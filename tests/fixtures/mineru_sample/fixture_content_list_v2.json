@@ -1,0 +1,71 @@
+[
+  [
+    {
+      "type": "title",
+      "bbox": [80, 70, 920, 140],
+      "content": {
+        "title_content": [{"type": "text", "content": "1 Introduction"}],
+        "level": 1
+      }
+    },
+    {
+      "type": "paragraph",
+      "bbox": [80, 170, 920, 320],
+      "experimental_field": "retained in provenance and reported",
+      "content": {
+        "paragraph_content": [{"type": "text", "content": "This document demonstrates a parser-neutral intermediate representation."}],
+        "style": {"font": "Times", "font_size": 11}
+      }
+    },
+    {
+      "type": "paragraph",
+      "bbox": [80, 340, 920, 470],
+      "content": {
+        "paragraph_content": [{"type": "text", "content": "The first page also contains a visual example."}],
+        "style": {"font": "Times", "font_size": 11}
+      }
+    },
+    {
+      "type": "image",
+      "bbox": [140, 500, 860, 900],
+      "content": {
+        "content": "A schematic of the first example.",
+        "image_caption": [{"type": "text", "content": "Figure 1. A soft document structure."}],
+        "caption_bbox": [180, 920, 820, 970]
+      }
+    }
+  ],
+  [
+    {
+      "type": "table",
+      "bbox": [100, 110, 900, 520],
+      "content": {
+        "html": "<table><tr><th>Type</th><th>Count</th></tr><tr><td>Page</td><td>3</td></tr></table>",
+        "table_caption": [{"type": "text", "content": "Table 2. Fixture counts."}],
+        "table_footnote": [{"type": "text", "content": "Note: Counts are synthetic."}],
+        "caption_bbox": [130, 60, 870, 100],
+        "footnote_bbox": [130, 535, 870, 580],
+        "column_count": 2
+      }
+    },
+    {
+      "type": "paragraph",
+      "bbox": [80, 650, 920, 790],
+      "content": {
+        "paragraph_content": [{"type": "text", "content": "See Figure 3 for the cross-page example."}]
+      }
+    }
+  ],
+  [
+    {
+      "type": "image",
+      "bbox": [130, 180, 870, 760],
+      "content": {
+        "content": "A cross-page reference target.",
+        "image_caption": [{"type": "text", "content": "Figure 3. Cross-page target."}],
+        "caption_bbox": [170, 780, 830, 840]
+      }
+    }
+  ]
+]
+

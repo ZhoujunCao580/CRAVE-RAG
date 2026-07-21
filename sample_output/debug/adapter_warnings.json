@@ -1,0 +1,12 @@
+[
+  {
+    "code": "unrecognized_fields",
+    "message": "Unrecognized MinerU fields at page 0, block 1",
+    "payload": {
+      "block_fields": [
+        "experimental_field"
+      ],
+      "content_fields": []
+    }
+  }
+]

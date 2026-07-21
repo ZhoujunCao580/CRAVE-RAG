@@ -1,0 +1,11 @@
+name: multimodal_pdf_rag
+
+channels:
+  - defaults
+
+dependencies:
+  - python=3.11
+  - pip
+  - pydantic>=2.5,<3
+  - pillow>=9,<12
+  - pytest>=7.4,<9

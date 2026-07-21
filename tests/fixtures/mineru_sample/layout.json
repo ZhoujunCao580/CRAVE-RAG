@@ -1,0 +1,10 @@
+{
+  "doc_id": "softdoc-fixture",
+  "title": "Soft Structure Fixture",
+  "pdf_info": [
+    {"page_idx": 0, "page_number": 1, "page_size": [1000, 1400]},
+    {"page_idx": 1, "page_number": 2, "page_size": [1000, 1400]},
+    {"page_idx": 2, "page_number": 3, "page_size": [1000, 1400]}
+  ]
+}
+

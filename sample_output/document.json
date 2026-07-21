@@ -1,0 +1,1976 @@
+{
+  "document_id": "doc:softdoc-fixture:fe5a8a4e",
+  "title": "Soft Structure Fixture",
+  "source_path": "mineru_sample",
+  "pages": [
+    {
+      "page_id": "doc:softdoc-fixture:fe5a8a4e:page:0000",
+      "document_id": "doc:softdoc-fixture:fe5a8a4e",
+      "page_index": 0,
+      "page_number": 1,
+      "width": 1000.0,
+      "height": 1400.0,
+      "element_ids": [
+        "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0000:heading:main",
+        "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0001:paragraph:main",
+        "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0002:paragraph:main",
+        "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:figure:main",
+        "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:caption:figure"
+      ],
+      "reading_order": [
+        "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0000:heading:main",
+        "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0001:paragraph:main",
+        "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0002:paragraph:main",
+        "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:figure:main",
+        "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:caption:figure"
+      ],
+      "image_path": null,
+      "provenance": {
+        "provenance_id": "prov:mineru:adcfc233144d",
+        "adapter": "mineru",
+        "source_path": "layout.json",
+        "source_locator": "pdf_info[0]",
+        "parser_version": null,
+        "raw_payload": {
+          "page_idx": 0,
+          "page_number": 1,
+          "page_size": [
+            1000,
+            1400
+          ]
+        },
+        "metadata": {}
+      },
+      "metadata": {
+        "source_page_index": 0
+      }
+    },
+    {
+      "page_id": "doc:softdoc-fixture:fe5a8a4e:page:0001",
+      "document_id": "doc:softdoc-fixture:fe5a8a4e",
+      "page_index": 1,
+      "page_number": 2,
+      "width": 1000.0,
+      "height": 1400.0,
+      "element_ids": [
+        "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:table:main",
+        "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:caption:table",
+        "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:footnote:table",
+        "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0001:paragraph:main"
+      ],
+      "reading_order": [
+        "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:table:main",
+        "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:caption:table",
+        "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:footnote:table",
+        "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0001:paragraph:main"
+      ],
+      "image_path": null,
+      "provenance": {
+        "provenance_id": "prov:mineru:107323b1bc1f",
+        "adapter": "mineru",
+        "source_path": "layout.json",
+        "source_locator": "pdf_info[1]",
+        "parser_version": null,
+        "raw_payload": {
+          "page_idx": 1,
+          "page_number": 2,
+          "page_size": [
+            1000,
+            1400
+          ]
+        },
+        "metadata": {}
+      },
+      "metadata": {
+        "source_page_index": 1
+      }
+    },
+    {
+      "page_id": "doc:softdoc-fixture:fe5a8a4e:page:0002",
+      "document_id": "doc:softdoc-fixture:fe5a8a4e",
+      "page_index": 2,
+      "page_number": 3,
+      "width": 1000.0,
+      "height": 1400.0,
+      "element_ids": [
+        "doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:figure:main",
+        "doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:caption:figure"
+      ],
+      "reading_order": [
+        "doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:figure:main",
+        "doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:caption:figure"
+      ],
+      "image_path": null,
+      "provenance": {
+        "provenance_id": "prov:mineru:2fed0634d391",
+        "adapter": "mineru",
+        "source_path": "layout.json",
+        "source_locator": "pdf_info[2]",
+        "parser_version": null,
+        "raw_payload": {
+          "page_idx": 2,
+          "page_number": 3,
+          "page_size": [
+            1000,
+            1400
+          ]
+        },
+        "metadata": {}
+      },
+      "metadata": {
+        "source_page_index": 2
+      }
+    }
+  ],
+  "sections": [
+    {
+      "section_id": "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662",
+      "document_id": "doc:softdoc-fixture:fe5a8a4e",
+      "title": "1 Introduction",
+      "level": 1,
+      "heading_element_id": "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0000:heading:main",
+      "parent_section_id": null,
+      "section_path": [
+        "1 Introduction"
+      ],
+      "page_ids": [
+        "doc:softdoc-fixture:fe5a8a4e:page:0000",
+        "doc:softdoc-fixture:fe5a8a4e:page:0001",
+        "doc:softdoc-fixture:fe5a8a4e:page:0002"
+      ],
+      "element_ids": [
+        "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0000:heading:main",
+        "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0001:paragraph:main",
+        "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0002:paragraph:main",
+        "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:figure:main",
+        "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:caption:figure",
+        "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:table:main",
+        "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:caption:table",
+        "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:footnote:table",
+        "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0001:paragraph:main",
+        "doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:figure:main",
+        "doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:caption:figure"
+      ],
+      "provenance": {
+        "provenance_id": "prov:mineru:a5d676f256f2",
+        "adapter": "mineru",
+        "source_path": "fixture_content_list_v2.json",
+        "source_locator": "page[0].block[0]",
+        "parser_version": null,
+        "raw_payload": {
+          "type": "title",
+          "bbox": [
+            80,
+            70,
+            920,
+            140
+          ],
+          "content": {
+            "title_content": [
+              {
+                "type": "text",
+                "content": "1 Introduction"
+              }
+            ],
+            "level": 1
+          }
+        },
+        "metadata": {}
+      },
+      "metadata": {
+        "created_by": "heading_stack"
+      }
+    }
+  ],
+  "elements": [
+    {
+      "element_id": "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0000:heading:main",
+      "document_id": "doc:softdoc-fixture:fe5a8a4e",
+      "page_id": "doc:softdoc-fixture:fe5a8a4e:page:0000",
+      "page_number": 1,
+      "element_type": "heading",
+      "reading_order": 0,
+      "bbox": {
+        "bbox_id": "bbox:ce004fc08662",
+        "raw": [
+          80.0,
+          70.0,
+          920.0,
+          140.0
+        ],
+        "normalized": [
+          0.08,
+          0.05,
+          0.92,
+          0.1
+        ],
+        "coordinate_system": "page"
+      },
+      "column_index": null,
+      "section_id": "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662",
+      "section_path": [
+        "1 Introduction"
+      ],
+      "heading_level": 1,
+      "text": "1 Introduction",
+      "html": null,
+      "image_path": null,
+      "crop_image_path": null,
+      "reference_label": null,
+      "summary": null,
+      "keywords": [],
+      "provenance": {
+        "provenance_id": "prov:mineru:a5d676f256f2",
+        "adapter": "mineru",
+        "source_path": "fixture_content_list_v2.json",
+        "source_locator": "page[0].block[0]",
+        "parser_version": null,
+        "raw_payload": {
+          "type": "title",
+          "bbox": [
+            80,
+            70,
+            920,
+            140
+          ],
+          "content": {
+            "title_content": [
+              {
+                "type": "text",
+                "content": "1 Introduction"
+              }
+            ],
+            "level": 1
+          }
+        },
+        "metadata": {}
+      },
+      "metadata": {}
+    },
+    {
+      "element_id": "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0001:paragraph:main",
+      "document_id": "doc:softdoc-fixture:fe5a8a4e",
+      "page_id": "doc:softdoc-fixture:fe5a8a4e:page:0000",
+      "page_number": 1,
+      "element_type": "paragraph",
+      "reading_order": 1,
+      "bbox": {
+        "bbox_id": "bbox:d463fd98d43a",
+        "raw": [
+          80.0,
+          170.0,
+          920.0,
+          320.0
+        ],
+        "normalized": [
+          0.08,
+          0.12142857142857143,
+          0.92,
+          0.22857142857142856
+        ],
+        "coordinate_system": "page"
+      },
+      "column_index": null,
+      "section_id": "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662",
+      "section_path": [
+        "1 Introduction"
+      ],
+      "heading_level": null,
+      "text": "This document demonstrates a parser-neutral intermediate representation.",
+      "html": null,
+      "image_path": null,
+      "crop_image_path": null,
+      "reference_label": null,
+      "summary": null,
+      "keywords": [],
+      "provenance": {
+        "provenance_id": "prov:mineru:aea5426f0cbd",
+        "adapter": "mineru",
+        "source_path": "fixture_content_list_v2.json",
+        "source_locator": "page[0].block[1]",
+        "parser_version": null,
+        "raw_payload": {
+          "type": "paragraph",
+          "bbox": [
+            80,
+            170,
+            920,
+            320
+          ],
+          "experimental_field": "retained in provenance and reported",
+          "content": {
+            "paragraph_content": [
+              {
+                "type": "text",
+                "content": "This document demonstrates a parser-neutral intermediate representation."
+              }
+            ],
+            "style": {
+              "font": "Times",
+              "font_size": 11
+            }
+          }
+        },
+        "metadata": {}
+      },
+      "metadata": {
+        "style": {
+          "font": "Times",
+          "font_size": 11
+        }
+      }
+    },
+    {
+      "element_id": "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0002:paragraph:main",
+      "document_id": "doc:softdoc-fixture:fe5a8a4e",
+      "page_id": "doc:softdoc-fixture:fe5a8a4e:page:0000",
+      "page_number": 1,
+      "element_type": "paragraph",
+      "reading_order": 2,
+      "bbox": {
+        "bbox_id": "bbox:caa5a779864b",
+        "raw": [
+          80.0,
+          340.0,
+          920.0,
+          470.0
+        ],
+        "normalized": [
+          0.08,
+          0.24285714285714285,
+          0.92,
+          0.3357142857142857
+        ],
+        "coordinate_system": "page"
+      },
+      "column_index": null,
+      "section_id": "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662",
+      "section_path": [
+        "1 Introduction"
+      ],
+      "heading_level": null,
+      "text": "The first page also contains a visual example.",
+      "html": null,
+      "image_path": null,
+      "crop_image_path": null,
+      "reference_label": null,
+      "summary": null,
+      "keywords": [],
+      "provenance": {
+        "provenance_id": "prov:mineru:b733bae71a84",
+        "adapter": "mineru",
+        "source_path": "fixture_content_list_v2.json",
+        "source_locator": "page[0].block[2]",
+        "parser_version": null,
+        "raw_payload": {
+          "type": "paragraph",
+          "bbox": [
+            80,
+            340,
+            920,
+            470
+          ],
+          "content": {
+            "paragraph_content": [
+              {
+                "type": "text",
+                "content": "The first page also contains a visual example."
+              }
+            ],
+            "style": {
+              "font": "Times",
+              "font_size": 11
+            }
+          }
+        },
+        "metadata": {}
+      },
+      "metadata": {
+        "style": {
+          "font": "Times",
+          "font_size": 11
+        }
+      }
+    },
+    {
+      "element_id": "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:figure:main",
+      "document_id": "doc:softdoc-fixture:fe5a8a4e",
+      "page_id": "doc:softdoc-fixture:fe5a8a4e:page:0000",
+      "page_number": 1,
+      "element_type": "figure",
+      "reading_order": 3,
+      "bbox": {
+        "bbox_id": "bbox:55cba4d5d35b",
+        "raw": [
+          140.0,
+          500.0,
+          860.0,
+          900.0
+        ],
+        "normalized": [
+          0.14,
+          0.35714285714285715,
+          0.86,
+          0.6428571428571429
+        ],
+        "coordinate_system": "page"
+      },
+      "column_index": null,
+      "section_id": "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662",
+      "section_path": [
+        "1 Introduction"
+      ],
+      "heading_level": null,
+      "text": "A schematic of the first example.",
+      "html": null,
+      "image_path": null,
+      "crop_image_path": null,
+      "reference_label": null,
+      "summary": null,
+      "keywords": [],
+      "provenance": {
+        "provenance_id": "prov:mineru:c7e8780fb5b9",
+        "adapter": "mineru",
+        "source_path": "fixture_content_list_v2.json",
+        "source_locator": "page[0].block[3]",
+        "parser_version": null,
+        "raw_payload": {
+          "type": "image",
+          "bbox": [
+            140,
+            500,
+            860,
+            900
+          ],
+          "content": {
+            "content": "A schematic of the first example.",
+            "image_caption": [
+              {
+                "type": "text",
+                "content": "Figure 1. A soft document structure."
+              }
+            ],
+            "caption_bbox": [
+              180,
+              920,
+              820,
+              970
+            ]
+          }
+        },
+        "metadata": {}
+      },
+      "metadata": {}
+    },
+    {
+      "element_id": "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:caption:figure",
+      "document_id": "doc:softdoc-fixture:fe5a8a4e",
+      "page_id": "doc:softdoc-fixture:fe5a8a4e:page:0000",
+      "page_number": 1,
+      "element_type": "caption",
+      "reading_order": 4,
+      "bbox": {
+        "bbox_id": "bbox:32958debd37b",
+        "raw": [
+          180.0,
+          920.0,
+          820.0,
+          970.0
+        ],
+        "normalized": [
+          0.18,
+          0.6571428571428571,
+          0.82,
+          0.6928571428571428
+        ],
+        "coordinate_system": "page"
+      },
+      "column_index": null,
+      "section_id": "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662",
+      "section_path": [
+        "1 Introduction"
+      ],
+      "heading_level": null,
+      "text": "Figure 1. A soft document structure.",
+      "html": null,
+      "image_path": null,
+      "crop_image_path": null,
+      "reference_label": null,
+      "summary": null,
+      "keywords": [],
+      "provenance": {
+        "provenance_id": "prov:mineru:ba44e84b342f",
+        "adapter": "mineru",
+        "source_path": "fixture_content_list_v2.json",
+        "source_locator": "derived:doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:figure:main:caption",
+        "parser_version": null,
+        "raw_payload": {
+          "derived_from": {
+            "type": "image",
+            "bbox": [
+              140,
+              500,
+              860,
+              900
+            ],
+            "content": {
+              "content": "A schematic of the first example.",
+              "image_caption": [
+                {
+                  "type": "text",
+                  "content": "Figure 1. A soft document structure."
+                }
+              ],
+              "caption_bbox": [
+                180,
+                920,
+                820,
+                970
+              ]
+            }
+          },
+          "caption": "Figure 1. A soft document structure."
+        },
+        "metadata": {}
+      },
+      "metadata": {
+        "target_element_id": "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:figure:main",
+        "derived_from_element_id": "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:figure:main"
+      }
+    },
+    {
+      "element_id": "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:table:main",
+      "document_id": "doc:softdoc-fixture:fe5a8a4e",
+      "page_id": "doc:softdoc-fixture:fe5a8a4e:page:0001",
+      "page_number": 2,
+      "element_type": "table",
+      "reading_order": 0,
+      "bbox": {
+        "bbox_id": "bbox:10ca3b4e6852",
+        "raw": [
+          100.0,
+          110.0,
+          900.0,
+          520.0
+        ],
+        "normalized": [
+          0.1,
+          0.07857142857142857,
+          0.9,
+          0.37142857142857144
+        ],
+        "coordinate_system": "page"
+      },
+      "column_index": null,
+      "section_id": "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662",
+      "section_path": [
+        "1 Introduction"
+      ],
+      "heading_level": null,
+      "text": null,
+      "html": "<table><tr><th>Type</th><th>Count</th></tr><tr><td>Page</td><td>3</td></tr></table>",
+      "image_path": null,
+      "crop_image_path": null,
+      "reference_label": null,
+      "summary": null,
+      "keywords": [],
+      "provenance": {
+        "provenance_id": "prov:mineru:3ed4b644e977",
+        "adapter": "mineru",
+        "source_path": "fixture_content_list_v2.json",
+        "source_locator": "page[1].block[0]",
+        "parser_version": null,
+        "raw_payload": {
+          "type": "table",
+          "bbox": [
+            100,
+            110,
+            900,
+            520
+          ],
+          "content": {
+            "html": "<table><tr><th>Type</th><th>Count</th></tr><tr><td>Page</td><td>3</td></tr></table>",
+            "table_caption": [
+              {
+                "type": "text",
+                "content": "Table 2. Fixture counts."
+              }
+            ],
+            "table_footnote": [
+              {
+                "type": "text",
+                "content": "Note: Counts are synthetic."
+              }
+            ],
+            "caption_bbox": [
+              130,
+              60,
+              870,
+              100
+            ],
+            "footnote_bbox": [
+              130,
+              535,
+              870,
+              580
+            ],
+            "column_count": 2
+          }
+        },
+        "metadata": {}
+      },
+      "metadata": {
+        "column_count": 2
+      }
+    },
+    {
+      "element_id": "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:caption:table",
+      "document_id": "doc:softdoc-fixture:fe5a8a4e",
+      "page_id": "doc:softdoc-fixture:fe5a8a4e:page:0001",
+      "page_number": 2,
+      "element_type": "caption",
+      "reading_order": 1,
+      "bbox": {
+        "bbox_id": "bbox:a383840640a8",
+        "raw": [
+          130.0,
+          60.0,
+          870.0,
+          100.0
+        ],
+        "normalized": [
+          0.13,
+          0.04285714285714286,
+          0.87,
+          0.07142857142857142
+        ],
+        "coordinate_system": "page"
+      },
+      "column_index": null,
+      "section_id": "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662",
+      "section_path": [
+        "1 Introduction"
+      ],
+      "heading_level": null,
+      "text": "Table 2. Fixture counts.",
+      "html": null,
+      "image_path": null,
+      "crop_image_path": null,
+      "reference_label": null,
+      "summary": null,
+      "keywords": [],
+      "provenance": {
+        "provenance_id": "prov:mineru:e020bf9726ad",
+        "adapter": "mineru",
+        "source_path": "fixture_content_list_v2.json",
+        "source_locator": "derived:doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:table:main:caption",
+        "parser_version": null,
+        "raw_payload": {
+          "derived_from": {
+            "type": "table",
+            "bbox": [
+              100,
+              110,
+              900,
+              520
+            ],
+            "content": {
+              "html": "<table><tr><th>Type</th><th>Count</th></tr><tr><td>Page</td><td>3</td></tr></table>",
+              "table_caption": [
+                {
+                  "type": "text",
+                  "content": "Table 2. Fixture counts."
+                }
+              ],
+              "table_footnote": [
+                {
+                  "type": "text",
+                  "content": "Note: Counts are synthetic."
+                }
+              ],
+              "caption_bbox": [
+                130,
+                60,
+                870,
+                100
+              ],
+              "footnote_bbox": [
+                130,
+                535,
+                870,
+                580
+              ],
+              "column_count": 2
+            }
+          },
+          "caption": "Table 2. Fixture counts."
+        },
+        "metadata": {}
+      },
+      "metadata": {
+        "target_element_id": "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:table:main",
+        "derived_from_element_id": "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:table:main"
+      }
+    },
+    {
+      "element_id": "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:footnote:table",
+      "document_id": "doc:softdoc-fixture:fe5a8a4e",
+      "page_id": "doc:softdoc-fixture:fe5a8a4e:page:0001",
+      "page_number": 2,
+      "element_type": "footnote",
+      "reading_order": 2,
+      "bbox": {
+        "bbox_id": "bbox:17b0dd7e0596",
+        "raw": [
+          130.0,
+          535.0,
+          870.0,
+          580.0
+        ],
+        "normalized": [
+          0.13,
+          0.3821428571428571,
+          0.87,
+          0.4142857142857143
+        ],
+        "coordinate_system": "page"
+      },
+      "column_index": null,
+      "section_id": "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662",
+      "section_path": [
+        "1 Introduction"
+      ],
+      "heading_level": null,
+      "text": "Note: Counts are synthetic.",
+      "html": null,
+      "image_path": null,
+      "crop_image_path": null,
+      "reference_label": null,
+      "summary": null,
+      "keywords": [],
+      "provenance": {
+        "provenance_id": "prov:mineru:fb86f5a9ce78",
+        "adapter": "mineru",
+        "source_path": "fixture_content_list_v2.json",
+        "source_locator": "derived:doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:table:main:footnote",
+        "parser_version": null,
+        "raw_payload": {
+          "derived_from": {
+            "type": "table",
+            "bbox": [
+              100,
+              110,
+              900,
+              520
+            ],
+            "content": {
+              "html": "<table><tr><th>Type</th><th>Count</th></tr><tr><td>Page</td><td>3</td></tr></table>",
+              "table_caption": [
+                {
+                  "type": "text",
+                  "content": "Table 2. Fixture counts."
+                }
+              ],
+              "table_footnote": [
+                {
+                  "type": "text",
+                  "content": "Note: Counts are synthetic."
+                }
+              ],
+              "caption_bbox": [
+                130,
+                60,
+                870,
+                100
+              ],
+              "footnote_bbox": [
+                130,
+                535,
+                870,
+                580
+              ],
+              "column_count": 2
+            }
+          },
+          "footnote": "Note: Counts are synthetic."
+        },
+        "metadata": {}
+      },
+      "metadata": {
+        "target_element_id": "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:table:main",
+        "derived_from_element_id": "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:table:main"
+      }
+    },
+    {
+      "element_id": "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0001:paragraph:main",
+      "document_id": "doc:softdoc-fixture:fe5a8a4e",
+      "page_id": "doc:softdoc-fixture:fe5a8a4e:page:0001",
+      "page_number": 2,
+      "element_type": "paragraph",
+      "reading_order": 3,
+      "bbox": {
+        "bbox_id": "bbox:7753155de95c",
+        "raw": [
+          80.0,
+          650.0,
+          920.0,
+          790.0
+        ],
+        "normalized": [
+          0.08,
+          0.4642857142857143,
+          0.92,
+          0.5642857142857143
+        ],
+        "coordinate_system": "page"
+      },
+      "column_index": null,
+      "section_id": "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662",
+      "section_path": [
+        "1 Introduction"
+      ],
+      "heading_level": null,
+      "text": "See Figure 3 for the cross-page example.",
+      "html": null,
+      "image_path": null,
+      "crop_image_path": null,
+      "reference_label": null,
+      "summary": null,
+      "keywords": [],
+      "provenance": {
+        "provenance_id": "prov:mineru:5dda8a76b7ec",
+        "adapter": "mineru",
+        "source_path": "fixture_content_list_v2.json",
+        "source_locator": "page[1].block[1]",
+        "parser_version": null,
+        "raw_payload": {
+          "type": "paragraph",
+          "bbox": [
+            80,
+            650,
+            920,
+            790
+          ],
+          "content": {
+            "paragraph_content": [
+              {
+                "type": "text",
+                "content": "See Figure 3 for the cross-page example."
+              }
+            ]
+          }
+        },
+        "metadata": {}
+      },
+      "metadata": {}
+    },
+    {
+      "element_id": "doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:figure:main",
+      "document_id": "doc:softdoc-fixture:fe5a8a4e",
+      "page_id": "doc:softdoc-fixture:fe5a8a4e:page:0002",
+      "page_number": 3,
+      "element_type": "figure",
+      "reading_order": 0,
+      "bbox": {
+        "bbox_id": "bbox:739407646a1e",
+        "raw": [
+          130.0,
+          180.0,
+          870.0,
+          760.0
+        ],
+        "normalized": [
+          0.13,
+          0.12857142857142856,
+          0.87,
+          0.5428571428571428
+        ],
+        "coordinate_system": "page"
+      },
+      "column_index": null,
+      "section_id": "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662",
+      "section_path": [
+        "1 Introduction"
+      ],
+      "heading_level": null,
+      "text": "A cross-page reference target.",
+      "html": null,
+      "image_path": null,
+      "crop_image_path": null,
+      "reference_label": null,
+      "summary": null,
+      "keywords": [],
+      "provenance": {
+        "provenance_id": "prov:mineru:9b3d89494dac",
+        "adapter": "mineru",
+        "source_path": "fixture_content_list_v2.json",
+        "source_locator": "page[2].block[0]",
+        "parser_version": null,
+        "raw_payload": {
+          "type": "image",
+          "bbox": [
+            130,
+            180,
+            870,
+            760
+          ],
+          "content": {
+            "content": "A cross-page reference target.",
+            "image_caption": [
+              {
+                "type": "text",
+                "content": "Figure 3. Cross-page target."
+              }
+            ],
+            "caption_bbox": [
+              170,
+              780,
+              830,
+              840
+            ]
+          }
+        },
+        "metadata": {}
+      },
+      "metadata": {}
+    },
+    {
+      "element_id": "doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:caption:figure",
+      "document_id": "doc:softdoc-fixture:fe5a8a4e",
+      "page_id": "doc:softdoc-fixture:fe5a8a4e:page:0002",
+      "page_number": 3,
+      "element_type": "caption",
+      "reading_order": 1,
+      "bbox": {
+        "bbox_id": "bbox:4269a3432478",
+        "raw": [
+          170.0,
+          780.0,
+          830.0,
+          840.0
+        ],
+        "normalized": [
+          0.17,
+          0.5571428571428572,
+          0.83,
+          0.6
+        ],
+        "coordinate_system": "page"
+      },
+      "column_index": null,
+      "section_id": "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662",
+      "section_path": [
+        "1 Introduction"
+      ],
+      "heading_level": null,
+      "text": "Figure 3. Cross-page target.",
+      "html": null,
+      "image_path": null,
+      "crop_image_path": null,
+      "reference_label": null,
+      "summary": null,
+      "keywords": [],
+      "provenance": {
+        "provenance_id": "prov:mineru:838f593ec581",
+        "adapter": "mineru",
+        "source_path": "fixture_content_list_v2.json",
+        "source_locator": "derived:doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:figure:main:caption",
+        "parser_version": null,
+        "raw_payload": {
+          "derived_from": {
+            "type": "image",
+            "bbox": [
+              130,
+              180,
+              870,
+              760
+            ],
+            "content": {
+              "content": "A cross-page reference target.",
+              "image_caption": [
+                {
+                  "type": "text",
+                  "content": "Figure 3. Cross-page target."
+                }
+              ],
+              "caption_bbox": [
+                170,
+                780,
+                830,
+                840
+              ]
+            }
+          },
+          "caption": "Figure 3. Cross-page target."
+        },
+        "metadata": {}
+      },
+      "metadata": {
+        "target_element_id": "doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:figure:main",
+        "derived_from_element_id": "doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:figure:main"
+      }
+    }
+  ],
+  "relations": [
+    {
+      "relation_id": "rel:contains:a9c7011548a6",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0000",
+      "relation_type": "contains",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "parser",
+      "evidence": [
+        {
+          "rule": "document_contains_page",
+          "description": "The parsed page belongs to the document.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e",
+            "doc:softdoc-fixture:fe5a8a4e:page:0000"
+          ],
+          "data": {}
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:contains:1be75d37b99f",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0000",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0000:heading:main",
+      "relation_type": "contains",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "parser",
+      "evidence": [
+        {
+          "rule": "page_contains_element",
+          "description": "The parser placed the element on this page.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0000",
+            "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0000:heading:main"
+          ],
+          "data": {}
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:contains:71f1951d162c",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0000",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0001:paragraph:main",
+      "relation_type": "contains",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "parser",
+      "evidence": [
+        {
+          "rule": "page_contains_element",
+          "description": "The parser placed the element on this page.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0000",
+            "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0001:paragraph:main"
+          ],
+          "data": {}
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:contains:8026741ec958",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0000",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0002:paragraph:main",
+      "relation_type": "contains",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "parser",
+      "evidence": [
+        {
+          "rule": "page_contains_element",
+          "description": "The parser placed the element on this page.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0000",
+            "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0002:paragraph:main"
+          ],
+          "data": {}
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:contains:59b9aa5936c6",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0000",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:figure:main",
+      "relation_type": "contains",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "parser",
+      "evidence": [
+        {
+          "rule": "page_contains_element",
+          "description": "The parser placed the element on this page.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0000",
+            "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:figure:main"
+          ],
+          "data": {}
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:contains:1f6b1bf5a8e1",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0000",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:caption:figure",
+      "relation_type": "contains",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "parser",
+      "evidence": [
+        {
+          "rule": "page_contains_element",
+          "description": "The parser placed the element on this page.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0000",
+            "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:caption:figure"
+          ],
+          "data": {}
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:contains:aa38a6213175",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0001",
+      "relation_type": "contains",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "parser",
+      "evidence": [
+        {
+          "rule": "document_contains_page",
+          "description": "The parsed page belongs to the document.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e",
+            "doc:softdoc-fixture:fe5a8a4e:page:0001"
+          ],
+          "data": {}
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:contains:6659639bcfc8",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0001",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:table:main",
+      "relation_type": "contains",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "parser",
+      "evidence": [
+        {
+          "rule": "page_contains_element",
+          "description": "The parser placed the element on this page.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0001",
+            "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:table:main"
+          ],
+          "data": {}
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:contains:cb2d5fc2fc5c",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0001",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:caption:table",
+      "relation_type": "contains",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "parser",
+      "evidence": [
+        {
+          "rule": "page_contains_element",
+          "description": "The parser placed the element on this page.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0001",
+            "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:caption:table"
+          ],
+          "data": {}
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:contains:48b34b940d24",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0001",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:footnote:table",
+      "relation_type": "contains",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "parser",
+      "evidence": [
+        {
+          "rule": "page_contains_element",
+          "description": "The parser placed the element on this page.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0001",
+            "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:footnote:table"
+          ],
+          "data": {}
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:contains:6b6c851b3457",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0001",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0001:paragraph:main",
+      "relation_type": "contains",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "parser",
+      "evidence": [
+        {
+          "rule": "page_contains_element",
+          "description": "The parser placed the element on this page.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0001",
+            "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0001:paragraph:main"
+          ],
+          "data": {}
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:contains:7fe0dd29ff9c",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0002",
+      "relation_type": "contains",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "parser",
+      "evidence": [
+        {
+          "rule": "document_contains_page",
+          "description": "The parsed page belongs to the document.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e",
+            "doc:softdoc-fixture:fe5a8a4e:page:0002"
+          ],
+          "data": {}
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:contains:8d26532f3e66",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0002",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:figure:main",
+      "relation_type": "contains",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "parser",
+      "evidence": [
+        {
+          "rule": "page_contains_element",
+          "description": "The parser placed the element on this page.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0002",
+            "doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:figure:main"
+          ],
+          "data": {}
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:contains:72d31a67dd3a",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0002",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:caption:figure",
+      "relation_type": "contains",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "parser",
+      "evidence": [
+        {
+          "rule": "page_contains_element",
+          "description": "The parser placed the element on this page.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0002",
+            "doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:caption:figure"
+          ],
+          "data": {}
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:next_page:8061515d1083",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0000",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0001",
+      "relation_type": "next_page",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "deterministic_rule",
+      "evidence": [
+        {
+          "rule": "consecutive_page_index",
+          "description": "Pages are consecutive in document order.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0000",
+            "doc:softdoc-fixture:fe5a8a4e:page:0001"
+          ],
+          "data": {
+            "source_page_index": 0,
+            "target_page_index": 1
+          }
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:next_page:3193478da042",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0001",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0002",
+      "relation_type": "next_page",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "deterministic_rule",
+      "evidence": [
+        {
+          "rule": "consecutive_page_index",
+          "description": "Pages are consecutive in document order.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0001",
+            "doc:softdoc-fixture:fe5a8a4e:page:0002"
+          ],
+          "data": {
+            "source_page_index": 1,
+            "target_page_index": 2
+          }
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:next_in_reading_order:83e49f72217a",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0000:heading:main",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0001:paragraph:main",
+      "relation_type": "next_in_reading_order",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "parser",
+      "evidence": [
+        {
+          "rule": "parser_reading_order",
+          "description": "Elements are consecutive in parser reading order.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0000:heading:main",
+            "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0001:paragraph:main"
+          ],
+          "data": {
+            "page_id": "doc:softdoc-fixture:fe5a8a4e:page:0000"
+          }
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:next_in_reading_order:ee62504a660e",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0001:paragraph:main",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0002:paragraph:main",
+      "relation_type": "next_in_reading_order",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "parser",
+      "evidence": [
+        {
+          "rule": "parser_reading_order",
+          "description": "Elements are consecutive in parser reading order.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0001:paragraph:main",
+            "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0002:paragraph:main"
+          ],
+          "data": {
+            "page_id": "doc:softdoc-fixture:fe5a8a4e:page:0000"
+          }
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:next_in_reading_order:f25368b9510a",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0002:paragraph:main",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:figure:main",
+      "relation_type": "next_in_reading_order",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "parser",
+      "evidence": [
+        {
+          "rule": "parser_reading_order",
+          "description": "Elements are consecutive in parser reading order.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0002:paragraph:main",
+            "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:figure:main"
+          ],
+          "data": {
+            "page_id": "doc:softdoc-fixture:fe5a8a4e:page:0000"
+          }
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:next_in_reading_order:69e61a961b4e",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:figure:main",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:caption:figure",
+      "relation_type": "next_in_reading_order",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "parser",
+      "evidence": [
+        {
+          "rule": "parser_reading_order",
+          "description": "Elements are consecutive in parser reading order.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:figure:main",
+            "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:caption:figure"
+          ],
+          "data": {
+            "page_id": "doc:softdoc-fixture:fe5a8a4e:page:0000"
+          }
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:next_in_reading_order:53cbe07b4514",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:table:main",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:caption:table",
+      "relation_type": "next_in_reading_order",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "parser",
+      "evidence": [
+        {
+          "rule": "parser_reading_order",
+          "description": "Elements are consecutive in parser reading order.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:table:main",
+            "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:caption:table"
+          ],
+          "data": {
+            "page_id": "doc:softdoc-fixture:fe5a8a4e:page:0001"
+          }
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:next_in_reading_order:1e2207870013",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:caption:table",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:footnote:table",
+      "relation_type": "next_in_reading_order",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "parser",
+      "evidence": [
+        {
+          "rule": "parser_reading_order",
+          "description": "Elements are consecutive in parser reading order.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:caption:table",
+            "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:footnote:table"
+          ],
+          "data": {
+            "page_id": "doc:softdoc-fixture:fe5a8a4e:page:0001"
+          }
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:next_in_reading_order:20b70dcc8681",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:footnote:table",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0001:paragraph:main",
+      "relation_type": "next_in_reading_order",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "parser",
+      "evidence": [
+        {
+          "rule": "parser_reading_order",
+          "description": "Elements are consecutive in parser reading order.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:footnote:table",
+            "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0001:paragraph:main"
+          ],
+          "data": {
+            "page_id": "doc:softdoc-fixture:fe5a8a4e:page:0001"
+          }
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:next_in_reading_order:7d4dc662bddc",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:figure:main",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:caption:figure",
+      "relation_type": "next_in_reading_order",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "parser",
+      "evidence": [
+        {
+          "rule": "parser_reading_order",
+          "description": "Elements are consecutive in parser reading order.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:figure:main",
+            "doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:caption:figure"
+          ],
+          "data": {
+            "page_id": "doc:softdoc-fixture:fe5a8a4e:page:0002"
+          }
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:belongs_to_section:09b669ce337f",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0000:heading:main",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662",
+      "relation_type": "belongs_to_section",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "deterministic_rule",
+      "evidence": [
+        {
+          "rule": "heading_stack_membership",
+          "description": "The active heading stack assigned the element to this section.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0000:heading:main",
+            "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662"
+          ],
+          "data": {
+            "section_path": [
+              "1 Introduction"
+            ]
+          }
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:belongs_to_section:6a773a5b316b",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0001:paragraph:main",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662",
+      "relation_type": "belongs_to_section",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "deterministic_rule",
+      "evidence": [
+        {
+          "rule": "heading_stack_membership",
+          "description": "The active heading stack assigned the element to this section.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0001:paragraph:main",
+            "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662"
+          ],
+          "data": {
+            "section_path": [
+              "1 Introduction"
+            ]
+          }
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:belongs_to_section:822d18c7744c",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0002:paragraph:main",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662",
+      "relation_type": "belongs_to_section",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "deterministic_rule",
+      "evidence": [
+        {
+          "rule": "heading_stack_membership",
+          "description": "The active heading stack assigned the element to this section.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0002:paragraph:main",
+            "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662"
+          ],
+          "data": {
+            "section_path": [
+              "1 Introduction"
+            ]
+          }
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:belongs_to_section:ce1356177943",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:figure:main",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662",
+      "relation_type": "belongs_to_section",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "deterministic_rule",
+      "evidence": [
+        {
+          "rule": "heading_stack_membership",
+          "description": "The active heading stack assigned the element to this section.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:figure:main",
+            "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662"
+          ],
+          "data": {
+            "section_path": [
+              "1 Introduction"
+            ]
+          }
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:belongs_to_section:ae2d518c4c38",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:caption:figure",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662",
+      "relation_type": "belongs_to_section",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "deterministic_rule",
+      "evidence": [
+        {
+          "rule": "heading_stack_membership",
+          "description": "The active heading stack assigned the element to this section.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:caption:figure",
+            "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662"
+          ],
+          "data": {
+            "section_path": [
+              "1 Introduction"
+            ]
+          }
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:belongs_to_section:b6d677324783",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:table:main",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662",
+      "relation_type": "belongs_to_section",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "deterministic_rule",
+      "evidence": [
+        {
+          "rule": "heading_stack_membership",
+          "description": "The active heading stack assigned the element to this section.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:table:main",
+            "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662"
+          ],
+          "data": {
+            "section_path": [
+              "1 Introduction"
+            ]
+          }
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:belongs_to_section:bfdfc24518c9",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:caption:table",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662",
+      "relation_type": "belongs_to_section",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "deterministic_rule",
+      "evidence": [
+        {
+          "rule": "heading_stack_membership",
+          "description": "The active heading stack assigned the element to this section.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:caption:table",
+            "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662"
+          ],
+          "data": {
+            "section_path": [
+              "1 Introduction"
+            ]
+          }
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:belongs_to_section:81d982343365",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:footnote:table",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662",
+      "relation_type": "belongs_to_section",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "deterministic_rule",
+      "evidence": [
+        {
+          "rule": "heading_stack_membership",
+          "description": "The active heading stack assigned the element to this section.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:footnote:table",
+            "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662"
+          ],
+          "data": {
+            "section_path": [
+              "1 Introduction"
+            ]
+          }
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:belongs_to_section:ec960817b780",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0001:paragraph:main",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662",
+      "relation_type": "belongs_to_section",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "deterministic_rule",
+      "evidence": [
+        {
+          "rule": "heading_stack_membership",
+          "description": "The active heading stack assigned the element to this section.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0001:paragraph:main",
+            "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662"
+          ],
+          "data": {
+            "section_path": [
+              "1 Introduction"
+            ]
+          }
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:belongs_to_section:0f8a55fc28cc",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:figure:main",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662",
+      "relation_type": "belongs_to_section",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "deterministic_rule",
+      "evidence": [
+        {
+          "rule": "heading_stack_membership",
+          "description": "The active heading stack assigned the element to this section.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:figure:main",
+            "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662"
+          ],
+          "data": {
+            "section_path": [
+              "1 Introduction"
+            ]
+          }
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:belongs_to_section:0e41b183d61b",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:caption:figure",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662",
+      "relation_type": "belongs_to_section",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "deterministic_rule",
+      "evidence": [
+        {
+          "rule": "heading_stack_membership",
+          "description": "The active heading stack assigned the element to this section.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:caption:figure",
+            "doc:softdoc-fixture:fe5a8a4e:section:ce004fc08662"
+          ],
+          "data": {
+            "section_path": [
+              "1 Introduction"
+            ]
+          }
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:caption_of:bf003bfd5311",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:caption:figure",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:figure:main",
+      "relation_type": "caption_of",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "parser",
+      "evidence": [
+        {
+          "rule": "parser_declared_function_target",
+          "description": "caption is associated with a compatible document element.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:caption:figure",
+            "doc:softdoc-fixture:fe5a8a4e:page:0000:element:0003:figure:main"
+          ],
+          "data": {
+            "source_page_id": "doc:softdoc-fixture:fe5a8a4e:page:0000",
+            "target_page_id": "doc:softdoc-fixture:fe5a8a4e:page:0000",
+            "cross_page": false
+          }
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:caption_of:3025aeb97fc9",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:caption:table",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:table:main",
+      "relation_type": "caption_of",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "parser",
+      "evidence": [
+        {
+          "rule": "parser_declared_function_target",
+          "description": "caption is associated with a compatible document element.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:caption:table",
+            "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:table:main"
+          ],
+          "data": {
+            "source_page_id": "doc:softdoc-fixture:fe5a8a4e:page:0001",
+            "target_page_id": "doc:softdoc-fixture:fe5a8a4e:page:0001",
+            "cross_page": false
+          }
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:caption_of:d2fd72f0e77a",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:caption:figure",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:figure:main",
+      "relation_type": "caption_of",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "parser",
+      "evidence": [
+        {
+          "rule": "parser_declared_function_target",
+          "description": "caption is associated with a compatible document element.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:caption:figure",
+            "doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:figure:main"
+          ],
+          "data": {
+            "source_page_id": "doc:softdoc-fixture:fe5a8a4e:page:0002",
+            "target_page_id": "doc:softdoc-fixture:fe5a8a4e:page:0002",
+            "cross_page": false
+          }
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:footnote_of:9139be0c3471",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:footnote:table",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:table:main",
+      "relation_type": "footnote_of",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "parser",
+      "evidence": [
+        {
+          "rule": "parser_declared_function_target",
+          "description": "footnote is associated with a compatible document element.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:footnote:table",
+            "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0000:table:main"
+          ],
+          "data": {
+            "source_page_id": "doc:softdoc-fixture:fe5a8a4e:page:0001",
+            "target_page_id": "doc:softdoc-fixture:fe5a8a4e:page:0001",
+            "cross_page": false
+          }
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "relation_id": "rel:refers_to:0ba6af8ae832",
+      "source_id": "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0001:paragraph:main",
+      "target_id": "doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:figure:main",
+      "relation_type": "refers_to",
+      "confidence": 1.0,
+      "status": "confirmed",
+      "created_by": "explicit_reference",
+      "evidence": [
+        {
+          "rule": "explicit_numbered_reference",
+          "description": "Text explicitly names Figure 3.",
+          "source_ids": [
+            "doc:softdoc-fixture:fe5a8a4e:page:0001:element:0001:paragraph:main",
+            "doc:softdoc-fixture:fe5a8a4e:page:0002:element:0000:figure:main"
+          ],
+          "data": {
+            "matched_text": "Figure 3",
+            "reference_kind": "figure",
+            "reference_number": "3",
+            "source_page_id": "doc:softdoc-fixture:fe5a8a4e:page:0001",
+            "target_page_id": "doc:softdoc-fixture:fe5a8a4e:page:0002"
+          }
+        }
+      ],
+      "metadata": {}
+    }
+  ],
+  "provenance": {
+    "provenance_id": "prov:mineru:3b0bffa9111a",
+    "adapter": "mineru",
+    "source_path": "layout.json",
+    "source_locator": "document",
+    "parser_version": null,
+    "raw_payload": {
+      "layout_metadata": {
+        "doc_id": "softdoc-fixture",
+        "title": "Soft Structure Fixture"
+      },
+      "content_file": "fixture_content_list_v2.json"
+    },
+    "metadata": {}
+  },
+  "metadata": {
+    "adapter": "mineru",
+    "adapter_warnings": [
+      {
+        "code": "unrecognized_fields",
+        "message": "Unrecognized MinerU fields at page 0, block 1",
+        "payload": {
+          "block_fields": [
+            "experimental_field"
+          ],
+          "content_fields": []
+        }
+      }
+    ],
+    "summary_generation": "disabled",
+    "keyword_generation": "disabled"
+  }
+}
