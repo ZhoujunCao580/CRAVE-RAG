@@ -15,7 +15,12 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7.4,<9"]
-mineru = ["mineru[pipeline]==3.4.4"]
+mineru = [
+    "mineru[pipeline]==3.4.4",
+    # MinerU 3.4.4 imports six in its pipeline OCR code but omits it from
+    # the published dependency metadata.
+    "six>=1.16,<2",
+]
 
 [project.scripts]
 softdoc = "softdoc.cli:main"

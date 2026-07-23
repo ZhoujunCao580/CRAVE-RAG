@@ -48,6 +48,10 @@ python -m pip install --no-cache-dir `
 Do not copy that CUDA command blindly to a future Linux server. Select the
 PyTorch build matching that server's driver.
 
+MinerU 3.4.4's pipeline OCR code imports `six` without declaring it in the
+published package metadata. The project dependency files explicitly include
+`six>=1.16,<2` so a recreated environment does not fail during OCR startup.
+
 ## First MinerU run
 
 Keep model caches and MinerU's configuration on the D drive:
