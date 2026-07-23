@@ -42,6 +42,8 @@ _BLOCK_TYPE_MAP: dict[str, ElementType] = {
     "image": ElementType.FIGURE,
     "figure": ElementType.FIGURE,
     "chart": ElementType.CHART,
+    "code": ElementType.CODE,
+    "algorithm": ElementType.ALGORITHM,
     "caption": ElementType.CAPTION,
     "footnote": ElementType.FOOTNOTE,
     "page_footnote": ElementType.FOOTNOTE,
@@ -50,7 +52,14 @@ _BLOCK_TYPE_MAP: dict[str, ElementType] = {
     "equation_interline": ElementType.EQUATION,
 }
 
-_IGNORED_BLOCK_TYPES = {"page_header", "page_footer", "page_number", "page_aside_text"}
+_IGNORED_BLOCK_TYPES = {
+    "page_header",
+    "page_footer",
+    "page_number",
+    "page_aside_text",
+    "header",
+    "footer",
+}
 _KNOWN_BLOCK_KEYS = {
     "type",
     "bbox",
@@ -68,6 +77,10 @@ _KNOWN_BLOCK_KEYS = {
 _KNOWN_CONTENT_KEYS = {
     "title_content",
     "paragraph_content",
+    "page_footnote_content",
+    "page_footer_content",
+    "page_header_content",
+    "page_number_content",
     "list_type",
     "list_items",
     "image_source",
@@ -75,6 +88,13 @@ _KNOWN_CONTENT_KEYS = {
     "image_footnote",
     "chart_caption",
     "chart_footnote",
+    "code_caption",
+    "code_content",
+    "code_footnote",
+    "code_language",
+    "algorithm_caption",
+    "algorithm_content",
+    "algorithm_footnote",
     "table_caption",
     "table_footnote",
     "caption_content",
@@ -111,22 +131,27 @@ class MinerUAdapter:
         self.warnings = []
         if not input_path.is_dir():
             raise NotADirectoryError(f"MinerU input must be a directory: {input_path}")
-        layout_path = input_path / "layout.json"
-        if not layout_path.exists():
-            raise FileNotFoundError(f"Missing MinerU layout.json: {layout_path}")
         content_path = self._find_content_path(input_path)
+        layout_path, content_bbox_coordinate_system = self._find_layout_path(input_path)
         layout = self._load_json(layout_path)
         content_payload = self._load_json(content_path)
         layout_pages = self._layout_pages(layout)
         content_pages = self._content_pages(content_payload)
 
         declared_id = _first_string(layout, "document_id", "doc_id", "id")
-        doc_id = document_id(input_path.name, declared_id)
+        source_name = self._artifact_stem(content_path) or input_path.name
+        doc_id = document_id(source_name, declared_id)
         output_dir.mkdir(parents=True, exist_ok=True)
         (output_dir / "assets" / "pages").mkdir(parents=True, exist_ok=True)
         (output_dir / "assets" / "elements").mkdir(parents=True, exist_ok=True)
 
         page_indexes = sorted(set(layout_pages) | set(content_pages))
+        rendered_page_images = self._render_page_assets(
+            input_path=input_path,
+            output_dir=output_dir,
+            doc_id=doc_id,
+            page_indexes=page_indexes,
+        )
         pages: list[Page] = []
         elements: list[Element] = []
         for fallback_index, current_page_index in enumerate(page_indexes):
@@ -134,13 +159,15 @@ class MinerUAdapter:
             width, height = self._page_size(page_payload)
             page_number = int(page_payload.get("page_number") or current_page_index + 1)
             current_page_id = page_id(doc_id, current_page_index)
-            page_image = self._copy_page_asset(
-                input_path,
-                output_dir,
-                page_payload,
-                current_page_index,
-                current_page_id,
+            page_image = rendered_page_images.get(current_page_index) or self._copy_page_asset(
+                input_path=input_path,
+                output_dir=output_dir,
+                page=page_payload,
+                page_index=current_page_index,
+                owner_id=current_page_id,
             )
+            blocks = content_pages.get(current_page_index, [])
+            layout_blocks = self._align_layout_blocks(page_payload, blocks)
             page_elements = self._parse_page_elements(
                 input_path=input_path,
                 output_dir=output_dir,
@@ -150,7 +177,9 @@ class MinerUAdapter:
                 page_number=page_number,
                 page_width=width,
                 page_height=height,
-                blocks=content_pages.get(current_page_index, []),
+                blocks=blocks,
+                layout_blocks=layout_blocks,
+                content_bbox_coordinate_system=content_bbox_coordinate_system,
                 content_path=content_path,
             )
             elements.extend(page_elements)
@@ -177,18 +206,29 @@ class MinerUAdapter:
             )
 
         sections = self._build_sections(doc_id, pages, elements)
+        inferred_title = next(
+            (
+                element.text
+                for element in elements
+                if element.element_type == ElementType.HEADING and element.text
+            ),
+            None,
+        )
+        source_pdf = self._find_source_pdf(input_path)
         doc_provenance = self._provenance(
             source_path=layout_path.relative_to(input_path),
             source_locator="document",
             raw_payload={
                 "layout_metadata": {key: value for key, value in layout.items() if key not in {"pdf_info", "pages"}},
                 "content_file": content_path.name,
+                "layout_file": layout_path.name,
             },
+            parser_version=_first_string(layout, "_version_name", "version"),
         )
         document = Document(
             document_id=doc_id,
-            title=_first_string(layout, "title", "document_title"),
-            source_path=Path(input_path.name),
+            title=_first_string(layout, "title", "document_title") or inferred_title,
+            source_path=Path(source_pdf.name if source_pdf else source_name),
             pages=pages,
             sections=sections,
             elements=elements,
@@ -217,6 +257,8 @@ class MinerUAdapter:
         page_width: float,
         page_height: float,
         blocks: list[dict[str, Any]],
+        layout_blocks: list[dict[str, Any] | None],
+        content_bbox_coordinate_system: str,
         content_path: Path,
     ) -> list[Element]:
         elements: list[Element] = []
@@ -236,25 +278,39 @@ class MinerUAdapter:
             source_index = int(block.get("index", block_index))
             main_id = element_id(doc_id, page_index, source_index, element_type.value)
             content = block.get("content") if isinstance(block.get("content"), dict) else {}
+            layout_block = layout_blocks[block_index] if block_index < len(layout_blocks) else None
             text, html = _element_content(element_type, block, content)
             image_path = self._copy_element_asset(input_path, output_dir, block, content, main_id)
+            layout_bbox = layout_block.get("bbox") if layout_block else None
             bbox = self._bbox(
                 owner_id=main_id,
-                raw_bbox=block.get("bbox"),
+                raw_bbox=layout_bbox or block.get("bbox"),
                 page_width=page_width,
                 page_height=page_height,
                 context=f"page={page_index} block={block_index}",
+                coordinate_system=(
+                    "page" if layout_bbox is not None else content_bbox_coordinate_system
+                ),
             )
             provenance = self._provenance(
                 source_path=content_path.relative_to(input_path),
                 source_locator=f"page[{page_index}].block[{block_index}]",
                 raw_payload=block,
+                metadata={"layout_payload": layout_block} if layout_block else {},
             )
             metadata = dict(block.get("metadata") or {})
+            metadata["mineru_type"] = raw_type
+            if layout_block:
+                if layout_block.get("score") is not None:
+                    metadata["parser_score"] = layout_block["score"]
+                if layout_block.get("sub_type") is not None:
+                    metadata["mineru_sub_type"] = layout_block["sub_type"]
             if isinstance(content.get("style"), dict):
                 metadata["style"] = dict(content["style"])
             if content.get("column_count") is not None:
                 metadata["column_count"] = content.get("column_count")
+            if content.get("code_language") is not None:
+                metadata["code_language"] = content.get("code_language")
             main = Element(
                 element_id=main_id,
                 document_id=doc_id,
@@ -275,9 +331,16 @@ class MinerUAdapter:
                 metadata=metadata,
             )
             elements.append(main)
-            if element_type in {ElementType.FIGURE, ElementType.CHART, ElementType.TABLE}:
+            if element_type in {
+                ElementType.FIGURE,
+                ElementType.CHART,
+                ElementType.TABLE,
+                ElementType.CODE,
+                ElementType.ALGORITHM,
+            }:
                 caption_text = _caption_text(element_type, content)
                 if caption_text:
+                    caption_bbox = _nested_function_bbox(layout_block, "caption")
                     elements.append(
                         self._derived_function_element(
                             parent=main,
@@ -287,9 +350,14 @@ class MinerUAdapter:
                             source_index=source_index,
                             element_type=ElementType.CAPTION,
                             text=caption_text,
-                            raw_bbox=content.get("caption_bbox"),
+                            raw_bbox=caption_bbox or content.get("caption_bbox"),
                             page_width=page_width,
                             page_height=page_height,
+                            coordinate_system=(
+                                "page"
+                                if caption_bbox is not None
+                                else content_bbox_coordinate_system
+                            ),
                             content_path=content_path,
                             input_path=input_path,
                             raw_payload={"derived_from": block, "caption": caption_text},
@@ -298,6 +366,7 @@ class MinerUAdapter:
                     )
                 footnote_text = _footnote_text(element_type, content)
                 if footnote_text:
+                    footnote_bbox = _nested_function_bbox(layout_block, "footnote")
                     elements.append(
                         self._derived_function_element(
                             parent=main,
@@ -307,9 +376,14 @@ class MinerUAdapter:
                             source_index=source_index,
                             element_type=ElementType.FOOTNOTE,
                             text=footnote_text,
-                            raw_bbox=content.get("footnote_bbox"),
+                            raw_bbox=footnote_bbox or content.get("footnote_bbox"),
                             page_width=page_width,
                             page_height=page_height,
+                            coordinate_system=(
+                                "page"
+                                if footnote_bbox is not None
+                                else content_bbox_coordinate_system
+                            ),
                             content_path=content_path,
                             input_path=input_path,
                             raw_payload={"derived_from": block, "footnote": footnote_text},
@@ -331,6 +405,7 @@ class MinerUAdapter:
         raw_bbox: Any,
         page_width: float,
         page_height: float,
+        coordinate_system: str,
         content_path: Path,
         input_path: Path,
         raw_payload: dict[str, Any],
@@ -350,6 +425,7 @@ class MinerUAdapter:
                 page_width=page_width,
                 page_height=page_height,
                 context=f"derived {element_type.value} for {parent.element_id}",
+                coordinate_system=coordinate_system,
             ),
             column_index=parent.column_index,
             text=text,
@@ -456,6 +532,7 @@ class MinerUAdapter:
         page_width: float,
         page_height: float,
         context: str,
+        coordinate_system: str | None = None,
     ) -> BoundingBox | None:
         if raw_bbox in (None, [], ()):
             return None
@@ -463,13 +540,14 @@ class MinerUAdapter:
             self._warn("invalid_bbox", f"Invalid bbox shape at {context}", raw_bbox)
             return None
         values = tuple(float(value) for value in raw_bbox)
-        coordinate_system = "page"
-        if (
-            (values[2] > page_width * 1.05 or values[3] > page_height * 1.05)
-            and min(values) >= 0
-            and max(values) <= 1000
-        ):
-            coordinate_system = "normalized_1000"
+        if coordinate_system is None:
+            coordinate_system = "page"
+            if (
+                (values[2] > page_width * 1.05 or values[3] > page_height * 1.05)
+                and min(values) >= 0
+                and max(values) <= 1000
+            ):
+                coordinate_system = "normalized_1000"
         try:
             return BoundingBox.from_raw(
                 bbox_id=bbox_id(owner_id),
@@ -553,19 +631,141 @@ class MinerUAdapter:
         source_path: Path,
         source_locator: str,
         raw_payload: dict[str, Any],
+        parser_version: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Provenance:
         return Provenance(
             provenance_id=provenance_id(self.adapter_name, source_path.as_posix(), source_locator),
             adapter=self.adapter_name,
             source_path=source_path,
             source_locator=source_locator,
+            parser_version=parser_version,
             raw_payload=raw_payload,
+            metadata=metadata or {},
         )
 
     def _warn(self, code: str, message: str, payload: Any) -> None:
         item = {"code": code, "message": message, "payload": payload}
         self.warnings.append(item)
         logger.warning("%s: %s", code, message)
+
+    @staticmethod
+    def _find_layout_path(input_path: Path) -> tuple[Path, str]:
+        legacy_layout = input_path / "layout.json"
+        if legacy_layout.exists():
+            return legacy_layout, "page"
+        direct_middle = input_path / "middle.json"
+        if direct_middle.exists():
+            return direct_middle, "normalized_1000"
+        candidates = sorted(input_path.glob("*_middle.json"))
+        if not candidates:
+            raise FileNotFoundError(
+                f"Missing MinerU layout.json or *_middle.json under {input_path}"
+            )
+        return candidates[0], "normalized_1000"
+
+    @staticmethod
+    def _artifact_stem(content_path: Path) -> str | None:
+        suffix = "_content_list_v2.json"
+        if content_path.name.endswith(suffix):
+            stem = content_path.name[: -len(suffix)]
+            return stem or None
+        return None
+
+    @staticmethod
+    def _find_source_pdf(input_path: Path) -> Path | None:
+        preferred = sorted(input_path.glob("*_origin.pdf"))
+        if preferred:
+            return preferred[0]
+        candidates = [
+            path
+            for path in sorted(input_path.glob("*.pdf"))
+            if not path.stem.endswith(("_layout", "_span"))
+        ]
+        return candidates[0] if candidates else None
+
+    def _render_page_assets(
+        self,
+        *,
+        input_path: Path,
+        output_dir: Path,
+        doc_id: str,
+        page_indexes: list[int],
+    ) -> dict[int, Path]:
+        source_pdf = self._find_source_pdf(input_path)
+        if source_pdf is None:
+            return {}
+        try:
+            import pypdfium2
+        except ImportError:
+            self._warn(
+                "page_rendering_unavailable",
+                "pypdfium2 is unavailable; page images were not rendered",
+                {"source_pdf": source_pdf.name},
+            )
+            return {}
+
+        rendered: dict[int, Path] = {}
+        document = None
+        try:
+            document = pypdfium2.PdfDocument(source_pdf)
+            for current_page_index in page_indexes:
+                if current_page_index < 0 or current_page_index >= len(document):
+                    self._warn(
+                        "missing_pdf_page",
+                        f"Source PDF has no page index {current_page_index}",
+                        {"source_pdf": source_pdf.name},
+                    )
+                    continue
+                owner_id = page_id(doc_id, current_page_index)
+                destination = (
+                    output_dir
+                    / "assets"
+                    / "pages"
+                    / f"{stable_digest(owner_id)}.png"
+                )
+                if not destination.exists():
+                    page = document[current_page_index]
+                    bitmap = page.render(scale=1.5)
+                    image = bitmap.to_pil()
+                    image.save(destination)
+                    image.close()
+                    bitmap.close()
+                    page.close()
+                rendered[current_page_index] = destination.relative_to(output_dir)
+        except Exception as exc:
+            self._warn(
+                "page_rendering_failed",
+                f"Failed to render page images from {source_pdf.name}: {exc}",
+                {"source_pdf": source_pdf.name},
+            )
+        finally:
+            if document is not None:
+                document.close()
+        return rendered
+
+    @staticmethod
+    def _align_layout_blocks(
+        page_payload: dict[str, Any],
+        content_blocks: list[dict[str, Any]],
+    ) -> list[dict[str, Any] | None]:
+        layout_blocks = [
+            block
+            for key in ("para_blocks", "discarded_blocks")
+            for block in page_payload.get(key, [])
+            if isinstance(block, dict)
+        ]
+        if not layout_blocks:
+            return [None] * len(content_blocks)
+        by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for layout_block in layout_blocks:
+            by_type[_normalized_layout_type(layout_block.get("type"))].append(layout_block)
+        aligned: list[dict[str, Any] | None] = []
+        for content_block in content_blocks:
+            raw_type = content_block.get("type") if isinstance(content_block, dict) else None
+            candidates = by_type[_normalized_layout_type(raw_type)]
+            aligned.append(candidates.pop(0) if candidates else None)
+        return aligned
 
     @staticmethod
     def _find_content_path(input_path: Path) -> Path:
@@ -609,6 +809,35 @@ def _heading_level(block: dict[str, Any], content: dict[str, Any]) -> int:
     return max(1, int(content.get("level", block.get("level", 1)) or 1))
 
 
+def _normalized_layout_type(value: Any) -> str:
+    raw_type = str(value or "").strip().lower()
+    return {
+        "heading": "title",
+        "text": "paragraph",
+        "abstract": "paragraph",
+        "code": "code_like",
+        "algorithm": "code_like",
+        "footer": "page_footer",
+        "header": "page_header",
+        "equation_interline": "equation",
+    }.get(raw_type, raw_type)
+
+
+def _nested_function_bbox(
+    layout_block: dict[str, Any] | None,
+    role: str,
+) -> Any:
+    if not layout_block:
+        return None
+    for child in layout_block.get("blocks", []):
+        if not isinstance(child, dict):
+            continue
+        child_type = str(child.get("type") or "").strip().lower()
+        if child_type == role or child_type.endswith(f"_{role}"):
+            return child.get("bbox")
+    return None
+
+
 def _element_content(
     element_type: ElementType,
     block: dict[str, Any],
@@ -633,12 +862,23 @@ def _element_content(
         return _optional_text(content.get("content", block.get("text"))), html
     if element_type in {ElementType.FIGURE, ElementType.CHART}:
         return _optional_text(content.get("content", block.get("text"))), None
+    if element_type == ElementType.CODE:
+        return _optional_text(content.get("code_content", content.get("content", block.get("text")))), None
+    if element_type == ElementType.ALGORITHM:
+        return _optional_text(
+            content.get("algorithm_content", content.get("content", block.get("text")))
+        ), None
     if element_type == ElementType.EQUATION:
         return _optional_text(content.get("math_content", content.get("content", block.get("text")))), None
     if element_type == ElementType.CAPTION:
         return _optional_text(content.get("caption_content", content.get("text", block.get("text")))), None
     if element_type == ElementType.FOOTNOTE:
-        return _optional_text(content.get("footnote_content", content.get("text", block.get("text")))), None
+        return _optional_text(
+            content.get(
+                "footnote_content",
+                content.get("page_footnote_content", content.get("text", block.get("text"))),
+            )
+        ), None
     return _optional_text(block.get("text")), None
 
 
@@ -662,6 +902,8 @@ def _caption_text(element_type: ElementType, content: dict[str, Any]) -> str:
         ElementType.FIGURE: "image_caption",
         ElementType.CHART: "chart_caption",
         ElementType.TABLE: "table_caption",
+        ElementType.CODE: "code_caption",
+        ElementType.ALGORITHM: "algorithm_caption",
     }[element_type]
     return _spans_text(content.get(key))
 
@@ -671,5 +913,7 @@ def _footnote_text(element_type: ElementType, content: dict[str, Any]) -> str:
         ElementType.FIGURE: "image_footnote",
         ElementType.CHART: "chart_footnote",
         ElementType.TABLE: "table_footnote",
+        ElementType.CODE: "code_footnote",
+        ElementType.ALGORITHM: "algorithm_footnote",
     }[element_type]
     return _spans_text(content.get(key))

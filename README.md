@@ -109,10 +109,12 @@ softdoc parse-mineru MINERU_OUTPUT_DIR --output "data\processed\softdoc"
 softdoc validate "data\processed\softdoc"
 ```
 
-MinerU 3.4.x may emit a newer content-list schema than the adapter fixture used
-in Milestone 1. If `parse-mineru` reports an unsupported file/schema, preserve
-the MinerU output: it is the fixture needed for the next adapter compatibility
-change, not an environment installation failure.
+The adapter supports both the original fixture format
+(`layout.json` + `*_content_list_v2.json`) and MinerU 3.4.x output
+(`*_middle.json` + `*_content_list_v2.json`). For MinerU 3.4.x it uses the
+middle JSON for physical page geometry and the v2 content list for semantic
+content. If `*_origin.pdf` is present, it also renders page images for the
+SoftDoc debug overlays.
 
 ## Checks
 

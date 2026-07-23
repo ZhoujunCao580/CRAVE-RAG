@@ -170,6 +170,12 @@ class RelationBuilder:
             created_by = RelationSource.PARSER
             confidence = 1.0
             rule = "parser_declared_function_target"
+            if (
+                target is None
+                and source_type == ElementType.FOOTNOTE
+                and source.metadata.get("mineru_type") == "page_footnote"
+            ):
+                continue
             if target is None:
                 target = self._nearest_function_target(source)
                 created_by = RelationSource.LAYOUT_HEURISTIC
@@ -472,12 +478,28 @@ def _compatible_target_types(source: Element) -> set[ElementType]:
     if re.match(r"^(?:Table|表)\s*\d", text, re.IGNORECASE):
         return {ElementType.TABLE}
     if re.match(r"^(?:Figure|Fig\.|图)\s*\d", text, re.IGNORECASE):
-        return {ElementType.FIGURE, ElementType.CHART}
-    return {ElementType.FIGURE, ElementType.CHART, ElementType.TABLE}
+        return {
+            ElementType.FIGURE,
+            ElementType.CHART,
+            ElementType.CODE,
+            ElementType.ALGORITHM,
+        }
+    return {
+        ElementType.FIGURE,
+        ElementType.CHART,
+        ElementType.CODE,
+        ElementType.ALGORITHM,
+        ElementType.TABLE,
+    }
 
 
 def _element_reference_kind(element: Element) -> str | None:
-    if element.element_type in {ElementType.FIGURE, ElementType.CHART}:
+    if element.element_type in {
+        ElementType.FIGURE,
+        ElementType.CHART,
+        ElementType.CODE,
+        ElementType.ALGORITHM,
+    }:
         return "figure"
     if element.element_type == ElementType.TABLE:
         return "table"

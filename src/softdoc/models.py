@@ -15,6 +15,8 @@ class ElementType(str, Enum):
     TABLE = "table"
     FIGURE = "figure"
     CHART = "chart"
+    CODE = "code"
+    ALGORITHM = "algorithm"
     CAPTION = "caption"
     FOOTNOTE = "footnote"
     LIST = "list"
@@ -240,4 +242,3 @@ class Document(SoftDocModel):
         if indexes != sorted(indexes):
             raise ValueError("Document pages must be ordered by page_index")
         return pages
-

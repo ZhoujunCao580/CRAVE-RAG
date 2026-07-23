@@ -15,6 +15,8 @@ _COLORS: dict[ElementType, tuple[int, int, int]] = {
     ElementType.TABLE: (135, 45, 180),
     ElementType.FIGURE: (0, 140, 90),
     ElementType.CHART: (0, 125, 125),
+    ElementType.CODE: (70, 70, 70),
+    ElementType.ALGORITHM: (90, 80, 150),
     ElementType.CAPTION: (230, 120, 0),
     ElementType.FOOTNOTE: (110, 90, 60),
     ElementType.LIST: (40, 120, 180),
@@ -87,4 +89,3 @@ def _pixel_box(element: Element, width: int, height: int) -> tuple[int, int, int
 def _pixel_center(element: Element, width: int, height: int) -> tuple[int, int]:
     x1, y1, x2, y2 = _pixel_box(element, width, height)
     return (x1 + x2) // 2, (y1 + y2) // 2
-
