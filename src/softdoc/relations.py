@@ -44,6 +44,8 @@ _LABEL_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
     ),
 }
 
+_CODE_LIKE_TYPES = frozenset({ElementType.CODE, ElementType.ALGORITHM})
+
 
 class RelationBuilder:
     """Build only deterministic relations and bounded cross-page candidates."""
@@ -314,6 +316,14 @@ class RelationBuilder:
                         distance,
                     )
                 )
+                relations.extend(
+                    self._code_continuation_candidate(
+                        source_page.page_id,
+                        target_page.page_id,
+                        page_elements,
+                        distance,
+                    )
+                )
         return relations
 
     def _paragraph_continuation_candidate(
@@ -426,6 +436,136 @@ class RelationBuilder:
             )
         ]
 
+    def _code_continuation_candidate(
+        self,
+        source_page_id: str,
+        target_page_id: str,
+        page_elements: dict[str, list[Element]],
+        page_distance: int,
+    ) -> list[Relation]:
+        # Code continuations are intentionally limited to adjacent pages.
+        # Looking two pages ahead is useful for prose, but too permissive for
+        # independent listings that happen to share a visual style.
+        if page_distance != 1:
+            return []
+        source_blocks = [
+            element
+            for element in page_elements[source_page_id]
+            if element.element_type in _CODE_LIKE_TYPES
+        ]
+        target_blocks = [
+            element
+            for element in page_elements[target_page_id]
+            if element.element_type in _CODE_LIKE_TYPES
+        ]
+        if not source_blocks or not target_blocks:
+            return []
+
+        source, target = source_blocks[-1], target_blocks[0]
+        source_at_page_end = bool(
+            source.bbox and source.bbox.normalized[3] >= 0.80
+        )
+        target_at_page_start = bool(
+            target.bbox and target.bbox.normalized[1] <= 0.20
+        )
+        bbox_match = _bbox_width_and_position_match(source, target)
+        same_section = bool(
+            source.section_id and source.section_id == target.section_id
+        )
+        heading_before_target = any(
+            element.element_type == ElementType.HEADING
+            and element.reading_order < target.reading_order
+            for element in page_elements[target_page_id]
+        )
+        source_caption = _caption_for_element(
+            source.element_id,
+            self.document.elements,
+        )
+        target_caption = _caption_for_element(
+            target.element_id,
+            self.document.elements,
+        )
+        caption_text = " ".join(
+            caption.text or ""
+            for caption in (source_caption, target_caption)
+            if caption is not None
+        )
+        continuation_marker = bool(
+            re.search(r"\bcontinued\b|续", caption_text, re.IGNORECASE)
+        )
+        source_lacks_block_terminator = _code_lacks_block_terminator(
+            source.text or ""
+        )
+        target_starts_new_construct = _code_starts_new_construct(
+            target.text or ""
+        )
+
+        # A caption attached to the source usually marks the end of that
+        # listing. Only an explicit continuation marker may override it.
+        if source_caption is not None and not continuation_marker:
+            return []
+        boundary_layout_match = (
+            source_at_page_end and target_at_page_start and bbox_match
+        )
+        if not boundary_layout_match and not continuation_marker:
+            return []
+        if (
+            target_starts_new_construct
+            and not source_lacks_block_terminator
+            and not continuation_marker
+            and target_caption is None
+        ):
+            return []
+
+        score = 0.10
+        score += 0.15  # adjacent pages
+        score += 0.15 if source_at_page_end else 0.0
+        score += 0.15 if target_at_page_start else 0.0
+        score += 0.15 if bbox_match else 0.0
+        score += 0.10 if source_lacks_block_terminator else 0.0
+        score += 0.05 if same_section else 0.0
+        score += 0.05 if not heading_before_target else 0.0
+        score += 0.05 if target_caption is not None else 0.0
+        score += 0.15 if continuation_marker else 0.0
+        score -= 0.10 if target_starts_new_construct else 0.0
+        if score < 0.60:
+            return []
+
+        data = {
+            "content_family": "code_like",
+            "page_distance": page_distance,
+            "source_element_type": source.element_type.value,
+            "target_element_type": target.element_type.value,
+            "compatible_type_pair": True,
+            "source_at_page_end": source_at_page_end,
+            "target_at_page_start": target_at_page_start,
+            "bbox_width_and_position_match": bbox_match,
+            "source_lacks_block_terminator": source_lacks_block_terminator,
+            "target_starts_new_construct": target_starts_new_construct,
+            "heading_before_target": heading_before_target,
+            "same_section": same_section,
+            "source_has_caption": source_caption is not None,
+            "target_has_caption": target_caption is not None,
+            "caption_text": caption_text or None,
+            "continuation_marker": continuation_marker,
+        }
+        return [
+            self._relation(
+                source.element_id,
+                target.element_id,
+                RelationType.CONTINUED_ON,
+                confidence=round(min(score, 0.9), 3),
+                status=RelationStatus.CANDIDATE,
+                created_by=RelationSource.LAYOUT_HEURISTIC,
+                rule="bounded_cross_page_code_continuation",
+                description=(
+                    "Adjacent code or algorithm blocks share page-boundary "
+                    "layout and textual continuation signals."
+                ),
+                data=data,
+            )
+        ]
+
     def _object_page_id(self, object_id: str) -> str | None:
         element = self.elements.get(object_id)
         if element:
@@ -524,6 +664,40 @@ def _style_signature(element: Element) -> tuple[Any, ...] | None:
         return None
     signature = (style.get("font"), style.get("font_size"), style.get("weight"))
     return signature if any(value is not None for value in signature) else None
+
+
+def _caption_for_element(
+    element_id: str,
+    elements: Iterable[Element],
+) -> Element | None:
+    return next(
+        (
+            element
+            for element in elements
+            if element.element_type == ElementType.CAPTION
+            and element.metadata.get("target_element_id") == element_id
+        ),
+        None,
+    )
+
+
+def _code_lacks_block_terminator(text: str) -> bool:
+    stripped = text.rstrip()
+    if not stripped:
+        return False
+    return not bool(re.search(r"(?:[;:{}\[\]()]|```)\s*$", stripped))
+
+
+def _code_starts_new_construct(text: str) -> bool:
+    stripped = text.lstrip()
+    return bool(
+        re.match(
+            r"(?:```|#\s|//\s|def\s+|class\s+|function\s+|"
+            r"procedure\s+|algorithm\s+|import\s+|from\s+\S+\s+import\s+)",
+            stripped,
+            re.IGNORECASE,
+        )
+    )
 
 
 def _table_column_count(element: Element) -> int | None:

@@ -143,6 +143,27 @@ debug/page_overlays/
 
 Page overlays label headings as `TITLE`, `H1`, `H2`, and so on.
 
+## MinerU types and cross-page code
+
+MinerU 3.4 content-list v2 can emit types including `title`, `paragraph`,
+`image`, `table`, `chart`, `code`, `algorithm`, `list`,
+`equation_interline`, and auxiliary page content. The adapter maps those
+parser-specific names to parser-neutral `ElementType` values and preserves the
+original name in `Element.metadata["mineru_type"]`.
+
+`code` and `algorithm` remain separate element types. In the installed MinerU
+pipeline they share the same code-body layout path, while a code block
+containing inline formulas can be switched to the `algorithm` subtype. Because
+that distinction can change at a page boundary, continuation rules treat both
+as members of one `code_like` compatibility family.
+
+Code/algorithm `continued_on` candidates are limited to adjacent pages and
+require page-boundary and bbox-alignment evidence. A caption attached to the
+source closes the listing unless it explicitly says `continued` or `续`; a
+caption attached to the target is evidence that a multi-page listing ends
+there. These relations remain `candidate` and are listed in
+`debug/cross_page_relations.json`.
+
 ## Checks
 
 ```powershell
