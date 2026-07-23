@@ -9,3 +9,5 @@ dependencies:
   - pydantic>=2.5,<3
   - pillow>=9,<12
   - pytest>=7.4,<9
+  - pip:
+      - mineru[pipeline]==3.4.4

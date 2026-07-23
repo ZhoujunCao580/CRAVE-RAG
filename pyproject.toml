@@ -15,6 +15,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7.4,<9"]
+mineru = ["mineru[pipeline]==3.4.4"]
 
 [project.scripts]
 softdoc = "softdoc.cli:main"
@@ -26,4 +27,3 @@ where = ["src"]
 pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "-ra"
-

@@ -4,5 +4,8 @@ __pycache__/
 .agents/
 .coverage
 *.egg-info/
+data/raw/
+data/cache/
+data/processed/
 dist/
 build/
