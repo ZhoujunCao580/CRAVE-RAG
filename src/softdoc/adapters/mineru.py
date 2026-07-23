@@ -15,9 +15,9 @@ from softdoc.ids import (
     element_id,
     page_id,
     provenance_id,
-    section_id,
     stable_digest,
 )
+from softdoc.hierarchy import HeadingHierarchyBuilder
 from softdoc.models import (
     BoundingBox,
     Document,
@@ -25,7 +25,6 @@ from softdoc.models import (
     ElementType,
     Page,
     Provenance,
-    Section,
 )
 from softdoc.relations import RelationBuilder
 from softdoc.store import DocumentStore
@@ -205,15 +204,7 @@ class MinerUAdapter:
                 )
             )
 
-        sections = self._build_sections(doc_id, pages, elements)
-        inferred_title = next(
-            (
-                element.text
-                for element in elements
-                if element.element_type == ElementType.HEADING and element.text
-            ),
-            None,
-        )
+        hierarchy = HeadingHierarchyBuilder().build(doc_id, pages, elements)
         source_pdf = self._find_source_pdf(input_path)
         doc_provenance = self._provenance(
             source_path=layout_path.relative_to(input_path),
@@ -227,10 +218,13 @@ class MinerUAdapter:
         )
         document = Document(
             document_id=doc_id,
-            title=_first_string(layout, "title", "document_title") or inferred_title,
+            title=(
+                _first_string(layout, "title", "document_title")
+                or hierarchy.document_title
+            ),
             source_path=Path(source_pdf.name if source_pdf else source_name),
             pages=pages,
-            sections=sections,
+            sections=hierarchy.sections,
             elements=elements,
             relations=[],
             provenance=doc_provenance,
@@ -239,6 +233,13 @@ class MinerUAdapter:
                 "adapter_warnings": self.warnings,
                 "summary_generation": "disabled",
                 "keyword_generation": "disabled",
+                "heading_hierarchy": {
+                    "created_by": "deterministic_rule",
+                },
+                "heading_decisions": [
+                    decision.model_dump(mode="json")
+                    for decision in hierarchy.decisions
+                ],
             },
         )
         RelationBuilder(document).build_all()
@@ -441,46 +442,6 @@ class MinerUAdapter:
                 "derived_from_element_id": parent.element_id,
             },
         )
-
-    def _build_sections(self, doc_id: str, pages: list[Page], elements: list[Element]) -> list[Section]:
-        page_by_id = {page.page_id: page for page in pages}
-        ordered = sorted(elements, key=lambda item: (page_by_id[item.page_id].page_index, item.reading_order))
-        stack: list[Section] = []
-        sections: list[Section] = []
-        for element in ordered:
-            if element.element_type == ElementType.HEADING:
-                level = element.heading_level or 1
-                while stack and stack[-1].level >= level:
-                    stack.pop()
-                path = [section.title for section in stack] + [element.text or ""]
-                current = Section(
-                    section_id=section_id(doc_id, element.element_id),
-                    document_id=doc_id,
-                    title=element.text or "",
-                    level=level,
-                    heading_element_id=element.element_id,
-                    parent_section_id=stack[-1].section_id if stack else None,
-                    section_path=path,
-                    page_ids=[element.page_id],
-                    element_ids=[element.element_id],
-                    provenance=element.provenance,
-                    metadata={"created_by": "heading_stack"},
-                )
-                sections.append(current)
-                stack.append(current)
-                element.section_id = current.section_id
-                element.section_path = path
-                continue
-            if not stack:
-                continue
-            current = stack[-1]
-            element.section_id = current.section_id
-            element.section_path = list(current.section_path)
-            if element.element_id not in current.element_ids:
-                current.element_ids.append(element.element_id)
-            if element.page_id not in current.page_ids:
-                current.page_ids.append(element.page_id)
-        return sections
 
     def _layout_pages(self, layout: dict[str, Any]) -> dict[int, dict[str, Any]]:
         raw_pages = layout.get("pdf_info", layout.get("pages", []))

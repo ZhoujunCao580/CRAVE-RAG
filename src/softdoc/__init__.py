@@ -1,5 +1,11 @@
 """Soft document intermediate representation."""
 
+from softdoc.hierarchy import (
+    HeadingAction,
+    HeadingDecision,
+    HeadingHierarchyBuilder,
+    HeadingHierarchyResult,
+)
 from softdoc.models import (
     BoundingBox,
     Document,
@@ -28,5 +34,8 @@ __all__ = [
     "RelationStatus",
     "RelationType",
     "Section",
+    "HeadingAction",
+    "HeadingDecision",
+    "HeadingHierarchyBuilder",
+    "HeadingHierarchyResult",
 ]
-

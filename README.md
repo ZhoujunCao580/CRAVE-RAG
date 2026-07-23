@@ -116,6 +116,33 @@ middle JSON for physical page geometry and the v2 content list for semantic
 content. If `*_origin.pdf` is present, it also renders page images for the
 SoftDoc debug overlays.
 
+## Heading hierarchy
+
+`HeadingHierarchyBuilder` is parser-neutral. It treats parser heading levels as
+hints, then applies deterministic, inspectable rules:
+
+- a first-page top title can become `Document.title` without becoming a
+  `Section`;
+- numeric headings such as `3` and `3.1` become H1 and H2;
+- appendix headings such as `A` and `A.1` become H1 and H2;
+- common structural headings such as `Abstract` and `References` are H1;
+- unnumbered headings below an explicit anchor become child headings.
+
+The milestone deliberately does not define `SemanticRole`, `SectionRole`, or
+other role taxonomies. It preserves the source text and records every heading
+decision with its original level, normalized level, confidence, and rule.
+
+After `softdoc parse-mineru`, inspect:
+
+```text
+debug/document_outline.md
+debug/document_outline.json
+debug/heading_decisions.json
+debug/page_overlays/
+```
+
+Page overlays label headings as `TITLE`, `H1`, `H2`, and so on.
+
 ## Checks
 
 ```powershell

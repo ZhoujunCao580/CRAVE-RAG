@@ -46,7 +46,7 @@ def render_page_overlays(document: Document, output_dir: Path) -> list[Path]:
             rectangle = _pixel_box(element, canvas.width, canvas.height)
             color = _COLORS[element.element_type]
             draw.rectangle(rectangle, outline=color, width=max(2, canvas.width // 500))
-            label = f"{element.reading_order} {element.element_type.value} {element.element_id}"
+            label = _element_label(element)
             label_y = max(0, rectangle[1] - 12)
             draw.rectangle((rectangle[0], label_y, min(canvas.width, rectangle[0] + 8 * len(label)), rectangle[1]), fill=(255, 255, 255))
             draw.text((rectangle[0] + 2, label_y), label, fill=color)
@@ -89,3 +89,14 @@ def _pixel_box(element: Element, width: int, height: int) -> tuple[int, int, int
 def _pixel_center(element: Element, width: int, height: int) -> tuple[int, int]:
     x1, y1, x2, y2 = _pixel_box(element, width, height)
     return (x1 + x2) // 2, (y1 + y2) // 2
+
+
+def _element_label(element: Element) -> str:
+    element_type = element.element_type.value
+    if element.element_type == ElementType.HEADING:
+        hierarchy = element.metadata.get("heading_hierarchy", {})
+        if hierarchy.get("action") == "document_title":
+            element_type = "TITLE"
+        else:
+            element_type = f"H{element.heading_level or '?'}"
+    return f"{element.reading_order} {element_type} {element.element_id}"

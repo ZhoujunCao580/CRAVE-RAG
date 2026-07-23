@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from softdoc.models import Document, RelationType
+from softdoc.outline import build_document_outline, outline_markdown
 from softdoc.store import DocumentStore
 from softdoc.visualization import render_page_overlays
 
@@ -32,6 +33,19 @@ def write_document(document: Document, output_dir: Path, *, render_overlays: boo
         output_dir / "debug" / "adapter_warnings.json",
         document.metadata.get("adapter_warnings", []),
     )
+    outline = build_document_outline(document)
+    _write_json(
+        output_dir / "debug" / "document_outline.json",
+        outline.model_dump(mode="json"),
+    )
+    _write_text(
+        output_dir / "debug" / "document_outline.md",
+        outline_markdown(outline),
+    )
+    _write_json(
+        output_dir / "debug" / "heading_decisions.json",
+        document.metadata.get("heading_decisions", []),
+    )
     if render_overlays:
         render_page_overlays(document, output_dir)
 
@@ -55,6 +69,12 @@ def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
             handle.write("\n")
+
+
+def _write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(content)
 
 
 def _cross_page_relations(document: Document) -> list[dict[str, Any]]:

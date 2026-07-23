@@ -18,6 +18,9 @@ def test_output_files_and_json_round_trip(parsed_document, tmp_path) -> None:
         "relations.jsonl",
         "debug/cross_page_relations.json",
         "debug/adapter_warnings.json",
+        "debug/document_outline.json",
+        "debug/document_outline.md",
+        "debug/heading_decisions.json",
         "debug/page_overlays/page_0001.png",
         "debug/page_overlays/page_0002.png",
         "debug/page_overlays/page_0003.png",
@@ -29,4 +32,3 @@ def test_output_files_and_json_round_trip(parsed_document, tmp_path) -> None:
     with (output / "debug" / "cross_page_relations.json").open(encoding="utf-8") as handle:
         cross_page = json.load(handle)
     assert any(item["relation_type"] == RelationType.REFERS_TO.value for item in cross_page)
-
