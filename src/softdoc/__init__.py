@@ -38,6 +38,19 @@ from softdoc.models import (
     RelationType,
     Section,
 )
+from softdoc.pipeline import (
+    CoverageRecoveryPass,
+    DocumentPass,
+    FloatingSectionPass,
+    PassContext,
+    PassReport,
+    PipelineResult,
+    RelationPass,
+    RuleAuditPass,
+    SoftDocPipeline,
+    StructurePass,
+    ValidationPass,
+)
 from softdoc.repetition import (
     RepeatedHeaderFooterDetector,
     RepeatedHeaderFooterResult,
@@ -81,4 +94,15 @@ __all__ = [
     "FloatingContentSectionResolver",
     "SectionResolutionDecision",
     "SectionResolutionStatus",
+    "CoverageRecoveryPass",
+    "DocumentPass",
+    "FloatingSectionPass",
+    "PassContext",
+    "PassReport",
+    "PipelineResult",
+    "RelationPass",
+    "RuleAuditPass",
+    "SoftDocPipeline",
+    "StructurePass",
+    "ValidationPass",
 ]

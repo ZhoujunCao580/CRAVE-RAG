@@ -8,6 +8,9 @@ from pathlib import Path
 import sys
 
 from softdoc.adapters import MinerUAdapter
+from softdoc.models import Document
+from softdoc.pipeline import SoftDocPipeline
+from softdoc.rule_audit import write_rule_coverage_reports
 from softdoc.serialization import load_document, write_document
 from softdoc.store import DocumentStore
 
@@ -38,6 +41,7 @@ def main(argv: list[str] | None = None) -> int:
     output_root = args.output_root.resolve()
     output_root.mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, object]] = []
+    built_documents: list[Document] = []
     for document_dir in sorted(
         path for path in input_root.iterdir() if path.is_dir()
     ):
@@ -59,7 +63,11 @@ def main(argv: list[str] | None = None) -> int:
                         page.image_path
                     )
         adapter = MinerUAdapter()
-        document = adapter.parse(artifact_dir, destination)
+        pipeline_result = SoftDocPipeline(adapter).run(
+            artifact_dir,
+            destination,
+        )
+        document = pipeline_result.document
         for page in document.pages:
             if page.image_path is None:
                 page.image_path = reusable_page_assets.get(page.page_index)
@@ -93,7 +101,13 @@ def main(argv: list[str] | None = None) -> int:
                 "elements": len(document.elements),
                 "sections": len(document.sections),
                 "relations": len(document.relations),
-                "warnings": len(adapter.warnings),
+                "warnings": len(
+                    document.metadata.get("adapter_warnings", [])
+                ),
+                "passes": [
+                    report.model_dump(mode="json")
+                    for report in pipeline_result.pass_reports
+                ],
                 "validation_errors": validation_errors,
                 "profile": document.metadata.get(
                     "document_profile", {}
@@ -106,6 +120,7 @@ def main(argv: list[str] | None = None) -> int:
             f"elements={len(document.elements)} "
             f"errors={len(validation_errors)}"
         )
+        built_documents.append(document)
 
     summary = {
         "documents": len(rows),
@@ -118,6 +133,7 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    write_rule_coverage_reports(built_documents, output_root)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0 if summary["successful"] == len(rows) else 1
 

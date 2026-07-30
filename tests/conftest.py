@@ -8,6 +8,7 @@ from PIL import Image
 
 from softdoc.adapters import MinerUAdapter
 from softdoc.models import Document
+from softdoc.pipeline import SoftDocPipeline
 
 
 @pytest.fixture
@@ -17,7 +18,10 @@ def mineru_fixture_dir() -> Path:
 
 @pytest.fixture
 def parsed_document(mineru_fixture_dir: Path, tmp_path: Path) -> Document:
-    return MinerUAdapter().parse(mineru_fixture_dir, tmp_path / "adapter_output")
+    return SoftDocPipeline(MinerUAdapter()).parse(
+        mineru_fixture_dir,
+        tmp_path / "adapter_output",
+    )
 
 
 @pytest.fixture

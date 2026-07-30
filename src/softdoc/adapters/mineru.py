@@ -9,7 +9,6 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from softdoc.coverage import recover_pdf_text_layer_coverage
 from softdoc.ids import (
     bbox_id,
     document_id,
@@ -18,7 +17,6 @@ from softdoc.ids import (
     provenance_id,
     stable_digest,
 )
-from softdoc.floating_sections import FloatingContentSectionResolver
 from softdoc.models import (
     BoundingBox,
     ContentAvailability,
@@ -29,9 +27,6 @@ from softdoc.models import (
     Page,
     Provenance,
 )
-from softdoc.relations import RelationBuilder
-from softdoc.store import DocumentStore
-from softdoc.structure import SoftDocumentStructureBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -239,34 +234,6 @@ class MinerUAdapter:
                 "keyword_generation": "disabled",
             },
         )
-        if source_pdf is not None:
-            try:
-                coverage_result = recover_pdf_text_layer_coverage(
-                    document,
-                    source_pdf.resolve(),
-                )
-                document.metadata["coverage_recovery"] = {
-                    "source": "native_pdf_text_layer",
-                    "scanned_line_count": coverage_result.scanned_line_count,
-                    "recovered_count": coverage_result.recovered_count,
-                    "recovered_element_ids": list(
-                        coverage_result.recovered_element_ids
-                    ),
-                }
-            except Exception as exc:
-                self._warn(
-                    "pdf_text_layer_recovery_failed",
-                    "Native PDF text-layer recovery failed; continuing with MinerU elements.",
-                    {
-                        "source_pdf": source_pdf.as_posix(),
-                        "error_type": type(exc).__name__,
-                        "error": str(exc),
-                    },
-                )
-        SoftDocumentStructureBuilder().apply(document)
-        RelationBuilder(document).build_all()
-        FloatingContentSectionResolver(document).resolve()
-        DocumentStore(document).validate_references(raise_on_error=True)
         return document
 
     def _parse_page_elements(

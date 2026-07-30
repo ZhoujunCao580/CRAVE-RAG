@@ -915,10 +915,14 @@ MinerU
 MinerUAdapter
   ├─ Page / Element / bbox / reading order
   ├─ 原始 payload 与 warning
-  ├─ 页面图与元素裁剪图
+  └─ 页面图与元素裁剪图
+  ↓
+SoftDocPipeline
+  ↓
+CoverageRecoveryPass
   └─ 原生 PDF 文本层覆盖恢复
   ↓
-SoftDocumentStructureBuilder
+StructurePass
   ├─ DocumentProfileDetector
   ├─ ElementNormalizer
   ├─ RepeatedHeaderFooterDetector
@@ -926,24 +930,30 @@ SoftDocumentStructureBuilder
   ├─ HeadingHierarchyBuilder
   └─ SectionBuilder
   ↓
-RelationBuilder
+RelationPass
   ├─ contains / page order / reading order
   ├─ belongs_to_section
   ├─ caption_of / footnote_of
   ├─ explicit refers_to
   └─ continued_on candidates
   ↓
-FloatingContentSectionResolver
+FloatingSectionPass
   ├─ 高置信关系修正浮动内容 Section
   ├─ candidate 只记录建议，不强行迁移
   └─ 重建 belongs_to_section
   ↓
-DocumentStore.validate_references
+ValidationPass
+  └─ DocumentStore.validate_references
+  ↓
+RuleAuditPass
+  └─ 只读收集 rule firing，不修改 Document
   ↓
 JSON / JSONL / Assets / Debug Overlays
 ```
 
-上图表示逻辑模块边界。当前代码入口为了让 `softdoc parse-mineru` 一次完成转换，仍由 `MinerUAdapter.parse()` 依次调用 `SoftDocumentStructureBuilder`、`RelationBuilder`、`FloatingContentSectionResolver` 和最终验证；这些规则已经分别放在独立模块中，不在核心 Pydantic 模型里，也不依赖 MinerU 字段。
+`MinerUAdapter.parse()` 现在只负责 MinerU 到原始 Document 的转换，不再运行 coverage、结构、关系或 Section 修正。`SoftDocPipeline` 是唯一完整编排入口。每个 pass 都实现统一的 `DocumentPass` 接口，声明 `name`、`requires`、`provides` 和 `apply(document, context)`，并返回外置 `PassReport`。
+
+PassReport 和规则审计报告不写回 Document，因此不会改变 SoftDoc JSON 语义。冻结 tag 与新 Pipeline 对 14 份完整 `document.json` 的严格深比较结果为 14/14 相等、0 个字段差异。
 
 ## 18. 主要源代码模块
 
@@ -955,6 +965,7 @@ JSON / JSONL / Assets / Debug Overlays
 | `ids.py` | 稳定 ID 生成 |
 | `parser.py` | 统一 DocumentParser Protocol |
 | `adapters/mineru.py` | 将 MinerU 输出忠实转换为 SoftDoc |
+| `pipeline.py` | DocumentPass、PassReport 与唯一 SoftDocPipeline 编排入口 |
 | `coverage.py` | 从 PDF 原生文本层保守恢复 MinerU 漏掉的文本 |
 | `profiles.py` | 判断 academic/slides/form/report 等文档 Profile |
 | `normalization.py` | Element 类型归一化 |
@@ -971,6 +982,8 @@ JSON / JSONL / Assets / Debug Overlays
 | `serialization.py` | 输出和加载 JSON/JSONL/debug 文件 |
 | `visualization.py` | 页面与跨页关系 overlay |
 | `structure.py` | 编排解析器无关的结构后处理流水线 |
+| `rule_audit.py` | 稳定 rule_id、规则触发统计和覆盖报告 |
+| `semantic_diff.py` | 完整 JSON 语义深比较与差异报告 |
 | `cli.py` | `softdoc parse-mineru` 和 `softdoc validate` |
 
 `src/soft_structured_document.egg-info/` 如果存在，是 Python 可编辑安装生成的包元数据，不是业务代码。
@@ -996,12 +1009,15 @@ JSON / JSONL / Assets / Debug Overlays
 - coverage recovery；
 - FloatingContentSectionResolver；
 - CLI 和输出文件；
+- 所有 DocumentPass 的幂等性；
+- 规则审计只读性、稳定 rule_id 和稳定报告；
+- 完整 JSON 语义 diff；
 - JSON round-trip 后关系不变。
 
 最近一次完整测试结果为：
 
 ```text
-117 passed
+127 passed
 ```
 
 14 份最终输出的结构不变量检查结果：
@@ -1016,6 +1032,8 @@ JSON / JSONL / Assets / Debug Overlays
 - `belongs_to_section` 与最终 `Element.section_id` 一致；
 - 505/505 页面资产和 overlay 存在且尺寸匹配；
 - 14 份 layout PDF 与 SoftDoc 页数一致。
+- 冻结 tag 与新 Pipeline 的 14 份完整 JSON 语义 diff 为 14/14 相等；
+- `rule_coverage_report.json/.md` 记录 rule_id、触发次数、受影响文档/元素/关系、状态和 evidence。
 
 这些结果证明结构完整性较高，但不等于在人工 ground truth 上测得了 100% 语义准确率。
 
@@ -1054,11 +1072,16 @@ fix: add MinerU pipeline OCR runtime dependency
 feat: support MinerU 3.4 soft document conversion
 feat: normalize document heading hierarchy
 feat: detect cross-page code continuations
+feat: freeze soft document milestone 1
 ```
 
-之后的 Adapter 健壮性、Profile、coverage、FloatingContentSectionResolver、Caption/Footnote/Reference/Continuation 修正和完整 14 文档验收仍位于当前工作树中，尚未形成新的里程碑提交。
+Milestone 1 冻结提交为 `41419a7`，对应 annotated tag：
 
-交接时不要假设工作树是干净的，也不要用 `git reset --hard` 或覆盖这些文件。应先查看 `git status`，确认改动后再建立新的阶段 commit。
+```text
+softdoc-v0.1-dev
+```
+
+Pipeline 边界统一、pass 幂等性、规则审计和语义 diff 作为冻结 tag 之后的独立工程提交保存，没有重写历史。交接时仍应先查看 `git status`，不得使用 `git reset --hard`。
 
 ## 22. 当前推荐的暂停点
 
@@ -1072,7 +1095,7 @@ Milestone 1 已形成一个可交接的研究原型：
 - 有空间查询；
 - 有完整输出、验证和可视化；
 - 有 14 类真实文档结果；
-- 有 117 个回归测试。
+- 有 127 个回归测试。
 
 在进入下一阶段前，最值得做的不是继续添加启发式补丁，而是：
 

@@ -116,6 +116,39 @@ middle JSON for physical page geometry and the v2 content list for semantic
 content. If `*_origin.pdf` is present, it also renders page images for the
 SoftDoc debug overlays.
 
+## Pipeline boundary
+
+`MinerUAdapter.parse()` only converts MinerU artifacts into a raw, neutral
+`Document`. The complete deterministic workflow must enter through
+`SoftDocPipeline`:
+
+```text
+MinerUAdapter
+  -> CoverageRecoveryPass
+  -> StructurePass
+  -> RelationPass
+  -> FloatingSectionPass
+  -> ValidationPass
+  -> RuleAuditPass
+```
+
+Every post-processing pass implements `DocumentPass` with `name`, `requires`,
+`provides`, and `apply(document, context) -> PassReport`. Pass reports and rule
+coverage are sidecars; they are not written into `Document.metadata`.
+
+The representative corpus build writes:
+
+```text
+rule_coverage_report.json
+rule_coverage_report.md
+semantic_diff_report.json
+semantic_diff_report.md
+```
+
+The semantic diff compares complete parsed JSON, including list order,
+provenance, metadata, bbox values, section membership, relations, status, and
+evidence. It ignores only JSON formatting and external debug artifacts.
+
 ## Heading hierarchy
 
 `HeadingHierarchyBuilder` is parser-neutral. It treats parser heading levels as

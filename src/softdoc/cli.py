@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Sequence
 
 from softdoc.adapters import MinerUAdapter
+from softdoc.pipeline import SoftDocPipeline
+from softdoc.rule_audit import write_rule_coverage_reports
 from softdoc.serialization import load_document, write_document
 from softdoc.store import DocumentStore
 
@@ -30,14 +32,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "parse-mineru":
         adapter = MinerUAdapter()
-        document = adapter.parse(args.input_dir, args.output)
+        document = SoftDocPipeline(adapter).parse(
+            args.input_dir,
+            args.output,
+        )
         write_document(document, args.output)
+        write_rule_coverage_reports([document], args.output)
         print(
             f"Parsed {document.document_id}: {len(document.pages)} pages, "
             f"{len(document.elements)} elements, {len(document.relations)} relations"
         )
-        if adapter.warnings:
-            print(f"Recorded {len(adapter.warnings)} adapter warnings in debug/adapter_warnings.json")
+        warning_count = len(document.metadata.get("adapter_warnings", []))
+        if warning_count:
+            print(
+                f"Recorded {warning_count} adapter warnings in "
+                "debug/adapter_warnings.json"
+            )
         return 0
     if args.command == "validate":
         document = load_document(args.output_dir)

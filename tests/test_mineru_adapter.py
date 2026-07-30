@@ -9,18 +9,40 @@ from PIL import Image
 from softdoc.adapters import MinerUAdapter
 from softdoc.models import (
     ContentAvailability,
+    Document,
     ElementParseStatus,
     ElementType,
     RelationType,
 )
 from softdoc.normalization import ElementNormalizer
 from softdoc.parser import DocumentParser
+from softdoc.pipeline import SoftDocPipeline
 from softdoc.serialization import load_document, write_document
 from softdoc.store import DocumentStore
 
 
+def _parse_mineru(input_dir: Path, output_dir: Path) -> Document:
+    return SoftDocPipeline(MinerUAdapter()).parse(input_dir, output_dir)
+
+
 def test_adapter_satisfies_parser_protocol() -> None:
     assert isinstance(MinerUAdapter(), DocumentParser)
+
+
+def test_adapter_returns_raw_document_without_postprocessing(
+    mineru_fixture_dir: Path,
+    tmp_path: Path,
+) -> None:
+    document = MinerUAdapter().parse(
+        mineru_fixture_dir,
+        tmp_path / "raw_adapter_output",
+    )
+
+    assert document.sections == []
+    assert document.relations == []
+    assert "document_profile" not in document.metadata
+    assert "heading_decisions" not in document.metadata
+    assert "section_resolution_decisions" not in document.metadata
 
 
 def test_slide_ocr_year_rule_does_not_change_contractions() -> None:
@@ -36,8 +58,8 @@ def test_slide_ocr_year_rule_does_not_change_contractions() -> None:
 
 
 def test_stable_ids(mineru_fixture_dir: Path, tmp_path: Path) -> None:
-    first = MinerUAdapter().parse(mineru_fixture_dir, tmp_path / "first")
-    second = MinerUAdapter().parse(mineru_fixture_dir, tmp_path / "second")
+    first = _parse_mineru(mineru_fixture_dir, tmp_path / "first")
+    second = _parse_mineru(mineru_fixture_dir, tmp_path / "second")
     assert first.document_id == second.document_id
     assert [page.page_id for page in first.pages] == [page.page_id for page in second.pages]
     assert [element.element_id for element in first.elements] == [element.element_id for element in second.elements]
@@ -123,7 +145,7 @@ def test_parser_declared_header_footer_are_preserved_and_excluded(tmp_path: Path
         json.dumps(content), encoding="utf-8"
     )
 
-    document = MinerUAdapter().parse(input_dir, tmp_path / "output")
+    document = _parse_mineru(input_dir, tmp_path / "output")
     marginal = [
         element
         for element in document.elements
@@ -281,7 +303,7 @@ def test_mineru_34_middle_schema_without_layout_json(tmp_path: Path) -> None:
         json.dumps(content_v2), encoding="utf-8"
     )
 
-    document = MinerUAdapter().parse(input_dir, tmp_path / "output")
+    document = _parse_mineru(input_dir, tmp_path / "output")
 
     assert document.document_id.startswith("doc:paper:")
     assert document.title == "Test Paper"
@@ -327,7 +349,7 @@ def test_empty_headings_are_skipped_without_empty_sections(
     mineru_degraded_fixture_dir: Path,
     tmp_path: Path,
 ) -> None:
-    document = MinerUAdapter().parse(
+    document = _parse_mineru(
         mineru_degraded_fixture_dir,
         tmp_path / "output",
     )
@@ -359,7 +381,7 @@ def test_empty_tables_are_preserved_as_degraded_fallback_crops(
     tmp_path: Path,
 ) -> None:
     output_dir = tmp_path / "output"
-    document = MinerUAdapter().parse(mineru_degraded_fixture_dir, output_dir)
+    document = _parse_mineru(mineru_degraded_fixture_dir, output_dir)
     tables = [
         element
         for element in document.elements
@@ -419,7 +441,7 @@ def test_block_conversion_error_is_isolated_and_round_trips(
     tmp_path: Path,
 ) -> None:
     output_dir = tmp_path / "output"
-    document = MinerUAdapter().parse(mineru_degraded_fixture_dir, output_dir)
+    document = _parse_mineru(mineru_degraded_fixture_dir, output_dir)
 
     assert any(
         element.text == "A later block still converts after an exception."
@@ -626,7 +648,7 @@ def test_slide_index_block_and_external_chart_title_are_preserved(
         encoding="utf-8",
     )
 
-    document = MinerUAdapter().parse(input_dir, tmp_path / "output")
+    document = _parse_mineru(input_dir, tmp_path / "output")
     index_element = next(
         element
         for element in document.elements
@@ -773,7 +795,7 @@ def test_repeated_slide_header_style_becomes_primary_heading(
         encoding="utf-8",
     )
 
-    document = MinerUAdapter().parse(input_dir, tmp_path / "output")
+    document = _parse_mineru(input_dir, tmp_path / "output")
     headings = [
         element
         for element in document.elements
@@ -891,7 +913,7 @@ def test_sparse_central_slide_title_is_promoted(
         encoding="utf-8",
     )
 
-    document = MinerUAdapter().parse(input_dir, tmp_path / "output")
+    document = _parse_mineru(input_dir, tmp_path / "output")
     title = next(
         element
         for element in document.elements
@@ -965,7 +987,7 @@ def test_spatially_distinct_caption_array_is_not_concatenated(
         encoding="utf-8",
     )
 
-    document = MinerUAdapter().parse(input_dir, tmp_path / "output")
+    document = _parse_mineru(input_dir, tmp_path / "output")
     captions = [
         element
         for element in document.elements
@@ -1078,7 +1100,7 @@ def test_progressive_slide_repairs_missing_upper_visual_target(
         encoding="utf-8",
     )
 
-    document = MinerUAdapter().parse(input_dir, tmp_path / "output")
+    document = _parse_mineru(input_dir, tmp_path / "output")
     paragraph_page = next(
         page for page in document.pages if page.page_number == 1
     )
