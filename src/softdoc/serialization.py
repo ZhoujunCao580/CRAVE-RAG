@@ -9,7 +9,10 @@ from typing import Any
 from softdoc.models import Document, RelationType
 from softdoc.outline import build_document_outline, outline_markdown
 from softdoc.store import DocumentStore
-from softdoc.visualization import render_page_overlays
+from softdoc.visualization import (
+    render_cross_page_relation_overlays,
+    render_page_overlays,
+)
 
 
 def write_document(document: Document, output_dir: Path, *, render_overlays: bool = True) -> None:
@@ -20,6 +23,7 @@ def write_document(document: Document, output_dir: Path, *, render_overlays: boo
         output_dir / "assets" / "pages",
         output_dir / "assets" / "elements",
         output_dir / "debug" / "page_overlays",
+        output_dir / "debug" / "cross_page_overlays",
     ):
         directory.mkdir(parents=True, exist_ok=True)
 
@@ -46,8 +50,25 @@ def write_document(document: Document, output_dir: Path, *, render_overlays: boo
         output_dir / "debug" / "heading_decisions.json",
         document.metadata.get("heading_decisions", []),
     )
+    _write_json(
+        output_dir / "debug" / "heading_eligibility_decisions.json",
+        document.metadata.get("heading_eligibility_decisions", []),
+    )
+    _write_json(
+        output_dir / "debug" / "element_normalization_decisions.json",
+        document.metadata.get("element_normalization_decisions", []),
+    )
+    _write_json(
+        output_dir / "debug" / "document_profile.json",
+        document.metadata.get("document_profile", {}),
+    )
+    _write_json(
+        output_dir / "debug" / "section_resolution_decisions.json",
+        document.metadata.get("section_resolution_decisions", []),
+    )
     if render_overlays:
         render_page_overlays(document, output_dir)
+        render_cross_page_relation_overlays(document, output_dir)
 
 
 def load_document(output_dir: Path) -> Document:

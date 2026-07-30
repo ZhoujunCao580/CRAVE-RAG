@@ -1,0 +1,69 @@
+{
+  "document_id": "mineru-degraded-blocks",
+  "pdf_info": [
+    {
+      "page_idx": 0,
+      "page_size": [1000, 1000],
+      "para_blocks": [
+        {"type": "title", "bbox": [60, 40, 700, 100]},
+        {"type": "title", "bbox": [695, 570, 710, 589]},
+        {"type": "title", "bbox": [311, 802, 552, 840]},
+        {"type": "paragraph", "bbox": [60, 880, 900, 940]}
+      ]
+    },
+    {
+      "page_idx": 1,
+      "page_size": [1000, 1000],
+      "para_blocks": [
+        {"type": "table", "bbox": [78, 57, 968, 921]},
+        {"type": "paragraph", "bbox": [80, 935, 900, 970]}
+      ]
+    },
+    {
+      "page_idx": 2,
+      "page_size": [1000, 1000],
+      "para_blocks": [
+        {"type": "table", "bbox": [117, 103, 926, 451]},
+        {"type": "paragraph", "bbox": [117, 480, 900, 540]}
+      ]
+    },
+    {
+      "page_idx": 3,
+      "page_size": [1000, 1000],
+      "para_blocks": [
+        {"type": "table", "bbox": [78, 117, 902, 346]},
+        {"type": "paragraph", "bbox": [78, 380, 900, 440]}
+      ]
+    },
+    {
+      "page_idx": 4,
+      "page_size": [1000, 1000],
+      "para_blocks": [
+        {"type": "table", "bbox": [101, 79, 918, 799]},
+        {"type": "paragraph", "bbox": [101, 830, 900, 890]}
+      ]
+    },
+    {
+      "page_idx": 5,
+      "page_size": [1000, 1000],
+      "para_blocks": [
+        {"type": "table", "bbox": [116, 89, 875, 892]}
+      ]
+    },
+    {
+      "page_idx": 6,
+      "page_size": [1000, 1000],
+      "para_blocks": [
+        {"type": "table", "bbox": [119, 88, 875, 176]}
+      ]
+    },
+    {
+      "page_idx": 7,
+      "page_size": [1000, 1000],
+      "para_blocks": [
+        {"type": "table", "bbox": [100, 100, 900, 400]},
+        {"type": "paragraph", "bbox": [100, 450, 900, 520]}
+      ]
+    }
+  ]
+}

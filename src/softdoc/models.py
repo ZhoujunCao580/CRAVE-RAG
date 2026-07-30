@@ -23,6 +23,19 @@ class ElementType(str, Enum):
     EQUATION = "equation"
 
 
+class ElementParseStatus(str, Enum):
+    PARSED = "parsed"
+    DEGRADED = "degraded"
+
+
+class ContentAvailability(str, Enum):
+    STRUCTURED = "structured"
+    TEXT_ONLY = "text_only"
+    VISUAL_ONLY = "visual_only"
+    MIXED = "mixed"
+    UNAVAILABLE = "unavailable"
+
+
 class RelationType(str, Enum):
     CONTAINS = "contains"
     NEXT_PAGE = "next_page"
@@ -142,6 +155,8 @@ class Element(SoftDocModel):
     html: str | None = None
     image_path: Path | None = None
     crop_image_path: Path | None = None
+    parse_status: ElementParseStatus = ElementParseStatus.PARSED
+    content_availability: ContentAvailability | None = None
     reference_label: str | None = None
     summary: str | None = None
     keywords: list[str] = Field(default_factory=list)
@@ -150,9 +165,28 @@ class Element(SoftDocModel):
 
     @model_validator(mode="after")
     def validate_content(self) -> Self:
+        if self.content_availability is None:
+            has_text = bool((self.text or "").strip())
+            has_structured = bool((self.html or "").strip())
+            has_visual = self.image_path is not None or self.crop_image_path is not None
+            if has_visual and (has_text or has_structured):
+                availability = ContentAvailability.MIXED
+            elif has_structured:
+                availability = ContentAvailability.STRUCTURED
+            elif has_text:
+                availability = ContentAvailability.TEXT_ONLY
+            elif has_visual:
+                availability = ContentAvailability.VISUAL_ONLY
+            else:
+                availability = ContentAvailability.UNAVAILABLE
+            object.__setattr__(self, "content_availability", availability)
         if self.element_type == ElementType.HEADING and not (self.text or "").strip():
             raise ValueError("Heading elements require text")
-        if self.element_type == ElementType.TABLE and not any((self.text, self.html, self.image_path)):
+        if (
+            self.element_type == ElementType.TABLE
+            and not any((self.text, self.html, self.image_path, self.crop_image_path))
+            and self.parse_status != ElementParseStatus.DEGRADED
+        ):
             raise ValueError("Table elements require text, HTML, or an image path")
         if self.element_type in {ElementType.FIGURE, ElementType.CHART} and not any(
             (self.image_path, self.crop_image_path, self.text)

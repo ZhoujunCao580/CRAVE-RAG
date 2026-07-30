@@ -1,0 +1,195 @@
+[
+  [
+    {
+      "type": "title",
+      "content": {
+        "title_content": [{"type": "text", "content": "Regression Document"}],
+        "level": 1
+      },
+      "bbox": [60, 40, 700, 100],
+      "metadata": {"source_case": "control"}
+    },
+    {
+      "type": "title",
+      "content": {"title_content": [], "level": 2},
+      "bbox": [695, 570, 710, 589],
+      "metadata": {
+        "source_case": "empty_heading",
+        "source_document": "2024.ug.eprospectus.pdf"
+      }
+    },
+    {
+      "type": "title",
+      "content": {"title_content": [], "level": 2},
+      "bbox": [311, 802, 552, 840],
+      "metadata": {
+        "source_case": "empty_heading",
+        "source_document": "catvsdogdlpycon15se-150512122612-lva1-app6891_95.pdf"
+      }
+    },
+    {
+      "type": "paragraph",
+      "content": {
+        "paragraph_content": [{"type": "text", "content": "Content after empty headings survives."}]
+      },
+      "bbox": [60, 880, 900, 940]
+    }
+  ],
+  [
+    {
+      "type": "table",
+      "content": {
+        "image_source": {"path": "images/"},
+        "table_caption": [],
+        "table_footnote": [],
+        "html": "",
+        "table_type": "simple_table",
+        "table_nest_level": 1
+      },
+      "bbox": [78, 57, 968, 921],
+      "metadata": {
+        "source_case": "full_page_empty_table",
+        "source_document": "936c0e2c2e6c8e0c07c51bfaf7fd0a83.pdf"
+      }
+    },
+    {
+      "type": "paragraph",
+      "content": {
+        "paragraph_content": [{"type": "text", "content": "Content after the full-page table survives."}]
+      },
+      "bbox": [80, 935, 900, 970]
+    }
+  ],
+  [
+    {
+      "type": "table",
+      "content": {
+        "image_source": {"path": "images/"},
+        "table_caption": [],
+        "table_footnote": [],
+        "html": "",
+        "table_type": "simple_table",
+        "table_nest_level": 1
+      },
+      "bbox": [117, 103, 926, 451],
+      "metadata": {
+        "source_case": "directory_image_path",
+        "source_document": "afe620b9beac86c1027b96d31d396407.pdf"
+      }
+    },
+    {
+      "type": "paragraph",
+      "content": {
+        "paragraph_content": [{"type": "text", "content": "Directory image paths are non-fatal."}]
+      },
+      "bbox": [117, 480, 900, 540]
+    }
+  ],
+  [
+    {
+      "type": "table",
+      "content": {
+        "image_source": {"path": "images/"},
+        "content": "",
+        "text": "",
+        "html": "",
+        "table_caption": [],
+        "table_footnote": []
+      },
+      "bbox": [78, 117, 902, 346],
+      "metadata": {
+        "source_case": "html_and_text_empty",
+        "source_document": "DSA-278777.pdf"
+      }
+    },
+    {
+      "type": "paragraph",
+      "content": {
+        "paragraph_content": [{"type": "text", "content": "Empty HTML and text are non-fatal."}]
+      },
+      "bbox": [78, 380, 900, 440]
+    }
+  ],
+  [
+    {
+      "type": "table",
+      "content": {
+        "image_source": {"path": "images/"},
+        "table_caption": [],
+        "table_footnote": [],
+        "html": ""
+      },
+      "bbox": [101, 79, 918, 799],
+      "metadata": {
+        "source_case": "large_bbox_visual_table",
+        "source_document": "Macbook_air.pdf"
+      }
+    },
+    {
+      "type": "paragraph",
+      "content": {
+        "paragraph_content": [{"type": "text", "content": "Content after a large table survives."}]
+      },
+      "bbox": [101, 830, 900, 890]
+    }
+  ],
+  [
+    {
+      "type": "table",
+      "content": {
+        "image_source": {"path": "images/"},
+        "table_caption": [],
+        "table_footnote": [],
+        "html": ""
+      },
+      "bbox": [116, 89, 875, 892],
+      "metadata": {
+        "source_case": "continued_table_first_page",
+        "source_document": "e79deb02a0c0e87511080836c5d4347b.pdf"
+      }
+    }
+  ],
+  [
+    {
+      "type": "table",
+      "content": {
+        "image_source": {"path": "images/"},
+        "table_caption": [],
+        "table_footnote": [],
+        "html": ""
+      },
+      "bbox": [119, 88, 875, 176],
+      "metadata": {
+        "source_case": "continued_table_second_page",
+        "source_document": "e79deb02a0c0e87511080836c5d4347b.pdf"
+      }
+    }
+  ],
+  [
+    {
+      "type": "table",
+      "index": "not-an-integer",
+      "content": {"html": "<table><tr><td>malformed index</td></tr></table>"},
+      "bbox": [100, 100, 900, 400],
+      "metadata": {
+        "source_case": "block_conversion_exception",
+        "source_document": "synthetic_from_real_failure_mode"
+      }
+    },
+    {
+      "type": "paragraph",
+      "content": {
+        "paragraph_content": [{"type": "text", "content": "A later block still converts after an exception."}]
+      },
+      "bbox": [100, 450, 900, 520]
+    },
+    {
+      "type": "table",
+      "content": {"html": "", "content": "", "text": ""},
+      "metadata": {
+        "source_case": "empty_table_without_bbox",
+        "source_document": "synthetic_minimum"
+      }
+    }
+  ]
+]

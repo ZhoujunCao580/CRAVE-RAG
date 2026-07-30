@@ -21,9 +21,11 @@ def test_output_files_and_json_round_trip(parsed_document, tmp_path) -> None:
         "debug/document_outline.json",
         "debug/document_outline.md",
         "debug/heading_decisions.json",
+        "debug/section_resolution_decisions.json",
         "debug/page_overlays/page_0001.png",
         "debug/page_overlays/page_0002.png",
         "debug/page_overlays/page_0003.png",
+        "debug/cross_page_overlays/pages_0002_0003.png",
     }
     assert all((output / relative).exists() for relative in expected)
     restored = load_document(output)

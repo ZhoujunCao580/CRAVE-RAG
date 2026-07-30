@@ -11,5 +11,6 @@ dependencies:
   - pytest>=7.4,<9
   - pip:
       - mineru[pipeline]==3.4.4
+      - pypdfium2>=4.30,<5
       # Required at runtime by MinerU 3.4.4 pipeline OCR.
       - six>=1.16,<2

@@ -11,6 +11,7 @@ requires-python = ">=3.11,<3.14"
 dependencies = [
     "pydantic>=2.5,<3",
     "Pillow>=9,<12",
+    "pypdfium2>=4.30,<5",
 ]
 
 [project.optional-dependencies]
