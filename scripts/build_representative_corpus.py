@@ -1,4 +1,4 @@
-"""Build a representative corpus and record SoftDoc conversion timings."""
+"""Batch-convert existing MinerU output directories into SoftDocs."""
 
 from __future__ import annotations
 
@@ -16,21 +16,22 @@ from softdoc.serialization import load_document, write_document
 from softdoc.store import DocumentStore
 
 
-ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_INPUT = (
-    ROOT / "data" / "processed" / "representative_14" / "mineru"
-)
-DEFAULT_OUTPUT = (
-    ROOT / "data" / "processed" / "representative_14" / "softdoc_final"
-)
-
-
 def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input-root", type=Path, default=DEFAULT_INPUT)
-    parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument(
+        "--input-root",
+        type=Path,
+        required=True,
+        help="Directory containing one MinerU output directory per document.",
+    )
+    parser.add_argument(
+        "--output-root",
+        type=Path,
+        required=True,
+        help="Destination for the serialized SoftDoc corpus.",
+    )
     parser.add_argument(
         "--no-overlays",
         action="store_true",

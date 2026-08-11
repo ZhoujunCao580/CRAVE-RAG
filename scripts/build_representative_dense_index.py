@@ -21,7 +21,7 @@ from softdoc.serialization import load_document
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SOFTDOC_ROOT = (
-    ROOT / "data" / "processed" / "representative_14" / "softdoc_final"
+    ROOT / "data" / "processed" / "representative_28" / "softdoc"
 )
 DEFAULT_MODEL_DIR = (
     ROOT
@@ -31,11 +31,7 @@ DEFAULT_MODEL_DIR = (
     / "intfloat--multilingual-e5-small"
 )
 DEFAULT_OUTPUT_ROOT = (
-    ROOT
-    / "data"
-    / "processed"
-    / "representative_14"
-    / "retrieval_dense_e5"
+    ROOT / "data" / "processed" / "representative_28" / "retrieval"
 )
 MODEL_NAME = "intfloat/multilingual-e5-small"
 
