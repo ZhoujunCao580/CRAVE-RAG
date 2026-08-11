@@ -9,6 +9,7 @@ from softdoc.retrieval.models import (
     AnchorResolutionStatus,
     BM25ElementCandidate,
     BM25SearchResult,
+    CandidateMergePolicy,
     CandidatePreview,
     DenseElementCandidate,
     DenseSearchResult,
@@ -27,7 +28,7 @@ from softdoc.retrieval.models import (
 
 
 class SearchSessionBuilder:
-    """Combine independent rankings without mixing their score scales."""
+    """Combine independent Element ranks without mixing raw score scales."""
 
     def __init__(self, config: SearchSessionConfig | None = None) -> None:
         self.config = config or SearchSessionConfig()
@@ -65,12 +66,23 @@ class SearchSessionBuilder:
             for match in exact_matches
             if match.target_type.value not in {"page", "section"}
         }
+        merged_ids, rrf_scores = _rank_candidate_ids(
+            bm25=bm25.candidates if bm25 is not None else [],
+            dense=dense.candidates if dense is not None else [],
+            config=self.config,
+        )
+        exact_matches = [
+            _enrich_exact_match(
+                match,
+                bm25=bm25_by_id.get(match.target_id),
+                dense=dense_by_id.get(match.target_id),
+                rrf_score=rrf_scores.get(match.target_id),
+            )
+            for match in exact_matches
+        ]
         ranked_ids = [
             element_id
-            for element_id in _round_robin_ids(
-                bm25.candidates if bm25 is not None else [],
-                dense.candidates if dense is not None else [],
-            )
+            for element_id in merged_ids
             if element_id not in exact_element_ids
         ]
         catalog = [
@@ -79,6 +91,7 @@ class SearchSessionBuilder:
                 bm25=bm25_by_id.get(element_id),
                 dense=dense_by_id.get(element_id),
                 units_by_id=units_by_id,
+                rrf_score=rrf_scores.get(element_id),
             )
             for element_id in ranked_ids
         ]
@@ -98,13 +111,14 @@ class SearchSessionBuilder:
             dense=dense,
             exact_element_ids=exact_element_ids,
             ranked_count=len(catalog),
+            config=self.config,
         )
         session_id = "search-session:" + stable_digest(
             search_units.document_id,
             subquestion.subquestion_id,
             subquestion.text,
             search_units.index_version,
-            [match.target_id for match in exact_matches],
+            [match.model_dump(mode="json") for match in exact_matches],
             ranked_ids,
             self.config.model_dump(mode="json"),
         )
@@ -238,6 +252,28 @@ def _deduplicate_exact_matches(
     return result
 
 
+def _enrich_exact_match(
+    match: ExactAnchorMatch,
+    *,
+    bm25: BM25ElementCandidate | None,
+    dense: DenseElementCandidate | None,
+    rrf_score: float | None,
+) -> ExactAnchorMatch:
+    matched_by: list[RetrievalSource] = []
+    if bm25 is not None:
+        matched_by.append(RetrievalSource.BM25)
+    if dense is not None:
+        matched_by.append(RetrievalSource.DENSE)
+    return match.model_copy(
+        update={
+            "matched_by": matched_by,
+            "bm25_rank": bm25.bm25_rank if bm25 is not None else None,
+            "dense_rank": dense.dense_rank if dense is not None else None,
+            "rrf_score": rrf_score,
+        }
+    )
+
+
 def _round_robin_ids(
     bm25: list[BM25ElementCandidate],
     dense: list[DenseElementCandidate],
@@ -256,12 +292,63 @@ def _round_robin_ids(
     return result
 
 
+def _rank_candidate_ids(
+    *,
+    bm25: list[BM25ElementCandidate],
+    dense: list[DenseElementCandidate],
+    config: SearchSessionConfig,
+) -> tuple[list[str], dict[str, float]]:
+    if config.merge_policy == CandidateMergePolicy.ROUND_ROBIN_BM25_FIRST:
+        return _round_robin_ids(bm25, dense), {}
+    if config.merge_policy == CandidateMergePolicy.WEIGHTED_RRF:
+        return _weighted_rrf_ids(bm25=bm25, dense=dense, config=config)
+    raise ValueError(f"Unsupported candidate merge policy: {config.merge_policy}")
+
+
+def _weighted_rrf_ids(
+    *,
+    bm25: list[BM25ElementCandidate],
+    dense: list[DenseElementCandidate],
+    config: SearchSessionConfig,
+) -> tuple[list[str], dict[str, float]]:
+    scores: dict[str, float] = {}
+    best_rank: dict[str, int] = {}
+    page_number: dict[str, int] = {}
+    for candidates, weight in (
+        (bm25, config.bm25_weight),
+        (dense, config.dense_weight),
+    ):
+        for candidate in candidates:
+            rank = (
+                candidate.bm25_rank
+                if isinstance(candidate, BM25ElementCandidate)
+                else candidate.dense_rank
+            )
+            element_id = candidate.element_id
+            scores[element_id] = scores.get(element_id, 0.0) + weight / (
+                config.rrf_k + rank
+            )
+            best_rank[element_id] = min(best_rank.get(element_id, rank), rank)
+            page_number[element_id] = candidate.page_number
+    ordered = sorted(
+        scores,
+        key=lambda element_id: (
+            -scores[element_id],
+            best_rank[element_id],
+            page_number[element_id],
+            element_id,
+        ),
+    )
+    return ordered, scores
+
+
 def _session_candidate(
     *,
     element_id: str,
     bm25: BM25ElementCandidate | None,
     dense: DenseElementCandidate | None,
     units_by_id: dict[str, SearchUnit],
+    rrf_score: float | None,
 ) -> SessionCandidate:
     source_unit_id = (
         bm25.matched_search_unit_id if bm25 is not None
@@ -317,6 +404,7 @@ def _session_candidate(
         dense_match_end=(
             dense.matched_text_char_end if dense is not None else None
         ),
+        rrf_score=rrf_score,
     )
 
 
@@ -327,21 +415,25 @@ def _session_trace(
     dense: DenseSearchResult | None,
     exact_element_ids: set[str],
     ranked_count: int,
+    config: SearchSessionConfig,
 ) -> list[SearchSessionTraceEntry]:
     trace = [
         SearchSessionTraceEntry(
             code="candidate_ranking_created",
             description=(
-                "BM25 and Dense Element rankings were interleaved with stable "
-                "deduplication; their score scales were not mixed."
+                "BM25 and Dense Element rankings were merged with stable "
+                "Element deduplication."
             ),
             data={
-                "policy": "bm25_dense_round_robin",
+                "policy": config.merge_policy.value,
                 "bm25_candidates": len(bm25.candidates) if bm25 else 0,
                 "dense_candidates": len(dense.candidates) if dense else 0,
                 "ranked_candidates": ranked_count,
                 "exact_element_targets_excluded": len(exact_element_ids),
                 "fixed_final_top_k": False,
+                "rrf_k": config.rrf_k,
+                "bm25_weight": config.bm25_weight,
+                "dense_weight": config.dense_weight,
             },
         )
     ]
@@ -380,7 +472,8 @@ def _candidate_preview(
     config: SearchSessionConfig,
     units_by_id: dict[str, SearchUnit],
 ) -> CandidatePreview:
-    if RetrievalSource.BM25 in candidate.matched_by:
+    use_bm25 = _preview_uses_bm25(candidate, config)
+    if use_bm25:
         unit_id = candidate.bm25_search_unit_id
         offsets = candidate.bm25_matched_offsets
         anchor_start = min((offset.start for offset in offsets), default=0)
@@ -416,8 +509,26 @@ def _candidate_preview(
         matched_by=candidate.matched_by,
         bm25_rank=candidate.bm25_rank,
         dense_rank=candidate.dense_rank,
+        rrf_score=candidate.rrf_score,
         content_availability=candidate.content_availability,
     )
+
+
+def _preview_uses_bm25(
+    candidate: SessionCandidate,
+    config: SearchSessionConfig,
+) -> bool:
+    has_bm25 = RetrievalSource.BM25 in candidate.matched_by
+    has_dense = RetrievalSource.DENSE in candidate.matched_by
+    if not has_bm25:
+        return False
+    if not has_dense or config.merge_policy != CandidateMergePolicy.WEIGHTED_RRF:
+        return True
+    assert candidate.bm25_rank is not None
+    assert candidate.dense_rank is not None
+    bm25_contribution = config.bm25_weight / (config.rrf_k + candidate.bm25_rank)
+    dense_contribution = config.dense_weight / (config.rrf_k + candidate.dense_rank)
+    return bm25_contribution >= dense_contribution
 
 def _snippet_window(
     *,

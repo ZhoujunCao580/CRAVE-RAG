@@ -3,8 +3,8 @@
 Milestone 1 implements a parser-neutral Soft Document Structure for multimodal
 PDFs. The current retrieval milestone adds Exact Anchor Lookup, deterministic
 SearchUnits, BM25, injectable multilingual-E5 Dense retrieval, deterministic
-CandidatePreviews, and resumable SearchSessions. Retrieval state remains outside
-the SoftDoc model and does not expand Relations. Reader tools, RRF, Evidence
+CandidatePreviews, weighted-RRF ranking, and resumable SearchSessions. Retrieval
+state remains outside the SoftDoc model and does not expand Relations. Reader tools, Evidence
 Checker, LLM/VLM calls, and the Agent loop are not implemented yet.
 
 ## Windows local environment
@@ -210,6 +210,9 @@ python -m pytest -q
 
 The retrieval boundary and current status are documented in
 [`docs/RETRIEVAL_READING_V1_DESIGN.md`](docs/RETRIEVAL_READING_V1_DESIGN.md).
+The latest end-to-end audit, Hybrid decision, data models, and measured limits
+are in
+[`docs/END_TO_END_PIPELINE_AUDIT_20260811.md`](docs/END_TO_END_PIPELINE_AUDIT_20260811.md).
 The shared `SearchUnit` representation is used by both BM25 and Dense retrieval;
 it never copies Relation-neighbor text into the index.
 
@@ -231,8 +234,8 @@ Build or validate Dense indexes for the 14 representative SoftDocs:
 python scripts/build_representative_dense_index.py --device cuda
 ```
 
-Compare Exact, BM25, Dense, and the current non-RRF online candidate policy on
-the 142 local MMLongBench questions:
+Compare Exact, BM25, Dense, the old interleave baseline, and weighted RRF on
+the original 14-document development subset:
 
 ```powershell
 python scripts/evaluate_representative_retrieval.py --device cuda
@@ -247,21 +250,22 @@ without duplicating the original 14-document SoftDocs:
 
 ```powershell
 python scripts/build_representative_dense_index.py `
-  --softdoc-root data\processed\representative_14\softdoc_final `
-  --softdoc-root data\processed\representative_28_extension\softdoc_final `
-  --output-root data\processed\representative_28\retrieval_dense_e5 `
+  --softdoc-root data\processed\representative_14\softdoc_policy_v2 `
+  --softdoc-root data\processed\representative_28_extension\softdoc_policy_v2 `
+  --output-root data\processed\representative_28\retrieval_policy_v3 `
   --device cuda
 
 python scripts/evaluate_representative_retrieval.py `
-  --softdoc-root data\processed\representative_14\softdoc_final `
-  --softdoc-root data\processed\representative_28_extension\softdoc_final `
-  --output-root data\processed\representative_28\retrieval_dense_e5 `
+  --softdoc-root data\processed\representative_14\softdoc_policy_v2 `
+  --softdoc-root data\processed\representative_28_extension\softdoc_policy_v2 `
+  --output-root data\processed\representative_28\retrieval_policy_v3 `
+  --cache-root data\processed\representative_28\retrieval_policy_v2 `
   --device cuda
 ```
 
-The measured PDF-to-retrieval throughput, warm-query latency, strict Gold-page
-metrics, and navigation-aware interpretation are recorded in
-[`docs/REPRESENTATIVE_28_RETRIEVAL_REPORT.md`](docs/REPRESENTATIVE_28_RETRIEVAL_REPORT.md).
+The 2026-08-05 report is retained as a historical stable-interleave snapshot.
+Current weighted-RRF metrics are recorded in the end-to-end audit linked above
+and under `data/processed/representative_28/retrieval_policy_v3/evaluation/`.
 
 The Pipeline/Hybrid difficult-page comparison, the backend-aware minimal rule
 policy, the 28-document rebuild, and the retrieval regression audit are recorded

@@ -10,6 +10,7 @@ from softdoc.retrieval import (
     AnchorTargetType,
     BM25ElementCandidate,
     BM25SearchResult,
+    CandidateMergePolicy,
     DenseElementCandidate,
     DenseSearchResult,
     ExactAnchorMatch,
@@ -180,6 +181,11 @@ def test_session_keeps_exact_separate_and_merges_retrieval_sources() -> None:
     assert [item.target_id for item in session.exact_anchor_matches] == [
         "element:00"
     ]
+    exact_match = session.exact_anchor_matches[0]
+    assert exact_match.matched_by == [RetrievalSource.BM25, RetrievalSource.DENSE]
+    assert exact_match.bm25_rank == 1
+    assert exact_match.dense_rank == 2
+    assert exact_match.rrf_score is not None
     assert "element:00" not in session.ranked_candidate_ids
     assert len(session.ranked_candidate_ids) == 11
     assert len(set(session.ranked_candidate_ids)) == 11
@@ -196,7 +202,42 @@ def test_session_keeps_exact_separate_and_merges_retrieval_sources() -> None:
     assert merged.matched_by == [RetrievalSource.BM25, RetrievalSource.DENSE]
     assert merged.bm25_rank == 2
     assert merged.dense_rank == 4
+    assert merged.rrf_score is not None
     assert session.unresolved_anchors[0].normalized_label == "99"
+
+
+def test_round_robin_remains_an_explicit_reproducible_baseline() -> None:
+    units = _search_units()
+    session = SearchSessionBuilder(
+        SearchSessionConfig(
+            merge_policy=CandidateMergePolicy.ROUND_ROBIN_BM25_FIRST
+        )
+    ).create(
+        subquestion=_question(),
+        search_units=units,
+        exact=_exact(),
+        bm25=_bm25(units),
+        dense=_dense(units),
+    )
+
+    assert session.ranked_candidate_ids[:5] == [
+        "element:05",
+        "element:01",
+        "element:02",
+        "element:06",
+        "element:03",
+    ]
+    assert all(item.rrf_score is None for item in session.candidate_catalog)
+
+
+def test_default_candidate_policy_is_the_frozen_weighted_rrf_configuration() -> None:
+    config = SearchSessionConfig()
+
+    assert config.merge_policy == CandidateMergePolicy.WEIGHTED_RRF
+    assert config.rrf_k == 20
+    assert config.bm25_weight == 1.0
+    assert config.dense_weight == 1.25
+    assert config.batch_size == 5
 
 
 def test_batches_are_resumable_and_old_previews_remain_available() -> None:
@@ -319,6 +360,56 @@ def test_dense_only_preview_uses_the_best_dense_search_unit() -> None:
     assert preview.dense_rank == 1
     assert preview.bm25_rank is None
     assert "Candidate 5" in preview.matched_snippet
+
+
+def test_rrf_preview_uses_the_source_with_the_larger_rank_contribution() -> None:
+    units = _search_units(1)
+    original = units.units[0]
+    dense_unit = original.model_copy(
+        update={
+            "search_unit_id": "unit:00:dense",
+            "search_text": "Methods\nDense-specific semantic evidence.",
+            "content_text": "Dense-specific semantic evidence.",
+            "source_char_end": len("Dense-specific semantic evidence."),
+        }
+    )
+    units = units.model_copy(update={"units": [original, dense_unit]})
+    bm25 = _bm25(_search_units(1))
+    dense = DenseSearchResult(
+        subquestion_id="Q1",
+        document_id=DOCUMENT_ID,
+        index_version=INDEX_VERSION,
+        model_name="mock-e5",
+        total_search_units=2,
+        total_dense_segments=2,
+        total_candidates=1,
+        candidates=[
+            DenseElementCandidate(
+                element_id=original.element_id,
+                dense_score=0.99,
+                dense_rank=1,
+                matched_search_unit_id=dense_unit.search_unit_id,
+                matched_part=0,
+                matched_dense_segment_id="segment:dense",
+                matched_segment_index=0,
+                matched_text_char_start=0,
+                matched_text_char_end=len(dense_unit.search_text),
+                page_id=original.page_id,
+                page_number=original.page_number,
+                section_id=original.section_id,
+                element_type=original.element_type,
+            )
+        ],
+    )
+    session = SearchSessionBuilder().create(
+        subquestion=_question(), search_units=units, bm25=bm25, dense=dense
+    )
+
+    _, batch = SearchSessionNavigator(units).next_batch(session)
+    preview = batch.candidate_previews[0]
+
+    assert preview.matched_search_unit_id == dense_unit.search_unit_id
+    assert "Dense-specific" in preview.matched_snippet
 
 
 def test_session_identity_is_stable_and_input_mismatches_fail() -> None:

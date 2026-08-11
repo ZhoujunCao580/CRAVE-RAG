@@ -1,5 +1,10 @@
 # Representative-28 检索与耗时报告
 
+> 历史快照：本文记录 2026-08-05 的稳定轮转实验。当前在线候选策略已经由
+> 2026-08-11 的完整排名复验更新为 Exact 优先 + 加权 RRF。最新结论见
+> [`END_TO_END_PIPELINE_AUDIT_20260811.md`](END_TO_END_PIPELINE_AUDIT_20260811.md)，
+> 不应再用本文中的轮转数字描述当前默认系统。
+
 日期：2026-08-05
 
 本报告记录当前开发代表集从 14 份扩展到 28 份后的实际运行结果。该集合按
@@ -143,4 +148,3 @@ data/processed/representative_28/retrieval_dense_e5/evaluation/
   retrieval_summary.md
   retrieval_results.jsonl
 ```
-

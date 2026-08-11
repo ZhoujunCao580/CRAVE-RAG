@@ -15,12 +15,12 @@
 - 与文本、模型版本和索引版本绑定的 Embedding cache；
 - `CandidatePreview`：由命中 SearchUnit 确定性截取的轻量原文卡片；
 - `SearchSession`：保存完整候选顺序、cursor、已展示和已打开状态；
+- 加权 RRF：在 Element 级融合 BM25/Dense rank，默认 `k=20`、权重 `1.0/1.25`；
 - 默认每批 5 个候选，支持 JSON round-trip 后从下一批继续；
 - 28 份真实 SoftDoc 和 275 道 MMLongBench 问题上的离线评测。
 
 当前没有实现：
 
-- RRF 或其他分数融合；
 - `READ_ELEMENT`、`READ_PAGE`、`INSPECT_REGION`、`FOLLOW_RELATION`；
 - 子问题自动生成、Evidence State、Evidence Checker；
 - LLM/VLM 调用、Agent 循环和答案生成。
@@ -59,15 +59,14 @@ Exact 命中只是“从这里开始读”。例如问题同时提到 `Figure 3`
 SubQuestion
   -> BM25 完整 Element 排名
   -> Dense 完整 Element 排名
-  -> 保持两条来源，稳定轮转、Element 去重
-  -> 未来：是否加入 RRF 由实测决定
+  -> Weighted RRF、Element 去重
   -> SearchSession 每批返回少量 CandidatePreview
   -> 主 Reading Agent 选择 READ_ELEMENT
 ```
 
-当前轮转策略不混合 BM25 与 Dense 分数，也不是 RRF。它只用于测量真实在线
-“两条候选通道同时存在”时的入口覆盖。完整候选顺序保存在 SearchSession 中，
-默认只显示 5 条，但不存在固定最终 Top-k。
+RRF 只使用两个检索器内部的 Element rank，不直接相加 BM25 score 与 cosine score。
+稳定轮转仍保留为离线基线，不再是默认在线策略。完整候选顺序保存在
+SearchSession 中，默认只显示 5 条，但不存在固定最终 Top-k。
 
 ## 4. Exact Anchor Lookup
 
@@ -148,30 +147,29 @@ device 和 batch size 不改变向量语义，因此只记运行配置，不进�
 当前 JSON-per-vector 文件缓存适合研究原型且容易审计，但在 Windows 上小文件较多。
 扩大到全数据集前应改成批量二进制缓存；这属于工程优化，不改变检索语义。
 
-## 8. 当前无 RRF 的组合策略
+## 8. 当前加权 RRF 组合策略
 
-为避免在没有对比数据时提前加入融合，当前评测使用：
+28 文档的完整 Element 排名上比较了 BM25-only、Dense-only、两种轮转、多种比例轮转
+以及多个 RRF 参数。当前默认值为：
 
 ```text
-Exact handles（如有）
-  -> BM25 rank 1
-  -> Dense rank 1（若Element未出现）
-  -> BM25 rank 2
-  -> Dense rank 2（若Element未出现）
-  -> ...
+RRF_score(d) = 1.0 / (20 + bm25_rank(d))
+             + 1.25 / (20 + dense_rank(d))
 ```
 
-该顺序只代表未来分批 Preview 的一个简单基线：
+某一检索器没有找到该 Element 时，该路贡献为零。最终按 RRF score 降序；同分时按
+最佳源 rank、页码和稳定 Element ID 排序。它不会直接相加量纲不同的 BM25 score 与
+Dense cosine score。
 
-- 不比较 BM25 score 与 cosine score；
-- 不改变两个检索器内部排名；
-- 相同 Element 只出现一次；
-- 每个候选保留发现来源和原始 rank；
-- Exact 目标仍独立保存。
+选择目标优先考虑默认第一批 5 个 Preview 是否包含 Gold 页，再比较 MRR、Top-20，
+并检查原14份和新增14份文档上的方向是否一致。`k=20`、Dense权重1.25在完整排名上
+取得 Top-1 48.36%、Top-5 68.54%、Top-20 84.04%、MRR 0.5671，优于旧 Exact-first
+轮转的 43.66%、64.79%、82.16%、0.5403。稳定轮转保留为可复现实验基线。
 
-如果 Exact 命中，真实在线流程会先 READ 并 CHECK_EVIDENCE；普通候选只有在证据不足
-时才展示。离线的 `exact_first_dual` 指标表示“最终入口序列”的覆盖，不表示所有通道
-会在线同时执行。
+Exact handles 始终单独保存，不参与 RRF。在线时应先读取 unique Exact 目标；只有证据
+不足时才请求普通候选。离线评测把 Exact 放在 RRF 列表之前，只用于模拟最终入口覆盖。
+若 Exact Element 同时被 BM25/Dense 命中，它不会在普通候选重复；检索来源、各自 rank
+和 RRF score 作为审计元数据合并进 SearchSession 内的 Exact handle。
 
 ## 9. CandidatePreview 与 SearchSession
 
@@ -182,7 +180,9 @@ Relation 目标或任何自动生成结论。
 
 BM25 Preview 围绕 matched offsets 截取；Dense Preview 使用最佳 Dense SearchUnit 的
 命中字符范围。相同 Element 即使被 BM25 和 Dense 同时发现，也只占一个候选位置，
-但同时保存两个来源及各自 rank。Exact Element 目标保持单独返回，不在普通序列重复。
+但同时保存两个来源、各自 rank 与 RRF score。两路均命中时，Preview 选择对当前 RRF
+贡献更大的来源窗口，避免用很弱的 BM25 尾部命中覆盖强 Dense 语义片段。Exact Element
+目标保持单独返回，不在普通序列重复。
 
 `SearchSession` 是可 JSON 序列化的候选游标，保存：
 
@@ -199,28 +199,28 @@ SearchUnit index，就能从原 cursor 继续，也可以重新访问之前展�
 
 ## 10. 代表性评测快照
 
-数据：14 份 PDF、505 页、5860 Elements、142 道问题。其中 107 道提供 Gold 物理
-证据页；其余 35 道保留结果但不计证据页指标。Gold Element ID 不存在，因此以下是
+数据：28 份 PDF、1238 页、15985 Elements、275 道问题。其中 213 道提供 Gold 物理
+证据页；其余 62 道保留结果但不计证据页指标。Gold Element ID 不存在，因此以下是
 “候选是否来自 Gold 页”，不是答案准确率。
 
-| K | BM25 | Dense | 双通道轮转 | Exact优先+双通道 |
+| K | BM25 | Dense | Exact+旧轮转 | Exact+加权RRF |
 |---:|---:|---:|---:|---:|
-| 1 | 38.32% | 37.38% | 38.32% | 43.93% |
-| 5 | 63.55% | 57.94% | 68.22% | 69.16% |
-| 10 | 74.77% | 63.55% | 74.77% | 75.70% |
-| 20 | 85.05% | 77.57% | 83.18% | 84.11% |
-| 50 | 92.52% | 94.39% | 94.39% | 95.33% |
+| 1 | 38.03% | 37.56% | 43.66% | 48.36% |
+| 5 | 58.69% | 59.62% | 64.79% | 68.54% |
+| 10 | 68.08% | 69.95% | 72.77% | 74.65% |
+| 20 | 77.46% | 82.63% | 82.16% | 84.04% |
+| 50 | 84.51% | 92.49% | 92.96% | 92.96% |
 
-14 道问题含受支持 Anchor，其中 9 道有 Gold 页；9/9 的 Exact 目标位于 Gold 页。
-BM25 和 Dense 在 Top-5 分别有 17 和 11 道独有命中，证明存在互补性；但简单轮转在
-某些预算下会被较弱通道占位，不能自动获得 oracle union 的全部收益。
+25 道问题含受支持 Anchor，其中 18 道有 Gold 页；17/18 的 Exact 目标位于 Gold 页。
+BM25 和 Dense 在 Top-5 分别有 24 和 26 道独有命中，证明存在互补性；简单轮转在
+某些预算下会被较弱通道占位，加权RRF改善了第一批入口质量。
 这里的 oracle union@K 表示分别查看 BM25 前 K 和 Dense 前 K 后“任一命中”，最多
 检查 2K 个候选，只用于分析互补性，不是可部署的组合排名。
 
 评测产物：
 
 ```text
-data/processed/representative_14/retrieval_dense_e5/evaluation/
+data/processed/representative_28/retrieval_policy_v3/evaluation/
   retrieval_summary.md
   retrieval_summary.json
   retrieval_results.jsonl
@@ -228,12 +228,10 @@ data/processed/representative_14/retrieval_dense_e5/evaluation/
 
 ## 11. 下一步边界
 
-当前先不实现 RRF。合理的下一步是：
-
 1. 实现 `READ_ELEMENT`、`READ_PAGE`、`INSPECT_REGION` 和 `FOLLOW_RELATION`；
 2. 让 READ 后才暴露 confirmed Relation handles；
 3. 定义从实际读取结果产生的 Observation / Evidence State；
-4. 重新比较轮转、按页去重和未来 RRF，而不是直接假定某种融合最好；
+4. 在完整数据集上重新验证当前 RRF 参数，而不是继续在28份开发文档上调参；
 5. 最后接入子问题、Evidence Checker 与主 Agent 循环。
 
 Relation navigation 继续只属于 READ 之后的主动阅读阶段。

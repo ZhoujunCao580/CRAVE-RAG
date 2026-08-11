@@ -1,8 +1,8 @@
 # Soft-Structured Document Reading Agent：项目阶段日志
 
-> 更新日期：2026-08-04
-> 当前阶段：Milestone 1 已冻结；正在实现 Retrieval v1
-> 当前状态：14 份代表性真实 PDF 已完成 SoftDoc；Exact、SearchUnit、BM25 与 Dense 已实现并完成统一离线评测；尚未实现 Reader、Evidence Checker 和 Agent。
+> 更新日期：2026-08-11
+> 当前阶段：SoftDoc 与 Retrieval Entry 已冻结；正在进入 Reader 工具阶段
+> 当前状态：28 份代表性真实 PDF 已完成 SoftDoc；Exact、SearchUnit、BM25、Dense、加权RRF、CandidatePreview 与 SearchSession 已实现并统一评测；尚未实现 Reader、Evidence Checker 和 Agent。
 >
 > Retrieval and Reading v1 的当前边界与实测结果详见
 > [`RETRIEVAL_READING_V1_DESIGN.md`](RETRIEVAL_READING_V1_DESIGN.md)。
@@ -39,7 +39,6 @@
 
 当前明确没有实现：
 
-- RRF、CandidatePreview 和 SearchSession；
 - Reader 工具；
 - LLM 或 VLM 调用；
 - Agent 循环；
@@ -1196,3 +1195,31 @@ Reader 和答案生成，因此不能解释为最终 QA 准确率。
 
 本轮清理后完整测试套件为 180 个测试；没有删除仍覆盖核心模型、Pipeline、关系、
 空间查询、Exact、SearchUnit、BM25 或 Dense 行为的源码测试。
+
+## 25. 加权 RRF、SearchSession 与 CandidatePreview（2026-08-11）
+
+在 representative-28 的完整 Element 排名上重新比较稳定轮转和 5 组 RRF 参数后，
+默认候选策略由稳定轮转更新为：
+
+```text
+Exact handles 单独保留
+普通候选 RRF = 1.0 / (20 + bm25_rank) + 1.25 / (20 + dense_rank)
+```
+
+旧轮转仍作为可复现基线保留。当前 Exact + RRF 的 Gold 证据页入口命中为：
+Hit@1 48.36%、Hit@5 68.54%、Hit@10 74.65%、Hit@20 84.04%、Hit@50 92.96%。
+这不是答案准确率，也不是 Gold Element 指标。
+
+同时完成了可序列化 `SearchSession` 和确定性 `CandidatePreview`：候选完整排名不因
+默认 5 条展示批次而丢失，游标可继续取下一批，已经展示和打开的候选可追踪。
+Preview 只显示原始索引片段与位置，不包含完整 Element、Relation 目标、LLM 摘要或证据。
+
+困难页面的 Pipeline/Hybrid 严格配对检索只有 3 道可核验问题，两者 RRF Top-1 均为
+3/3，暂时没有证据证明 Hybrid 能提高检索；结合更高显存、耗时和生成视觉描述幻觉风险，
+当前继续以 Pipeline 为默认，Hybrid 仅保留为可选后端。
+
+完整边界、数据模型、风险与下一步见：
+[`END_TO_END_PIPELINE_AUDIT_20260811.md`](END_TO_END_PIPELINE_AUDIT_20260811.md)。
+
+冻结前验证：28/28 SoftDoc 引用完整性通过，193/193 pytest 通过，`compileall` 通过，
+`pip check` 未发现依赖冲突。

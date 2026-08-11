@@ -39,6 +39,11 @@ class AnchorTargetType(str, Enum):
     EQUATION = "equation"
 
 
+class RetrievalSource(str, Enum):
+    BM25 = "bm25"
+    DENSE = "dense"
+
+
 class SubQuestionInput(SoftDocModel):
     subquestion_id: str = Field(min_length=1)
     text: str = Field(min_length=1)
@@ -95,6 +100,22 @@ class ExactAnchorMatch(SoftDocModel):
     page_number: int = Field(ge=1)
     section_id: str | None = None
     resolution_method: str
+    matched_by: list[RetrievalSource] = Field(default_factory=list)
+    bm25_rank: int | None = Field(default=None, ge=1)
+    dense_rank: int | None = Field(default=None, ge=1)
+    rrf_score: float | None = Field(default=None, gt=0.0)
+
+    @model_validator(mode="after")
+    def validate_retrieval_metadata(self) -> Self:
+        if len(set(self.matched_by)) != len(self.matched_by):
+            raise ValueError("Exact Anchor retrieval sources must be unique")
+        if (self.bm25_rank is not None) != (RetrievalSource.BM25 in self.matched_by):
+            raise ValueError("Exact Anchor BM25 rank and source must appear together")
+        if (self.dense_rank is not None) != (RetrievalSource.DENSE in self.matched_by):
+            raise ValueError("Exact Anchor Dense rank and source must appear together")
+        if self.rrf_score is not None and not self.matched_by:
+            raise ValueError("Exact Anchor RRF score requires a retrieval source")
+        return self
 
 
 class ExactLookupTraceEntry(SoftDocModel):
@@ -383,15 +404,19 @@ class DenseSearchResult(SoftDocModel):
         return self
 
 
-class RetrievalSource(str, Enum):
-    BM25 = "bm25"
-    DENSE = "dense"
+class CandidateMergePolicy(str, Enum):
+    WEIGHTED_RRF = "weighted_rrf"
+    ROUND_ROBIN_BM25_FIRST = "round_robin_bm25_first"
 
 
 class SearchSessionConfig(SoftDocModel):
     batch_size: int = Field(default=5, ge=1)
     snippet_max_chars: int = Field(default=320, ge=40)
     snippet_context_chars: int = Field(default=80, ge=0)
+    merge_policy: CandidateMergePolicy = CandidateMergePolicy.WEIGHTED_RRF
+    rrf_k: int = Field(default=20, ge=1)
+    bm25_weight: float = Field(default=1.0, gt=0.0)
+    dense_weight: float = Field(default=1.25, gt=0.0)
 
     @model_validator(mode="after")
     def validate_snippet_window(self) -> Self:
@@ -423,6 +448,7 @@ class SessionCandidate(SoftDocModel):
     dense_search_unit_id: str | None = None
     dense_match_start: int | None = Field(default=None, ge=0)
     dense_match_end: int | None = Field(default=None, gt=0)
+    rrf_score: float | None = Field(default=None, gt=0.0)
 
     @model_validator(mode="after")
     def validate_sources(self) -> Self:
@@ -473,6 +499,7 @@ class CandidatePreview(SoftDocModel):
     matched_by: list[RetrievalSource] = Field(min_length=1)
     bm25_rank: int | None = Field(default=None, ge=1)
     dense_rank: int | None = Field(default=None, ge=1)
+    rrf_score: float | None = Field(default=None, gt=0.0)
     content_availability: ContentAvailability
 
     @model_validator(mode="after")

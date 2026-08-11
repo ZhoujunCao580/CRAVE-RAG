@@ -1,4 +1,4 @@
-"""Compare Exact, BM25, Dense, and a non-fused online candidate policy."""
+"""Compare Exact, BM25, Dense, baseline interleave, and weighted RRF."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from softdoc.retrieval import (
     ExactAnchorLookup,
     FileEmbeddingCache,
     HuggingFaceE5Encoder,
+    SearchSessionBuilder,
     SearchUnitBuilder,
     SubQuestionInput,
 )
@@ -53,6 +54,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--model-dir", type=Path, default=DEFAULT_MODEL_DIR)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
+    parser.add_argument(
+        "--cache-root",
+        type=Path,
+        help="Optional existing retrieval root whose embedding_cache should be reused.",
+    )
     parser.add_argument("--questions", type=Path, default=DEFAULT_QUESTIONS)
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     parser.add_argument("--batch-size", type=int, default=32)
@@ -80,7 +86,10 @@ def main(argv: list[str] | None = None) -> int:
         device=args.device,
         local_files_only=True,
     )
-    cache = FileEmbeddingCache(output_root / "embedding_cache")
+    cache_root = (
+        args.cache_root.resolve() if args.cache_root is not None else output_root
+    )
+    cache = FileEmbeddingCache(cache_root / "embedding_cache")
     exact_lookup = ExactAnchorLookup()
     by_document: dict[str, list[tuple[int, dict[str, object]]]] = defaultdict(list)
     for question_index, question in enumerate(questions):
@@ -128,6 +137,51 @@ def main(argv: list[str] | None = None) -> int:
             ]
             dual_entries = _round_robin(bm25_entries, dense_entries)
             exact_first_entries = _deduplicate_entries([*exact_entries, *dual_entries])
+            search_session = SearchSessionBuilder().create(
+                subquestion=question,
+                search_units=build_result,
+                exact=exact,
+                bm25=bm25,
+                dense=dense,
+            )
+            rrf_entries = [
+                {
+                    "candidate_id": candidate.element_id,
+                    "element_id": candidate.element_id,
+                    "page_number": candidate.page_number,
+                    "source": "weighted_rrf",
+                    "source_rank": rank,
+                    "target_type": candidate.element_type.value,
+                    "bm25_rank": candidate.bm25_rank,
+                    "dense_rank": candidate.dense_rank,
+                    "rrf_score": candidate.rrf_score,
+                }
+                for rank, candidate in enumerate(
+                    search_session.candidate_catalog, start=1
+                )
+            ]
+            exact_first_rrf_entries = _deduplicate_entries(
+                [*exact_entries, *rrf_entries]
+            )
+            rrf_variants = {
+                "rrf_equal_k60": _weighted_rrf_entries(
+                    bm25_entries, dense_entries, k=60, bm25_weight=1.0,
+                    dense_weight=1.0,
+                ),
+                "rrf_dense_1_25_k60": _weighted_rrf_entries(
+                    bm25_entries, dense_entries, k=60, bm25_weight=1.0,
+                    dense_weight=1.25,
+                ),
+                "rrf_dense_1_5_k60": _weighted_rrf_entries(
+                    bm25_entries, dense_entries, k=60, bm25_weight=1.0,
+                    dense_weight=1.5,
+                ),
+                "rrf_equal_k20": _weighted_rrf_entries(
+                    bm25_entries, dense_entries, k=20, bm25_weight=1.0,
+                    dense_weight=1.0,
+                ),
+                "rrf_dense_1_25_k20": rrf_entries,
+            }
             gold = set(gold_pages)
             bm25_top_50_ids = {
                 str(entry["candidate_id"]) for entry in bm25_entries[:50]
@@ -136,8 +190,7 @@ def main(argv: list[str] | None = None) -> int:
                 str(entry["candidate_id"]) for entry in dense_entries[:50]
             }
 
-            result_rows.append(
-                {
+            result_row = {
                     "question_index": question_index,
                     "doc_id": doc_id,
                     "doc_type": source.get("doc_type"),
@@ -169,8 +222,17 @@ def main(argv: list[str] | None = None) -> int:
                     "dense": _retriever_result(dense_entries, gold, elements),
                     "dual_round_robin": _entry_result(dual_entries, gold),
                     "exact_first_dual": _entry_result(exact_first_entries, gold),
+                    "weighted_rrf": _entry_result(rrf_entries, gold),
+                    "exact_first_weighted_rrf": _entry_result(
+                        exact_first_rrf_entries, gold
+                    ),
                 }
-            )
+            for name, entries in rrf_variants.items():
+                result_row[name] = _entry_result(entries, gold)
+                result_row[f"exact_first_{name}"] = _entry_result(
+                    _deduplicate_entries([*exact_entries, *entries]), gold
+                )
+            result_rows.append(result_row)
         print(
             f"{doc_id}: questions={len(by_document[doc_id])} "
             f"units={len(build_result.units)} "
@@ -249,6 +311,47 @@ def _round_robin(
             seen.add(candidate_id)
             result.append(entry)
     return result
+
+
+def _weighted_rrf_entries(
+    bm25: list[dict[str, object]],
+    dense: list[dict[str, object]],
+    *,
+    k: int,
+    bm25_weight: float,
+    dense_weight: float,
+) -> list[dict[str, object]]:
+    scores: dict[str, float] = {}
+    best_rank: dict[str, int] = {}
+    best_entry: dict[str, dict[str, object]] = {}
+    for entries, weight in ((bm25, bm25_weight), (dense, dense_weight)):
+        for fallback_rank, entry in enumerate(entries, start=1):
+            candidate_id = str(entry["candidate_id"])
+            rank = int(entry.get("source_rank") or fallback_rank)
+            scores[candidate_id] = scores.get(candidate_id, 0.0) + weight / (k + rank)
+            if rank < best_rank.get(candidate_id, 1_000_000):
+                best_rank[candidate_id] = rank
+                best_entry[candidate_id] = entry
+    return [
+        {
+            **best_entry[candidate_id],
+            "source": "weighted_rrf",
+            "source_rank": rank,
+            "rrf_score": scores[candidate_id],
+        }
+        for rank, candidate_id in enumerate(
+            sorted(
+                scores,
+                key=lambda item: (
+                    -scores[item],
+                    best_rank[item],
+                    int(best_entry[item]["page_number"]),
+                    item,
+                ),
+            ),
+            start=1,
+        )
+    ]
 
 
 def _deduplicate_entries(
@@ -374,7 +477,19 @@ def _summary(
 
     retrievers = {
         name: _metrics(evaluable, name)
-        for name in ("bm25", "dense", "dual_round_robin", "exact_first_dual")
+        for name in (
+            "bm25",
+            "dense",
+            "dual_round_robin",
+            "exact_first_dual",
+            "weighted_rrf",
+            "exact_first_weighted_rrf",
+            "exact_first_rrf_equal_k60",
+            "exact_first_rrf_dense_1_25_k60",
+            "exact_first_rrf_dense_1_5_k60",
+            "exact_first_rrf_equal_k20",
+            "exact_first_rrf_dense_1_25_k20",
+        )
     }
     complementarity: dict[str, dict[str, object]] = {}
     for k in K_VALUES:
@@ -400,8 +515,10 @@ def _summary(
             "generation is measured."
         ),
         "combination_policy": (
-            "Exact handles first, then BM25/Dense round-robin with Element "
-            "deduplication. Scores are not mixed and RRF is not used."
+            "The current online policy keeps Exact handles separate, then uses "
+            "weighted RRF over Element-level BM25 and Dense ranks with k=20, "
+            "BM25 weight=1.0 and Dense weight=1.25. The previous round-robin "
+            "policy remains in the report as a baseline."
         ),
         "complementarity_definition": (
             "Oracle union at K means BM25 top-K OR Dense top-K succeeds; it may "
@@ -488,7 +605,7 @@ def _timing_metrics(rows: list[dict[str, object]]) -> dict[str, object]:
 def _candidate_inspection_metrics(
     rows: list[dict[str, object]],
 ) -> dict[str, object]:
-    name = "exact_first_dual"
+    name = "exact_first_weighted_rrf"
     ranks = [
         int(row[name]["first_gold_page_rank"])
         for row in rows
@@ -501,7 +618,14 @@ def _candidate_inspection_metrics(
     ]
     duplicates = [int(row["duplicate_candidates_top_50"]) for row in rows]
     source_rank_distributions: dict[str, dict[str, object]] = {}
-    for retriever in ("bm25", "dense", "dual_round_robin", name):
+    for retriever in (
+        "bm25",
+        "dense",
+        "dual_round_robin",
+        "exact_first_dual",
+        "weighted_rrf",
+        name,
+    ):
         values = [
             int(row[retriever]["first_gold_page_rank"])
             for row in rows
@@ -513,7 +637,7 @@ def _candidate_inspection_metrics(
             "first_gold_page_rank": _distribution(values),
         }
     return {
-        "policy": "exact_first_then_bm25_dense_round_robin",
+        "policy": "exact_first_then_weighted_rrf",
         "preview_batch_size": PREVIEW_BATCH_SIZE,
         "questions_with_retrievable_gold_page": len(ranks),
         "questions_without_retrievable_gold_page": len(rows) - len(ranks),
@@ -590,15 +714,40 @@ def _summary_markdown(summary: dict[str, object]) -> str:
         "",
         "## Ranked entry retrieval",
         "",
-        "| K | BM25 | Dense | Dual round-robin | Exact-first + dual |",
-        "|---:|---:|---:|---:|---:|",
+        "| K | BM25 | Dense | Dual baseline | Exact+dual | Weighted RRF | Exact+RRF |",
+        "|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for k in K_VALUES:
         lines.append(
             f"| {k} | {retrievers['bm25']['hit_rate'][str(k)]:.4f} | "
             f"{retrievers['dense']['hit_rate'][str(k)]:.4f} | "
             f"{retrievers['dual_round_robin']['hit_rate'][str(k)]:.4f} | "
-            f"{retrievers['exact_first_dual']['hit_rate'][str(k)]:.4f} |"
+            f"{retrievers['exact_first_dual']['hit_rate'][str(k)]:.4f} | "
+            f"{retrievers['weighted_rrf']['hit_rate'][str(k)]:.4f} | "
+            f"{retrievers['exact_first_weighted_rrf']['hit_rate'][str(k)]:.4f} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Full-ranking RRF policy comparison (Exact-first)",
+            "",
+            "| Policy | Hit@1 | Hit@5 | Hit@20 | Hit@50 | MRR |",
+            "|---|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for name in (
+        "exact_first_rrf_equal_k60",
+        "exact_first_rrf_dense_1_25_k60",
+        "exact_first_rrf_dense_1_5_k60",
+        "exact_first_rrf_equal_k20",
+        "exact_first_rrf_dense_1_25_k20",
+    ):
+        item = retrievers[name]
+        label = name.removeprefix("exact_first_")
+        lines.append(
+            f"| {label} | {item['hit_rate']['1']:.4f} | "
+            f"{item['hit_rate']['5']:.4f} | {item['hit_rate']['20']:.4f} | "
+            f"{item['hit_rate']['50']:.4f} | {item['mrr']:.4f} |"
         )
     lines.extend(
         [
