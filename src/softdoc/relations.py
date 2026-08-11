@@ -8,7 +8,15 @@ from collections.abc import Iterable
 from typing import Any
 
 from softdoc.ids import relation_id, stable_digest
-from softdoc.labels import LabelRegistry, ReferenceTarget
+from softdoc.labels import (
+    LabelRegistry,
+    ReferenceTarget,
+    build_label_registry,
+    extract_label_number as _extract_label_number,
+    normalize_reference_number as _normalize_reference_number,
+    reference_kind_from_label as _reference_kind_from_label,
+    reference_number_parts as _reference_number_parts,
+)
 from softdoc.models import (
     Document,
     Element,
@@ -80,51 +88,6 @@ _REFERENCE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         re.compile(r"第\s*(?P<base>[0-9]+(?:\.[0-9]+)*)\s*节"),
     ),
 )
-
-_LABEL_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
-    "figure": (
-        re.compile(
-            rf"(?:Figure|Fig\.?)\s*(?P<base>[0-9]+)"
-            rf"(?:\s*(?:\(\s*(?P<paren_sub>{_SUBREFERENCE})\s*\)"
-            rf"|(?P<suffix_sub>{_SUBREFERENCE})))?(?![A-Za-z0-9_])",
-            re.IGNORECASE,
-        ),
-        re.compile(
-            rf"图\s*(?P<base>[0-9]+)"
-            rf"(?:\s*(?:\(\s*(?P<paren_sub>{_SUBREFERENCE})\s*\)"
-            rf"|(?P<suffix_sub>{_SUBREFERENCE})))?(?![A-Za-z0-9_])",
-            re.IGNORECASE,
-        ),
-    ),
-    "table": (
-        re.compile(
-            rf"Table\s*(?P<base>[0-9]+)"
-            rf"(?:\s*(?:\(\s*(?P<paren_sub>{_SUBREFERENCE})\s*\)"
-            rf"|(?P<suffix_sub>{_SUBREFERENCE})))?(?![A-Za-z0-9_])",
-            re.IGNORECASE,
-        ),
-        re.compile(
-            rf"表\s*(?P<base>[0-9]+)"
-            rf"(?:\s*(?:\(\s*(?P<paren_sub>{_SUBREFERENCE})\s*\)"
-            rf"|(?P<suffix_sub>{_SUBREFERENCE})))?(?![A-Za-z0-9_])",
-            re.IGNORECASE,
-        ),
-    ),
-    "section": (
-        re.compile(
-            r"^\s*(?P<base>[0-9]+(?:\.[0-9]+)*)"
-            r"(?=$|[^\d.]|\.(?!\d))"
-        ),
-        re.compile(r"第\s*(?P<base>[0-9]+(?:\.[0-9]+)*)\s*节"),
-    ),
-    "listing": (
-        re.compile(
-            r"Listing\s*(?P<base>[0-9]+)"
-            r"(?![A-Za-z0-9_])",
-            re.IGNORECASE,
-        ),
-    ),
-}
 
 _CODE_LIKE_TYPES = frozenset({ElementType.CODE, ElementType.ALGORITHM})
 
@@ -1196,131 +1159,10 @@ class RelationBuilder:
         self,
         caption_relations: Iterable[Relation],
     ) -> LabelRegistry:
-        targets = LabelRegistry(self.document)
-        for element in self.document.elements:
-            if element.reference_label:
-                kind = (
-                    _reference_kind_from_label(element.reference_label)
-                    or _element_reference_kind(element)
-                )
-                number = _extract_label_number(kind, element.reference_label) if kind else None
-                if kind and number:
-                    targets.add(
-                        kind=kind,
-                        number=number,
-                        target_id=element.element_id,
-                        resolution_rule="element_reference_label",
-                        label_source_id=element.element_id,
-                        label_text=element.reference_label,
-                        priority=100,
-                    )
-        for relation in caption_relations:
-            caption = self.elements.get(relation.source_id)
-            target = self.elements.get(relation.target_id)
-            if not caption or not target or not caption.text:
-                continue
-            kind = (
-                _reference_kind_from_label(caption.text)
-                or _element_reference_kind(target)
-            )
-            number = _extract_label_number(kind, caption.text) if kind else None
-            if kind and number:
-                targets.add(
-                    kind=kind,
-                    number=number,
-                    target_id=target.element_id,
-                    resolution_rule="caption_relation_label",
-                    label_source_id=caption.element_id,
-                    label_text=caption.text,
-                    priority=90,
-                )
-        for caption_candidate, target, kind, number in (
-            self._paragraph_caption_targets()
-        ):
-            targets.add(
-                kind=kind,
-                number=number,
-                target_id=target.element_id,
-                resolution_rule="paragraph_caption_layout_heuristic",
-                label_source_id=caption_candidate.element_id,
-                label_text=caption_candidate.text or "",
-                priority=70,
-            )
-        for section in self.document.sections:
-            number = _extract_label_number("section", section.title)
-            if number:
-                targets.add(
-                    kind="section",
-                    number=number,
-                    target_id=section.section_id,
-                    resolution_rule="section_title_number",
-                    label_source_id=section.heading_element_id,
-                    label_text=section.title,
-                    priority=100,
-                )
-        return targets
-
-    def _paragraph_caption_targets(
-        self,
-    ) -> list[tuple[Element, Element, str, str]]:
-        inferred: list[tuple[Element, Element, str, str]] = []
-        for candidate in self.document.elements:
-            if (
-                candidate.element_type != ElementType.PARAGRAPH
-                or not candidate.text
-                or candidate.bbox is None
-            ):
-                continue
-            label = _leading_caption_label(candidate.text)
-            if label is None:
-                continue
-            kind, number = label
-            target = self._nearest_visual_caption_target(candidate, kind)
-            if target is not None:
-                inferred.append((candidate, target, kind, number))
-        return inferred
-
-    def _nearest_visual_caption_target(
-        self,
-        caption_candidate: Element,
-        kind: str,
-    ) -> Element | None:
-        compatible_types = (
-            {ElementType.FIGURE, ElementType.CHART}
-            if kind == "figure"
-            else (
-                {ElementType.TABLE}
-                if kind == "table"
-                else {ElementType.CODE, ElementType.ALGORITHM}
-            )
+        return build_label_registry(
+            self.document,
+            caption_relations=caption_relations,
         )
-        candidates: list[tuple[float, int, Element]] = []
-        for target in self.document.elements:
-            if (
-                target.page_id != caption_candidate.page_id
-                or target.element_type not in compatible_types
-                or target.bbox is None
-            ):
-                continue
-            reading_gap = abs(
-                target.reading_order - caption_candidate.reading_order
-            )
-            if reading_gap > 3:
-                continue
-            vertical_gap = _normalized_vertical_gap(
-                caption_candidate,
-                target,
-            )
-            horizontal_overlap = _normalized_horizontal_overlap(
-                caption_candidate,
-                target,
-            )
-            if vertical_gap > 0.08 or horizontal_overlap < 0.25:
-                continue
-            candidates.append((vertical_gap, reading_gap, target))
-        if not candidates:
-            return None
-        return min(candidates, key=lambda item: (item[0], item[1]))[2]
 
     def build_cross_page_continuation_candidates(self) -> list[Relation]:
         relations: list[Relation] = []
@@ -2144,60 +1986,6 @@ def _compatible_target_types(source: Element) -> set[ElementType]:
     }
 
 
-def _element_reference_kind(element: Element) -> str | None:
-    if element.element_type in {
-        ElementType.FIGURE,
-        ElementType.CHART,
-        ElementType.CODE,
-        ElementType.ALGORITHM,
-    }:
-        return "figure"
-    if element.element_type == ElementType.TABLE:
-        return "table"
-    return None
-
-
-def _reference_kind_from_label(text: str) -> str | None:
-    for kind, patterns in _LABEL_PATTERNS.items():
-        if any(pattern.search(text) for pattern in patterns):
-            return kind
-    return None
-
-
-def _extract_label_number(kind: str, text: str) -> str | None:
-    for pattern in _LABEL_PATTERNS.get(kind, ()):
-        match = pattern.search(text)
-        if match:
-            number, _, _ = _reference_number_parts(match)
-            return number
-    return None
-
-
-def _reference_number_parts(
-    match: re.Match[str],
-) -> tuple[str, str, str | None]:
-    base_number = _normalize_reference_number(match.group("base"))
-    subreference = (
-        match.groupdict().get("paren_sub")
-        or match.groupdict().get("suffix_sub")
-    )
-    normalized_subreference = (
-        _normalize_subreference(subreference)
-        if subreference is not None
-        else None
-    )
-    number = (
-        f"{base_number}{normalized_subreference}"
-        if normalized_subreference is not None
-        else base_number
-    )
-    return number, base_number, normalized_subreference
-
-
-def _normalize_reference_number(number: str) -> str:
-    return number.strip().lower()
-
-
 def _additional_listing_references(
     text: str,
 ) -> list[tuple[str, str]]:
@@ -2213,30 +2001,6 @@ def _additional_listing_references(
             normalized = _normalize_reference_number(number)
             references.append((f"Listing {number}", normalized))
     return references
-
-
-def _normalize_subreference(value: str) -> str:
-    return (
-        re.sub(r"\s+", "", value)
-        .replace("\u2012", "-")
-        .replace("\u2013", "-")
-        .replace("\u2014", "-")
-        .lower()
-    )
-
-
-def _leading_caption_label(text: str) -> tuple[str, str] | None:
-    for kind in ("figure", "table", "listing"):
-        for pattern in _LABEL_PATTERNS[kind]:
-            match = pattern.match(text)
-            if match is None:
-                continue
-            remainder = text[match.end() :].lstrip()
-            if not remainder or remainder[0] not in ":：.。-\u2013\u2014":
-                continue
-            number, _, _ = _reference_number_parts(match)
-            return kind, number
-    return None
 
 
 def _looks_like_external_section_reference(

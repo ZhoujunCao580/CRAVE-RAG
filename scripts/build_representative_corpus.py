@@ -1,4 +1,4 @@
-"""Rebuild the 14-document representative corpus with the current pipeline."""
+"""Build a representative corpus and record SoftDoc conversion timings."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import argparse
 import json
 from pathlib import Path
 import sys
+import time
 
 from softdoc.adapters import MinerUAdapter
 from softdoc.models import Document
@@ -45,10 +46,19 @@ def main(argv: list[str] | None = None) -> int:
     for document_dir in sorted(
         path for path in input_root.iterdir() if path.is_dir()
     ):
-        artifact_dir = (
-            document_dir / "auto"
-            if (document_dir / "auto").is_dir()
-            else document_dir
+        document_started = time.perf_counter()
+        artifact_dir = next(
+            (
+                candidate
+                for candidate in (
+                    document_dir / "hybrid_auto",
+                    document_dir / "auto",
+                    document_dir,
+                )
+                if candidate.is_dir()
+                and any(candidate.glob("*_content_list_v2.json"))
+            ),
+            document_dir,
         )
         destination = output_root / document_dir.name
         reusable_page_assets: dict[int, Path] = {}
@@ -63,10 +73,12 @@ def main(argv: list[str] | None = None) -> int:
                         page.image_path
                     )
         adapter = MinerUAdapter()
+        pipeline_started = time.perf_counter()
         pipeline_result = SoftDocPipeline(adapter).run(
             artifact_dir,
             destination,
         )
+        pipeline_seconds = time.perf_counter() - pipeline_started
         document = pipeline_result.document
         for page in document.pages:
             if page.image_path is None:
@@ -88,11 +100,13 @@ def main(argv: list[str] | None = None) -> int:
                 "Run this script in the project environment with pypdfium2 "
                 "installed, or use --no-overlays explicitly."
             )
+        serialization_started = time.perf_counter()
         write_document(
             document,
             destination,
             render_overlays=not args.no_overlays,
         )
+        serialization_seconds = time.perf_counter() - serialization_started
         validation_errors = DocumentStore(document).validate_references()
         rows.append(
             {
@@ -113,6 +127,11 @@ def main(argv: list[str] | None = None) -> int:
                     "document_profile", {}
                 ).get("profile"),
                 "title": document.title,
+                "pipeline_seconds": round(pipeline_seconds, 6),
+                "serialization_seconds": round(serialization_seconds, 6),
+                "total_seconds": round(
+                    time.perf_counter() - document_started, 6
+                ),
             }
         )
         print(
@@ -127,6 +146,22 @@ def main(argv: list[str] | None = None) -> int:
         "successful": sum(not row["validation_errors"] for row in rows),
         "pages": sum(int(row["pages"]) for row in rows),
         "elements": sum(int(row["elements"]) for row in rows),
+        "timing": {
+            "pipeline_seconds": round(
+                sum(float(row["pipeline_seconds"]) for row in rows), 3
+            ),
+            "serialization_seconds": round(
+                sum(float(row["serialization_seconds"]) for row in rows), 3
+            ),
+            "total_seconds": round(
+                sum(float(row["total_seconds"]) for row in rows), 3
+            ),
+            "average_seconds_per_document": round(
+                sum(float(row["total_seconds"]) for row in rows) / len(rows), 3
+            )
+            if rows
+            else 0.0,
+        },
         "rows": rows,
     }
     (output_root / "build_summary.json").write_text(

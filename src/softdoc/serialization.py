@@ -63,6 +63,10 @@ def write_document(document: Document, output_dir: Path, *, render_overlays: boo
         document.metadata.get("document_profile", {}),
     )
     _write_json(
+        output_dir / "debug" / "page_label_decisions.json",
+        document.metadata.get("page_label_decisions", []),
+    )
+    _write_json(
         output_dir / "debug" / "section_resolution_decisions.json",
         document.metadata.get("section_resolution_decisions", []),
     )

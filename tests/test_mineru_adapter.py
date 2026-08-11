@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shutil
 
 import pytest
 from PIL import Image
@@ -45,6 +46,23 @@ def test_adapter_returns_raw_document_without_postprocessing(
     assert "section_resolution_decisions" not in document.metadata
 
 
+def test_hybrid_artifacts_use_minimal_structure_policy(
+    mineru_fixture_dir: Path,
+    tmp_path: Path,
+) -> None:
+    hybrid_dir = tmp_path / "hybrid_auto"
+    shutil.copytree(mineru_fixture_dir, hybrid_dir)
+
+    document = _parse_mineru(hybrid_dir, tmp_path / "hybrid_output")
+
+    assert document.metadata["parser_backend"] == "hybrid"
+    assert document.metadata["parser_capabilities"]["typed_lists"] is True
+    policy = document.metadata["heading_hierarchy"]
+    assert policy["strategy"] == "hybrid_parser_assisted_minimal_v1"
+    assert policy["legacy_element_normalizer_applied"] is False
+    assert document.metadata["element_normalization_decisions"] == []
+
+
 def test_slide_ocr_year_rule_does_not_change_contractions() -> None:
     corrected, corrections = ElementNormalizer._correct_slide_ocr(
         "we'll compare results from 'II, Oct 'I2, and in15"
@@ -80,7 +98,7 @@ def test_adapter_preserves_structure_and_raw_payload(parsed_document) -> None:
     assert paragraph.provenance.raw_payload["experimental_field"].startswith("retained")
 
 
-def test_parser_declared_header_footer_are_preserved_and_excluded(tmp_path: Path) -> None:
+def test_unique_parser_header_footer_are_signals_not_final_roles(tmp_path: Path) -> None:
     input_dir = tmp_path / "mineru_headers"
     input_dir.mkdir()
     layout = {
@@ -152,12 +170,19 @@ def test_parser_declared_header_footer_are_preserved_and_excluded(tmp_path: Path
         if element.metadata.get("repeated_region")
     ]
 
-    assert [element.text for element in marginal] == [
-        "Running header",
-        "Confidential",
-    ]
-    assert all(element.element_type == ElementType.PARAGRAPH for element in marginal)
-    assert all(element.section_id is None for element in marginal)
+    assert marginal == []
+    assert all(
+        element.element_type == ElementType.PARAGRAPH
+        for element in document.elements
+        if element.metadata.get("mineru_type")
+        in {"page_header", "page_footer"}
+    )
+    assert all(
+        element.section_id is None
+        for element in document.elements
+        if element.metadata.get("mineru_type")
+        in {"page_header", "page_footer"}
+    )
     local_label = next(
         element
         for element in document.elements
@@ -165,7 +190,7 @@ def test_parser_declared_header_footer_are_preserved_and_excluded(tmp_path: Path
     )
     assert local_label.metadata.get("repeated_region") is None
     assert len(document.sections) == 1
-    assert len(document.metadata["repeated_header_footer_decisions"]) == 2
+    assert len(document.metadata["repeated_header_footer_decisions"]) == 0
 
 
 def test_caption_footnote_and_reading_order(parsed_document) -> None:

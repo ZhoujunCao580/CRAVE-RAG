@@ -366,7 +366,8 @@ def test_page_header_mention_without_numbered_items_is_not_a_section() -> None:
     )
 
     assert [section.title for section in sections] == ["3 Evaluation"]
-    assert title.section_id == sections[0].section_id
+    assert title.section_id is None
+    assert body.section_id == sections[0].section_id
 
 
 def test_appendix_prompt_headings_share_the_same_parent() -> None:
@@ -558,7 +559,7 @@ def test_non_explicit_heading_inference_is_conservatively_capped_at_h3() -> None
     assert uncertain.evidence["conservative_max_inferred_level"] == 3
 
 
-def test_parser_header_text_excludes_repeated_branding_at_variable_positions() -> None:
+def test_parser_header_vote_does_not_exclude_same_text_at_body_positions() -> None:
     pages: list[Page] = []
     elements: list[Element] = []
     for page_index, y1 in enumerate([0.84, 0.52, 0.68]):
@@ -587,12 +588,22 @@ def test_parser_header_text_excludes_repeated_branding_at_variable_positions() -
     result = HeadingHierarchyBuilder().build("doc:test", pages, elements)
     sections = SectionBuilder().build("doc:test", pages, elements)
 
-    assert len(detected.decisions) == 6
-    assert sections == []
-    assert sum(
+    assert len(detected.decisions) == 3
+    assert all(
+        element.metadata.get("repeated_region") == "page_header"
+        for element in elements
+        if element.metadata.get("mineru_type") == "page_header"
+    )
+    assert len(sections) == 3
+    assert all(
+        element.metadata.get("repeated_region") is None
+        for element in elements
+        if element.element_type == ElementType.HEADING
+    )
+    assert not any(
         item.action == HeadingAction.EXCLUDED_REPEATED_REGION
         for item in result.decisions
-    ) == 3
+    )
 
 
 def test_gpl_brochure_indentation_is_only_a_fallback_signal() -> None:

@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .agents/
+.runlogs/
 .coverage
 *.egg-info/
 data/raw/

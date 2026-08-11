@@ -72,6 +72,7 @@ _KNOWN_BLOCK_KEYS = {
     "column_index",
     "metadata",
     "text",
+    "sub_type",
     "img_path",
     "image_path",
 }
@@ -125,6 +126,7 @@ class MinerUAdapter:
 
     def __init__(self) -> None:
         self.warnings: list[dict[str, Any]] = []
+        self.backend: str = "pipeline"
 
     def parse(self, input_path: Path, output_dir: Path) -> Document:
         input_path = Path(input_path)
@@ -136,6 +138,7 @@ class MinerUAdapter:
         layout_path, content_bbox_coordinate_system = self._find_layout_path(input_path)
         layout = self._load_json(layout_path)
         content_payload = self._load_json(content_path)
+        self.backend = self._detect_backend(input_path, content_payload)
         layout_pages = self._layout_pages(layout)
         content_pages = self._content_pages(content_payload)
 
@@ -203,7 +206,20 @@ class MinerUAdapter:
                     reading_order=ordered_ids,
                     image_path=page_image,
                     provenance=page_provenance,
-                    metadata={"source_page_index": current_page_index},
+                    metadata={
+                        "source_page_index": current_page_index,
+                        # Preserve MinerU's page-number blocks as parser
+                        # signals without promoting them to content Elements
+                        # or deciding whether they are trustworthy labels.
+                        "parser_page_label_signals": self._page_label_signals(
+                            doc_id=doc_id,
+                            page_index=current_page_index,
+                            page_width=width,
+                            page_height=height,
+                            blocks=blocks,
+                            coordinate_system=content_bbox_coordinate_system,
+                        ),
+                    },
                 )
             )
 
@@ -229,12 +245,84 @@ class MinerUAdapter:
             provenance=doc_provenance,
             metadata={
                 "adapter": self.adapter_name,
+                "parser_backend": self.backend,
+                "parser_capabilities": {
+                    "vlm_visual_description": self.backend == "hybrid",
+                    "typed_lists": self.backend == "hybrid",
+                    "visual_subtypes": self.backend == "hybrid",
+                },
                 "adapter_warnings": self.warnings,
                 "summary_generation": "disabled",
                 "keyword_generation": "disabled",
             },
         )
         return document
+
+    @staticmethod
+    def _detect_backend(input_path: Path, content_payload: Any) -> str:
+        """Identify MinerU's parser family without leaking it into core models.
+
+        The output directory name is the most reliable signal produced by the
+        current MinerU CLI.  ``sub_type`` is a fallback for copied/renamed
+        Hybrid artifacts.
+        """
+
+        if "hybrid" in input_path.name.casefold():
+            return "hybrid"
+
+        pending: list[Any] = [content_payload]
+        inspected = 0
+        while pending and inspected < 500:
+            value = pending.pop()
+            inspected += 1
+            if isinstance(value, dict):
+                if value.get("sub_type") is not None:
+                    return "hybrid"
+                pending.extend(value.values())
+            elif isinstance(value, list):
+                pending.extend(value[:100])
+        return "pipeline"
+
+    def _page_label_signals(
+        self,
+        *,
+        doc_id: str,
+        page_index: int,
+        page_width: float,
+        page_height: float,
+        blocks: list[dict[str, Any]],
+        coordinate_system: str,
+    ) -> list[dict[str, Any]]:
+        """Faithfully retain parser page-number blocks for a later pass."""
+
+        signals: list[dict[str, Any]] = []
+        for block_index, block in enumerate(blocks):
+            if str(block.get("type") or "").strip().casefold() != "page_number":
+                continue
+            content = block.get("content")
+            if not isinstance(content, dict):
+                content = {}
+            text = _spans_text(
+                content.get("page_number_content", block.get("text"))
+            )
+            owner_id = f"{doc_id}:page:{page_index:04d}:page-label:{block_index:04d}"
+            bbox = self._bbox(
+                owner_id=owner_id,
+                raw_bbox=block.get("bbox"),
+                page_width=page_width,
+                page_height=page_height,
+                context=f"page[{page_index}].block[{block_index}].page_number",
+                coordinate_system=coordinate_system,
+            )
+            signals.append(
+                {
+                    "text": text,
+                    "normalized_bbox": list(bbox.normalized) if bbox else None,
+                    "source_locator": f"page[{page_index}].block[{block_index}]",
+                    "raw_payload": block,
+                }
+            )
+        return signals
 
     def _parse_page_elements(
         self,
@@ -409,6 +497,21 @@ class MinerUAdapter:
         )
         metadata = dict(block.get("metadata") or {})
         metadata["mineru_type"] = raw_type
+        metadata["parser_backend"] = self.backend
+        block_sub_type = block.get("sub_type")
+        if block_sub_type is not None:
+            metadata["mineru_sub_type"] = str(block_sub_type)
+        if (
+            self.backend == "hybrid"
+            and element_type in {ElementType.FIGURE, ElementType.CHART}
+            and bool((text or "").strip())
+        ):
+            # MinerU Hybrid's visual body is VLM-generated.  Preserve it for a
+            # later visual read, but do not silently treat it like OCR/native
+            # text in deterministic retrieval.
+            metadata["text_source"] = "vlm_generated_visual_description"
+            metadata["retrieval_text_status"] = "unverified"
+            metadata["generated_visual_text"] = True
         if layout_block:
             if layout_block.get("score") is not None:
                 metadata["parser_score"] = layout_block["score"]

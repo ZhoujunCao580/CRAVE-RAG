@@ -9,6 +9,7 @@ from softdoc.coverage import CoverageRecoveryResult
 from softdoc.pipeline import (
     CoverageRecoveryPass,
     FloatingSectionPass,
+    PageLabelPass,
     PassContext,
     RelationPass,
     RuleAuditPass,
@@ -21,6 +22,7 @@ from softdoc.pipeline import (
 def _passes():
     return (
         CoverageRecoveryPass(),
+        PageLabelPass(),
         StructurePass(),
         RelationPass(),
         FloatingSectionPass(),
@@ -46,6 +48,7 @@ def test_pipeline_is_the_only_full_orchestration_entry(
     assert result.document.relations
     assert [report.name for report in result.pass_reports] == [
         "coverage_recovery",
+        "page_label_resolver",
         "document_structure",
         "relation_builder",
         "floating_section_resolver",

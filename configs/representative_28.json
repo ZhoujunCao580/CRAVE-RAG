@@ -1,0 +1,100 @@
+{
+  "name": "representative_28_dev",
+  "purpose": "A deliberately balanced development corpus with four documents from each MMLongBench-Doc document type. It is not a held-out benchmark split.",
+  "source": "yubo2333/MMLongBench-Doc",
+  "existing_documents": [
+    "2023.acl-long.386.pdf",
+    "2024.ug.eprospectus.pdf",
+    "2210.02442v1.pdf",
+    "936c0e2c2e6c8e0c07c51bfaf7fd0a83.pdf",
+    "afe620b9beac86c1027b96d31d396407.pdf",
+    "bigdatatrends-120723191058-phpapp02_95.pdf",
+    "catvsdogdlpycon15se-150512122612-lva1-app6891_95.pdf",
+    "COSTCO_2021_10K.pdf",
+    "DSA-278777.pdf",
+    "e79deb02a0c0e87511080836c5d4347b.pdf",
+    "earthlinkweb-150213112111-conversion-gate02_95.pdf",
+    "GPL-Graduate-Studies-Professional-Learning-Brochure-Jul-2021.pdf",
+    "Independents-Report.pdf",
+    "Macbook_air.pdf"
+  ],
+  "extension_documents": [
+    {
+      "doc_id": "2005.12872v3.pdf",
+      "doc_type": "Academic paper",
+      "selection_reason": "Long academic paper with equations, figures, tables and cross-page questions."
+    },
+    {
+      "doc_id": "2311.16502v3.pdf",
+      "doc_type": "Academic paper",
+      "selection_reason": "Academic paper with the largest question count among the remaining papers."
+    },
+    {
+      "doc_id": "0b85477387a9d0cc33fca0f4becaa0e5.pdf",
+      "doc_type": "Administration/Industry file",
+      "selection_reason": "Visually dense administration/industry document."
+    },
+    {
+      "doc_id": "3276a5b991c49cf5f9a4af0f7d6fce67.pdf",
+      "doc_type": "Administration/Industry file",
+      "selection_reason": "Different administration/industry layout and compact PDF size."
+    },
+    {
+      "doc_id": "2021-Apple-Catalog.pdf",
+      "doc_type": "Brochure",
+      "selection_reason": "Image-heavy product catalogue with sparse page text."
+    },
+    {
+      "doc_id": "NUS-Business-School-BBA-Brochure-2024.pdf",
+      "doc_type": "Brochure",
+      "selection_reason": "Multi-column education brochure with mixed text and graphics."
+    },
+    {
+      "doc_id": "AMAZON_2017_10K.pdf",
+      "doc_type": "Financial report",
+      "selection_reason": "Long financial report with repeated and continued tables."
+    },
+    {
+      "doc_id": "BESTBUY_2023_10K.pdf",
+      "doc_type": "Financial report",
+      "selection_reason": "Long financial report with table-heavy questions."
+    },
+    {
+      "doc_id": "91521110100M_4K_UHD_Display_User_Manual_V1.1.pdf",
+      "doc_type": "Guidebook",
+      "selection_reason": "Hardware manual with diagrams, warnings and procedural lists."
+    },
+    {
+      "doc_id": "t480_ug_en.pdf",
+      "doc_type": "Guidebook",
+      "selection_reason": "Long device guidebook that stress-tests hierarchy and page scale."
+    },
+    {
+      "doc_id": "PG_2020.05.21_International-Cooperation-COVID_FINAL.pdf",
+      "doc_type": "Research report / Introduction",
+      "selection_reason": "Research report with charts and survey-style layouts."
+    },
+    {
+      "doc_id": "PIP_Seniors-and-Tech-Use_040314.pdf",
+      "doc_type": "Research report / Introduction",
+      "selection_reason": "Long research report with repeated headers, charts and tables."
+    },
+    {
+      "doc_id": "0e94b4197b10096b1f4c699701570fbf.pdf",
+      "doc_type": "Tutorial/Workshop",
+      "selection_reason": "Replacement slide/tutorial document selected after the original genetics deck repeatedly hung MinerU 3.4.4 on Windows."
+    },
+    {
+      "doc_id": "disciplined-agile-business-analysis-160218012713_95.pdf",
+      "doc_type": "Tutorial/Workshop",
+      "selection_reason": "Text-heavy workshop slides with lists, diagrams and repeated headers."
+    }
+  ],
+  "excluded_after_parser_probe": [
+    {
+      "doc_id": "chapter8-geneticscompatibilitymode-141214140247-conversion-gate02_95.pdf",
+      "doc_type": "Tutorial/Workshop",
+      "reason": "MinerU 3.4.4 pipeline hung after initial processing with both auto and txt methods on Windows; no output document was produced."
+    }
+  ]
+}

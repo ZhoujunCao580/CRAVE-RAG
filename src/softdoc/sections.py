@@ -12,6 +12,15 @@ from softdoc.models import Element, ElementType, Page, RelationSource, Section
 class SectionBuilder:
     """Create a section tree without making heading-classification decisions."""
 
+    def __init__(
+        self,
+        *,
+        allow_caption_anchors: bool = True,
+        allow_terminal_checklist: bool = True,
+    ) -> None:
+        self.allow_caption_anchors = allow_caption_anchors
+        self.allow_terminal_checklist = allow_terminal_checklist
+
     def build(
         self,
         document_id: str,
@@ -19,10 +28,14 @@ class SectionBuilder:
         elements: list[Element],
     ) -> list[Section]:
         page_indexes = {page.page_id: page.page_index for page in pages}
-        terminal_checklist_anchor = self._terminal_checklist_anchor(
-            pages,
-            elements,
-            page_indexes,
+        terminal_checklist_anchor = (
+            self._terminal_checklist_anchor(
+                pages,
+                elements,
+                page_indexes,
+            )
+            if self.allow_terminal_checklist
+            else None
         )
         ordered = sorted(
             elements,
@@ -48,10 +61,27 @@ class SectionBuilder:
         for element in ordered:
             hierarchy = element.metadata.get("heading_hierarchy", {})
             repeated_region = element.metadata.get("repeated_region")
+            parser_marginal_type = str(
+                element.metadata.get("mineru_type") or ""
+            ).casefold()
             if (
                 hierarchy.get("action") == HeadingAction.DOCUMENT_TITLE.value
                 or repeated_region in {"page_header", "page_footer"}
                 or element.metadata.get("excluded_from_section_hierarchy") is True
+            ):
+                continue
+
+            # A unique parser-labelled margin block is preserved as an
+            # Element, but it is not automatically attached to whichever
+            # semantic Section happens to be active on that page.  Repetition
+            # decides whether it is confirmed running furniture; a real title
+            # must be emitted/promoted as a Heading before it can own a
+            # Section.  This keeps an uncertain parser signal from polluting
+            # every SearchUnit's section-path context.
+            if (
+                element.element_type != ElementType.HEADING
+                and parser_marginal_type
+                in {"page_header", "header", "page_footer", "footer"}
             ):
                 continue
 
@@ -83,10 +113,14 @@ class SectionBuilder:
                 element.section_path = path
                 continue
 
-            caption_section_title = self._functional_caption_section_title(
-                element,
-                elements_by_id,
-                normalized_heading_titles,
+            caption_section_title = (
+                self._functional_caption_section_title(
+                    element,
+                    elements_by_id,
+                    normalized_heading_titles,
+                )
+                if self.allow_caption_anchors
+                else None
             )
             if caption_section_title is not None:
                 is_financial_statement = bool(

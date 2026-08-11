@@ -1,10 +1,11 @@
 # Soft-Structured Document Reading Agent
 
 Milestone 1 implements a parser-neutral Soft Document Structure for multimodal
-PDFs. It contains Pydantic models, a MinerU adapter, deterministic relation
-builders, spatial navigation, validation, serialization, debug overlays, and a
-small CLI. It intentionally contains no retrieval, embeddings, model calls, or
-agent loop.
+PDFs. The current retrieval milestone adds Exact Anchor Lookup, deterministic
+SearchUnits, BM25, and injectable multilingual-E5 Dense retrieval. Retrieval
+state remains outside the SoftDoc model and does not expand Relations. Reader
+tools, CandidatePreview/SearchSession, RRF, Evidence Checker, LLM/VLM calls,
+and the Agent loop are not implemented yet.
 
 ## Windows local environment
 
@@ -204,6 +205,61 @@ python -m pip check
 python -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 python -m pytest -q
 ```
+
+## Retrieval prototype
+
+The retrieval boundary and current status are documented in
+[`docs/RETRIEVAL_READING_V1_DESIGN.md`](docs/RETRIEVAL_READING_V1_DESIGN.md).
+The shared `SearchUnit` representation is used by both BM25 and Dense retrieval;
+it never copies Relation-neighbor text into the index.
+
+The local E5 model is stored outside Git at:
+
+```text
+data/cache/huggingface/intfloat--multilingual-e5-small/
+```
+
+Build or validate Dense indexes for the 14 representative SoftDocs:
+
+```powershell
+python scripts/build_representative_dense_index.py --device cuda
+```
+
+Compare Exact, BM25, Dense, and the current non-RRF online candidate policy on
+the 142 local MMLongBench questions:
+
+```powershell
+python scripts/evaluate_representative_retrieval.py --device cuda
+```
+
+The evaluation uses Gold physical pages as an approximation because the local
+benchmark does not provide Gold Element IDs. It measures retrieval entry recall,
+not answer accuracy.
+
+The expanded development corpus contains 28 documents. Build and evaluate it
+without duplicating the original 14-document SoftDocs:
+
+```powershell
+python scripts/build_representative_dense_index.py `
+  --softdoc-root data\processed\representative_14\softdoc_final `
+  --softdoc-root data\processed\representative_28_extension\softdoc_final `
+  --output-root data\processed\representative_28\retrieval_dense_e5 `
+  --device cuda
+
+python scripts/evaluate_representative_retrieval.py `
+  --softdoc-root data\processed\representative_14\softdoc_final `
+  --softdoc-root data\processed\representative_28_extension\softdoc_final `
+  --output-root data\processed\representative_28\retrieval_dense_e5 `
+  --device cuda
+```
+
+The measured PDF-to-retrieval throughput, warm-query latency, strict Gold-page
+metrics, and navigation-aware interpretation are recorded in
+[`docs/REPRESENTATIVE_28_RETRIEVAL_REPORT.md`](docs/REPRESENTATIVE_28_RETRIEVAL_REPORT.md).
+
+The Pipeline/Hybrid difficult-page comparison, the backend-aware minimal rule
+policy, the 28-document rebuild, and the retrieval regression audit are recorded
+in [`docs/HYBRID_MINIMAL_POLICY_AUDIT.md`](docs/HYBRID_MINIMAL_POLICY_AUDIT.md).
 
 The package targets Python 3.11+ and the core code uses portable
 `pathlib.Path` paths.

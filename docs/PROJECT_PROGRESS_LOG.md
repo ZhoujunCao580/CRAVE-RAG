@@ -1,8 +1,11 @@
 # Soft-Structured Document Reading Agent：项目阶段日志
 
-> 更新日期：2026-07-29  
-> 当前阶段：Milestone 1——Soft Document Structure  
-> 当前状态：14 份代表性真实 PDF 已完成 MinerU 解析、SoftDoc 转换、关系构建与逐页调试输出；尚未进入检索和 Agent 阶段。
+> 更新日期：2026-08-04
+> 当前阶段：Milestone 1 已冻结；正在实现 Retrieval v1
+> 当前状态：14 份代表性真实 PDF 已完成 SoftDoc；Exact、SearchUnit、BM25 与 Dense 已实现并完成统一离线评测；尚未实现 Reader、Evidence Checker 和 Agent。
+>
+> Retrieval and Reading v1 的当前边界与实测结果详见
+> [`RETRIEVAL_READING_V1_DESIGN.md`](RETRIEVAL_READING_V1_DESIGN.md)。
 
 ## 1. 这份日志的用途
 
@@ -31,12 +34,13 @@
 5. 显式维护证据是否充分；
 6. 输出答案、证据引用和行动轨迹。
 
-但当前只实现第一个里程碑：**与具体解析器解耦的 Soft Document Structure 中间表示**。
+第一个里程碑——**与具体解析器解耦的 Soft Document Structure 中间表示**——已经冻结。
+当前正在其外部实现 Retrieval v1；检索状态不回写 SoftDoc。
 
 当前明确没有实现：
 
-- 检索；
-- embedding；
+- RRF、CandidatePreview 和 SearchSession；
+- Reader 工具；
 - LLM 或 VLM 调用；
 - Agent 循环；
 - Evidence Checker；
@@ -1107,6 +1111,11 @@ Milestone 1 已形成一个可交接的研究原型：
 
 当前应停止在这里，不继续实现检索、embedding、Agent、LLM/VLM 或模型训练。
 
+> **后续决策说明：** 上述内容记录的是 Milestone 1 当时的暂停点。
+> 2026-08-04 已完成 Exact、SearchUnit、BM25 和 Dense，并将 Relation navigation
+> 明确放在 READ 之后，而不是 SEARCH 阶段自动扩展。当前边界以
+> [`RETRIEVAL_READING_V1_DESIGN.md`](RETRIEVAL_READING_V1_DESIGN.md) 为准。
+
 ## 23. 常用入口
 
 激活环境：
@@ -1136,6 +1145,12 @@ softdoc validate OUTPUT_DIR
 data/processed/representative_14/softdoc_final/
 ```
 
+运行统一检索评测：
+
+```powershell
+python scripts/evaluate_representative_retrieval.py --device cuda
+```
+
 最重要的人工检查入口：
 
 ```text
@@ -1146,3 +1161,38 @@ debug/document_outline.md
 debug/heading_decisions.json
 debug/section_resolution_decisions.json
 ```
+
+## 24. Retrieval v1 实现与评测（2026-08-04）
+
+Milestone 1 冻结后，检索代码放在独立的 `softdoc.retrieval` 包中，没有修改
+SoftDoc 语义规则或 Relation 状态。当前实现：
+
+- Exact Anchor Lookup；
+- 模型无关 SearchUnitBuilder；
+- BM25 Element 排名；
+- 可注入 Encoder 的 multilingual-E5 Dense 排名；
+- E5 512-token 无损分片保护；
+- 与文本、模型、tokenizer 和索引版本绑定的 Embedding cache。
+
+真实运行覆盖 14 份 PDF、505 页、5860 Elements，生成 5242 SearchUnits 和
+5265 DenseSegments。仅 23 个 SearchUnit 需要 E5 内部二次切分，没有静默截断。
+
+在 142 道对应的 MMLongBench 问题中，107 道提供 Gold 物理证据页。统一评测结果：
+
+| K | BM25 | Dense | 双通道轮转 | Exact优先+双通道 |
+|---:|---:|---:|---:|---:|
+| 1 | 38.32% | 37.38% | 38.32% | 43.93% |
+| 5 | 63.55% | 57.94% | 68.22% | 69.16% |
+| 10 | 74.77% | 63.55% | 74.77% | 75.70% |
+| 20 | 85.05% | 77.57% | 83.18% | 84.11% |
+| 50 | 92.52% | 94.39% | 94.39% | 95.33% |
+
+Exact 共识别 14 道 Anchor 问题，其中 9 道有 Gold 页，Gold 页命中为 9/9。
+BM25 与 Dense 存在明显互补，但简单轮转不能在所有预算下超过最佳单通道，因此
+暂不实现 RRF，先保留两条来源并研究 CandidatePreview 与批次策略。
+
+这些指标只表示候选是否来自 Gold 页。数据集没有 Gold Element ID，当前也没有
+Reader 和答案生成，因此不能解释为最终 QA 准确率。
+
+本轮清理后完整测试套件为 180 个测试；没有删除仍覆盖核心模型、Pipeline、关系、
+空间查询、Exact、SearchUnit、BM25 或 Dense 行为的源码测试。

@@ -278,6 +278,14 @@ def recover_pdf_text_layer_coverage(
     return PdfTextLayerCoverageRecovery(source_pdf).recover(document)
 
 
+def extract_pdf_text_lines(
+    source_pdf: str | Path,
+) -> dict[int, list[PdfTextLine]]:
+    """Read native PDF text lines without applying coverage recovery."""
+
+    return PdfTextLayerCoverageRecovery(source_pdf)._extract_lines()
+
+
 def _lines_from_textpage(
     page_index: int,
     textpage: object,

@@ -67,22 +67,37 @@ class SoftDocumentStructureBuilder:
         self.section_builder = section_builder or SectionBuilder()
 
     def apply(self, document: Document) -> StructureBuildResult:
+        parser_backend = str(
+            document.metadata.get("parser_backend") or "pipeline"
+        ).casefold()
+        trusted_parser_types = parser_backend == "hybrid"
         profile = self.profile_detector.detect(
             document.pages,
             document.elements,
             source_path=document.source_path,
         )
-        normalization_decisions = self.element_normalizer.normalize(
-            document,
-            profile.profile,
-        )
-        repeated = self.repeated_region_detector.detect(
-            document.pages, document.elements
-        )
+        if trusted_parser_types:
+            # Hybrid already supplies stronger title/list/visual typing.  Do
+            # not run the legacy document-specific repair catalogue on top of
+            # it; preserve parser output and apply only generic structure
+            # checks below.
+            normalization_decisions = []
+            repeated = self.repeated_region_detector.detect(
+                document.pages, document.elements
+            )
+        else:
+            normalization_decisions = self.element_normalizer.normalize(
+                document,
+                profile.profile,
+            )
+            repeated = self.repeated_region_detector.detect(
+                document.pages, document.elements
+            )
         eligibility_decisions = self.heading_eligibility_detector.detect(
             document.pages,
             document.elements,
             profile.profile,
+            trusted_parser_types=trusted_parser_types,
         )
         hierarchy = self.heading_builder.build(
             document.document_id,
@@ -97,15 +112,31 @@ class SoftDocumentStructureBuilder:
                 self._entity_title_fallback(document)
                 or self._source_title_fallback(document)
             )
-        document.sections = self.section_builder.build(
+        section_builder = (
+            SectionBuilder(
+                allow_caption_anchors=False,
+                allow_terminal_checklist=False,
+            )
+            if trusted_parser_types
+            else self.section_builder
+        )
+        document.sections = section_builder.build(
             document.document_id,
             document.pages,
             document.elements,
         )
         document.metadata["heading_hierarchy"] = {
             "created_by": "deterministic_rule",
-            "strategy": "profiled_document_style_plus_conservative_rules",
+            "strategy": (
+                "hybrid_parser_assisted_minimal_v1"
+                if trusted_parser_types
+                else "profiled_document_style_plus_conservative_rules"
+            ),
             "document_profile": profile.profile.value,
+            "parser_backend": parser_backend,
+            "legacy_element_normalizer_applied": not trusted_parser_types,
+            "caption_derived_sections_enabled": not trusted_parser_types,
+            "terminal_checklist_sections_enabled": not trusted_parser_types,
         }
         document.metadata["document_profile"] = profile.model_dump(mode="json")
         document.metadata["element_normalization_decisions"] = [

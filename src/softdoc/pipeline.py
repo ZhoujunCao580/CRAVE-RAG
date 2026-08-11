@@ -13,6 +13,7 @@ from pydantic import Field
 from softdoc.coverage import recover_pdf_text_layer_coverage
 from softdoc.floating_sections import FloatingContentSectionResolver
 from softdoc.models import Document, SoftDocModel
+from softdoc.page_labels import PageLabelResolver
 from softdoc.parser import DocumentParser
 from softdoc.relations import RelationBuilder
 from softdoc.rule_audit import collect_rule_coverage
@@ -165,11 +166,56 @@ class CoverageRecoveryPass(_BasePass):
         return self._report(document, before=before, details=details)
 
 
+class PageLabelPass(_BasePass):
+    """Resolve printed page-label aliases without requiring every page to have one."""
+
+    name = "page_label_resolver"
+    requires = frozenset({"coverage_recovered"})
+    provides = frozenset({"page_labels_resolved"})
+
+    def __init__(self, resolver: PageLabelResolver | None = None) -> None:
+        self.resolver = resolver or PageLabelResolver()
+
+    def apply(self, document: Document, context: PassContext) -> PassReport:
+        before = document_fingerprint(document)
+        source_pdf = _find_source_pdf(context.input_path)
+        try:
+            result = self.resolver.resolve(
+                document,
+                source_pdf=source_pdf.resolve() if source_pdf else None,
+            )
+            pdf_error: dict[str, str] | None = None
+        except Exception as exc:
+            # Printed labels are an optional address layer.  A damaged PDF text
+            # layer must not prevent the rest of SoftDoc from being built.
+            result = self.resolver.resolve(document, source_pdf=None)
+            pdf_error = {
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            }
+        return self._report(
+            document,
+            before=before,
+            details={
+                "source_pdf": source_pdf.as_posix() if source_pdf else None,
+                "pages_with_printed_labels": sum(
+                    bool(decision.page_label_aliases)
+                    for decision in result.decisions
+                ),
+                "multi_label_pages": sum(
+                    len(decision.page_label_aliases) > 1
+                    for decision in result.decisions
+                ),
+                "pdf_error": pdf_error,
+            },
+        )
+
+
 class StructurePass(_BasePass):
     """Apply the existing parser-neutral structure builder unchanged."""
 
     name = "document_structure"
-    requires = frozenset({"coverage_recovered"})
+    requires = frozenset({"page_labels_resolved"})
     provides = frozenset({"document_structure"})
 
     def __init__(
@@ -288,6 +334,7 @@ class RuleAuditPass(_BasePass):
 
 DEFAULT_PASSES: tuple[DocumentPass, ...] = (
     CoverageRecoveryPass(),
+    PageLabelPass(),
     StructurePass(),
     RelationPass(),
     FloatingSectionPass(),

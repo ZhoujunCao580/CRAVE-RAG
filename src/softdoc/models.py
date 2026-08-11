@@ -36,6 +36,19 @@ class ContentAvailability(str, Enum):
     UNAVAILABLE = "unavailable"
 
 
+class PageLabelSource(str, Enum):
+    PDF_PAGE_LABEL = "pdf_page_label"
+    PARSER_PAGE_NUMBER = "parser_page_number"
+    MARGINAL_ELEMENT = "marginal_element"
+    PDF_TEXT_LAYER = "pdf_text_layer"
+    SEQUENCE_INFERENCE = "sequence_inference"
+
+
+class PageLabelStatus(str, Enum):
+    CONFIRMED = "confirmed"
+    CANDIDATE = "candidate"
+
+
 class RelationType(str, Enum):
     CONTAINS = "contains"
     NEXT_PAGE = "next_page"
@@ -195,6 +208,38 @@ class Element(SoftDocModel):
         return self
 
 
+class PageLabelCandidate(SoftDocModel):
+    candidate_id: str
+    label: str = Field(min_length=1)
+    source: PageLabelSource
+    status: PageLabelStatus
+    confidence: float = Field(ge=0.0, le=1.0)
+    source_element_id: str | None = None
+    normalized_bbox: tuple[float, float, float, float] | None = None
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("label")
+    @classmethod
+    def normalize_label(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("Page label must not be blank")
+        return stripped
+
+    @field_validator("normalized_bbox")
+    @classmethod
+    def validate_candidate_bbox(
+        cls,
+        value: tuple[float, float, float, float] | None,
+    ) -> tuple[float, float, float, float] | None:
+        if value is None:
+            return None
+        x1, y1, x2, y2 = value
+        if not (0.0 <= x1 < x2 <= 1.0 and 0.0 <= y1 < y2 <= 1.0):
+            raise ValueError("Page-label bbox must be normalized and valid")
+        return tuple(float(coordinate) for coordinate in value)
+
+
 class Page(SoftDocModel):
     page_id: str
     document_id: str
@@ -205,6 +250,16 @@ class Page(SoftDocModel):
     element_ids: list[str] = Field(default_factory=list)
     reading_order: list[str] = Field(default_factory=list)
     image_path: Path | None = None
+    display_page_label: str | None = None
+    display_page_label_confidence: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+    )
+    page_label_aliases: list[str] = Field(default_factory=list)
+    page_label_candidates: list[PageLabelCandidate] = Field(
+        default_factory=list
+    )
     provenance: Provenance
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -216,6 +271,27 @@ class Page(SoftDocModel):
             raise ValueError("Page reading_order IDs must be unique")
         if set(self.reading_order) != set(self.element_ids):
             raise ValueError("Page reading_order must contain exactly the page element IDs")
+        if len(self.page_label_aliases) != len(set(self.page_label_aliases)):
+            raise ValueError("Page label aliases must be unique")
+        if any(not label.strip() for label in self.page_label_aliases):
+            raise ValueError("Page label aliases must not be blank")
+        if (
+            self.display_page_label is not None
+            and self.display_page_label not in self.page_label_aliases
+        ):
+            raise ValueError("display_page_label must be present in page_label_aliases")
+        if (
+            self.display_page_label is None
+            and self.display_page_label_confidence is not None
+        ):
+            raise ValueError(
+                "display_page_label_confidence requires display_page_label"
+            )
+        candidate_ids = [
+            candidate.candidate_id for candidate in self.page_label_candidates
+        ]
+        if len(candidate_ids) != len(set(candidate_ids)):
+            raise ValueError("Page-label candidate IDs must be unique per page")
         return self
 
 

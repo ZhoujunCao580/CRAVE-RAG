@@ -7,10 +7,12 @@ dependencies:
   - python=3.11
   - pip
   - pydantic>=2.5,<3
+  - numpy>=1.26,<3
   - pillow>=9,<12
   - pytest>=7.4,<9
   - pip:
       - mineru[pipeline]==3.4.4
       - pypdfium2>=4.30,<5
+      - transformers>=4.40,<5
       # Required at runtime by MinerU 3.4.4 pipeline OCR.
       - six>=1.16,<2

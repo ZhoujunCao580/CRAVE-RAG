@@ -75,7 +75,15 @@ class HeadingEligibilityDetector:
         pages: list[Page],
         elements: list[Element],
         profile: DocumentProfile,
+        *,
+        trusted_parser_types: bool = False,
     ) -> list[HeadingEligibilityDecision]:
+        if trusted_parser_types:
+            return self._detect_with_trusted_parser_types(
+                pages,
+                elements,
+                profile,
+            )
         page_by_id = {page.page_id: page for page in pages}
         ordered = sorted(
             elements,
@@ -369,6 +377,122 @@ class HeadingEligibilityDetector:
                     reason = "index_letter"
                     confidence = 0.99
 
+            element.metadata["heading_eligibility"] = {
+                "eligible": eligible,
+                "reason": reason,
+                "confidence": confidence,
+                "profile": profile.value,
+                "evidence": evidence,
+            }
+            if not eligible:
+                element.metadata["excluded_from_heading_hierarchy"] = True
+                element.metadata["excluded_from_section_hierarchy"] = True
+                element.heading_level = None
+            decisions.append(
+                HeadingEligibilityDecision(
+                    element_id=element.element_id,
+                    page_id=element.page_id,
+                    page_number=element.page_number,
+                    eligible=eligible,
+                    reason=reason,
+                    confidence=confidence,
+                    evidence=evidence,
+                )
+            )
+        return decisions
+
+    def _detect_with_trusted_parser_types(
+        self,
+        pages: list[Page],
+        elements: list[Element],
+        profile: DocumentProfile,
+    ) -> list[HeadingEligibilityDecision]:
+        """Use a small, parser-assisted policy for MinerU Hybrid output.
+
+        Hybrid already performs stronger title/list/layout classification, so
+        the post-processor only guards against document furniture, empty text,
+        contact strings, and obvious sentence blocks.  It deliberately avoids
+        brochure, finance, form, and named-document special cases.
+        """
+
+        page_by_id = {page.page_id: page for page in pages}
+        headings = sorted(
+            (
+                element
+                for element in elements
+                if element.element_type == ElementType.HEADING
+            ),
+            key=lambda element: (
+                page_by_id[element.page_id].page_index,
+                element.reading_order,
+                element.element_id,
+            ),
+        )
+        primary_slide_titles: set[str] = set()
+        if profile == DocumentProfile.SLIDES:
+            for page in pages:
+                candidates = [
+                    element
+                    for element in headings
+                    if element.page_id == page.page_id
+                    and element.bbox is not None
+                    and element.bbox.normalized[1] <= 0.35
+                ]
+                if candidates:
+                    primary_slide_titles.add(
+                        min(
+                            candidates,
+                            key=lambda item: (
+                                item.bbox.normalized[1],
+                                -item.bbox.height,
+                                item.reading_order,
+                            ),
+                        ).element_id
+                    )
+
+        decisions: list[HeadingEligibilityDecision] = []
+        for element in headings:
+            previous = element.metadata.get("heading_eligibility")
+            if isinstance(previous, dict):
+                element.metadata.pop("forced_heading_level", None)
+                if element.metadata.get("repeated_region") is None:
+                    element.metadata.pop("excluded_from_heading_hierarchy", None)
+                    element.metadata.pop("excluded_from_section_hierarchy", None)
+
+            text = self._plain_text(element.text or "")
+            word_count = len(text.split())
+            eligible = True
+            reason = "trusted_parser_title"
+            confidence = 0.90
+            if element.metadata.get("repeated_region") is not None:
+                eligible = False
+                reason = "confirmed_repeated_page_furniture"
+                confidence = 0.99
+            elif not text:
+                eligible = False
+                reason = "empty_heading"
+                confidence = 1.0
+            elif self._PHONE_OR_CONTACT.match(text):
+                eligible = False
+                reason = "contact_or_url"
+                confidence = 0.99
+            elif word_count >= 18 or (
+                word_count >= 9 and text.rstrip().endswith((".", ";"))
+            ):
+                eligible = False
+                reason = "sentence_block_not_heading"
+                confidence = 0.94
+            elif element.element_id in primary_slide_titles:
+                element.metadata["forced_heading_level"] = 1
+                reason = "landscape_page_primary_title"
+                confidence = 0.94
+
+            evidence: dict[str, object] = {
+                "policy": "trusted_parser_minimal_v1",
+                "profile_signal": profile.value,
+                "parser_backend": element.metadata.get("parser_backend"),
+                "word_count": word_count,
+            }
             element.metadata["heading_eligibility"] = {
                 "eligible": eligible,
                 "reason": reason,
