@@ -82,6 +82,14 @@ def test_table_html_is_flattened_and_split_without_a_cell_graph(
     assert len(units) > 1
     assert all("<td>" not in unit.search_text for unit in units)
     assert all("Table 77" in unit.search_text for unit in units)
+    assert all(unit.display_label == "Table 77" for unit in units)
+    assert all(
+        unit.search_text[
+            unit.content_search_char_start : unit.content_search_char_end
+        ]
+        == unit.content_text
+        for unit in units
+    )
     assert "row0\tvalue0" in html_to_text(table.html)
 
 
@@ -200,6 +208,7 @@ def test_heading_does_not_duplicate_itself_from_section_path(
     unit = _units_for(SearchUnitBuilder().build(document), heading.element_id)[0]
 
     assert unit.search_text == "Methods\n2 Experiments"
+    assert unit.display_label == "2 Experiments"
 
 
 def test_table_without_html_falls_back_to_own_text(parsed_document) -> None:

@@ -222,6 +222,12 @@ BM25/Dense Element rankings, and creates a serializable cursor. A
 cards by default, can resume with the same SearchUnit index, and never opens an
 Element or follows a Relation automatically.
 
+Each Preview exposes a deterministic `display_label`, the exact
+`search_unit.search_text` coordinate space of its snippet, the selected BM25 or
+Dense preview source, and whether that match came from Element content or index
+metadata. These fields affect presentation and auditability, not candidate
+ranking.
+
 The local E5 model is stored outside Git at:
 
 ```text

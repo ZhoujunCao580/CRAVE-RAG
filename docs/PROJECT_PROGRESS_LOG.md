@@ -1223,3 +1223,20 @@ Preview 只显示原始索引片段与位置，不包含完整 Element、Relatio
 
 冻结前验证：28/28 SoftDoc 引用完整性通过，193/193 pytest 通过，`compileall` 通过，
 `pip check` 未发现依赖冲突。
+
+## 26. Retrieval schema收尾（2026-08-11）
+
+在不改变Exact、BM25、Dense和RRF候选顺序的前提下，完成CandidatePreview展示层收尾：
+
+- `display_label`显式保留Figure/Table/Heading等可读标签；
+- `snippet_char_start/end`明确属于`SearchUnit.search_text`，不再暗示原始Element坐标；
+- `preview_source`记录实际使用BM25或Dense生成片段；
+- `match_scope`区分content、metadata、mixed和unknown；
+- BM25只命中Section path/label而Dense覆盖正文时，Preview展示Dense正文；
+- Session trace统计两路前5项metadata-only数量，但不影响分数和排序；
+- 无label且无文本的visual-only对象继续不建立伪造SearchUnit。
+
+28文档、213道可核验问题的完整评测结果与冻结前逐项相同：Exact+RRF的Hit@1/5/20/50
+仍为48.36%/68.54%/84.04%/92.96%。BM25前5项的metadata-only命中为25/1375
+（1.82%，涉及15题），Dense为0/1375，未发现需要立即调整字段权重的系统性问题。
+完整测试为195/195通过。

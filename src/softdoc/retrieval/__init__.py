@@ -45,6 +45,7 @@ from softdoc.retrieval.models import (
     EncoderInputType,
     EncoderTokenSpan,
     MatchedOffset,
+    PreviewMatchScope,
     RetrievalSource,
     SearchBatch,
     SearchSession,
@@ -55,6 +56,7 @@ from softdoc.retrieval.models import (
     SearchUnitBuildResult,
     SearchUnitConfig,
     SkippedSearchElement,
+    SnippetSource,
     SubQuestionInput,
 )
 from softdoc.retrieval.session import SearchSessionBuilder, SearchSessionNavigator
@@ -95,6 +97,7 @@ __all__ = [
     "ExactLookupResult",
     "ExactLookupTraceEntry",
     "MatchedOffset",
+    "PreviewMatchScope",
     "RetrievalSource",
     "FileEmbeddingCache",
     "HuggingFaceE5Encoder",
@@ -111,6 +114,7 @@ __all__ = [
     "SearchSessionTraceEntry",
     "SessionCandidate",
     "SkippedSearchElement",
+    "SnippetSource",
     "SubQuestionInput",
     "TextEncoder",
     "e5_prefixed_text",

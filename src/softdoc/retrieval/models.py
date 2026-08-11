@@ -44,6 +44,17 @@ class RetrievalSource(str, Enum):
     DENSE = "dense"
 
 
+class SnippetSource(str, Enum):
+    SEARCH_UNIT_TEXT = "search_unit.search_text"
+
+
+class PreviewMatchScope(str, Enum):
+    CONTENT = "content"
+    METADATA = "metadata"
+    MIXED = "mixed"
+    UNKNOWN = "unknown"
+
+
 class SubQuestionInput(SoftDocModel):
     subquestion_id: str = Field(min_length=1)
     text: str = Field(min_length=1)
@@ -154,6 +165,9 @@ class SearchUnit(SoftDocModel):
     part_count: int = Field(ge=1)
     search_text: str = Field(min_length=1)
     content_text: str = Field(min_length=1)
+    display_label: str | None = Field(default=None, min_length=1)
+    content_search_char_start: int | None = Field(default=None, ge=0)
+    content_search_char_end: int | None = Field(default=None, gt=0)
     source_char_start: int = Field(ge=0)
     source_char_end: int = Field(gt=0)
     page_id: str = Field(min_length=1)
@@ -172,6 +186,27 @@ class SearchUnit(SoftDocModel):
             raise ValueError("SearchUnit part_index must be smaller than part_count")
         if self.source_char_start >= self.source_char_end:
             raise ValueError("SearchUnit source range must be non-empty")
+        if (self.content_search_char_start is None) != (
+            self.content_search_char_end is None
+        ):
+            raise ValueError("SearchUnit content search bounds must appear together")
+        if (
+            self.content_search_char_start is not None
+            and self.content_search_char_end is not None
+        ):
+            if self.content_search_char_start >= self.content_search_char_end:
+                raise ValueError("SearchUnit content search range must be non-empty")
+            if self.content_search_char_end > len(self.search_text):
+                raise ValueError("SearchUnit content search range exceeds search_text")
+            if (
+                self.search_text[
+                    self.content_search_char_start : self.content_search_char_end
+                ]
+                != self.content_text
+            ):
+                raise ValueError(
+                    "SearchUnit content search range must select content_text"
+                )
         return self
 
 
@@ -436,6 +471,7 @@ class SessionCandidate(SoftDocModel):
     page_number: int = Field(ge=1)
     section_id: str | None = None
     section_path: list[str] = Field(default_factory=list)
+    display_label: str | None = Field(default=None, min_length=1)
     content_availability: ContentAvailability
     matched_by: list[RetrievalSource] = Field(min_length=1)
     bm25_rank: int | None = Field(default=None, ge=1)
@@ -491,12 +527,17 @@ class CandidatePreview(SoftDocModel):
     page_id: str = Field(min_length=1)
     page_number: int = Field(ge=1)
     section_path: list[str] = Field(default_factory=list)
+    display_label: str | None = Field(default=None, min_length=1)
     matched_snippet: str
     snippet_char_start: int = Field(ge=0)
     snippet_char_end: int = Field(ge=0)
     snippet_truncated: bool
+    snippet_source: SnippetSource = SnippetSource.SEARCH_UNIT_TEXT
+    snippet_source_id: str = Field(min_length=1)
     matched_search_unit_id: str = Field(min_length=1)
     matched_by: list[RetrievalSource] = Field(min_length=1)
+    preview_source: RetrievalSource
+    match_scope: PreviewMatchScope
     bm25_rank: int | None = Field(default=None, ge=1)
     dense_rank: int | None = Field(default=None, ge=1)
     rrf_score: float | None = Field(default=None, gt=0.0)
@@ -504,6 +545,10 @@ class CandidatePreview(SoftDocModel):
 
     @model_validator(mode="after")
     def validate_snippet_range(self) -> Self:
+        if self.snippet_source_id != self.matched_search_unit_id:
+            raise ValueError("CandidatePreview snippet source must be its SearchUnit")
+        if self.preview_source not in self.matched_by:
+            raise ValueError("CandidatePreview source must be a matched source")
         if self.snippet_char_start > self.snippet_char_end:
             raise ValueError("CandidatePreview snippet range is invalid")
         if not self.matched_snippet and (

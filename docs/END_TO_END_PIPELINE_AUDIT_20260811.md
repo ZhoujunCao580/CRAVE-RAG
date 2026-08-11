@@ -96,27 +96,41 @@ CandidatePreview 是让未来 Reading Agent 决定“下一步打开哪个 Eleme
   "page_id": "...",
   "page_number": 12,
   "section_path": ["Experiments", "Robustness"],
+  "display_label": null,
   "matched_snippet": "...原始检索文本中的短片段...",
   "snippet_char_start": 80,
   "snippet_char_end": 320,
   "snippet_truncated": true,
+  "snippet_source": "search_unit.search_text",
+  "snippet_source_id": "...#part_0001",
   "matched_search_unit_id": "...#part_0001",
   "matched_by": ["bm25", "dense"],
+  "preview_source": "dense",
+  "match_scope": "content",
   "bm25_rank": 17,
   "dense_rank": 2,
   "rrf_score": 0.0712,
-  "content_availability": "textual"
+  "content_availability": "text_only"
 }
 ```
+
+`snippet_char_start/end` 明确相对于 `snippet_source_id` 对应的
+`SearchUnit.search_text`，不是原始 `Element.text`。SearchUnit可能包含Section路径、
+label、归一化文本或HTML转纯文本，因此在没有字符映射时不得把这些offset解释为
+Element原文坐标。
 
 Preview 的生成规则：
 
 - BM25 主导时，围绕命中词截取原文窗口；
 - Dense 主导时，使用最佳 Dense SearchUnit 的确定性截断文本；
-- 两者都命中时，比较二者在当前 RRF 中的贡献，选择贡献更大的来源生成片段，
-  避免很弱的 BM25 尾部命中遮住很强的 Dense 命中；
+- `preview_source`记录实际采用哪一路，`match_scope`记录命中属于正文、metadata、
+  两者混合或未知；
+- BM25若只命中Section path/label等metadata，而Dense片段覆盖正文，则优先展示Dense；
+  其余情况才比较两路RRF贡献；
 - Caption/Footnote 可直接显示自身短文本；
-- `visual_only` Figure 允许空 snippet，只显示类型、label 和位置。
+- 有明确label的视觉对象通过`display_label`展示，例如`Figure 5`；完全无label、无文本的
+  `visual_only`对象不会伪造空SearchUnit，它需要由Exact、READ_PAGE、Relation或未来的
+  视觉检索发现。
 
 Preview 不包含：完整 Element、大表 HTML、整页图片、高清 crop、Relation 目标、
 LLM 摘要或答案。Agent 只有执行未来的 READ/INSPECT 动作后，读到的内容才可能成为
@@ -146,6 +160,8 @@ retrieval_trace
 
 SearchSession JSON round-trip 后保持稳定，但恢复会话时仍需使用相同 document、
 `index_version` 和 SearchUnit 索引，才能重新确定性地产生相同 Preview。
+`opened_candidate_ids`只追踪普通候选；未来直接读取Exact目标的动作统一进入全局
+Action Trace，不在SearchSession中另建一套Exact打开状态。
 
 ## 5. 当前 28 文档检索结果怎样理解
 
@@ -207,6 +223,10 @@ BM25 与 Dense 的确互补，例如在 Top-20，BM25-only 命中 16 道、Dense
    化后可拆成持久 SearchStore，但当前没有必要提前增加基础设施。
 8. 当前 28 份文档既用于选择融合参数又用于报告结果，因此数字是开发集指标，不是最终
    无偏测试指标。
+9. SearchSession trace会统计BM25/Dense前5项中只由Section path/label等metadata命中的
+   数量，用于发现`section_metadata_dominated`现象；该统计不改变任何候选分数或顺序。
+   28文档实测中，BM25为25/1375（1.82%，涉及15题），Dense为0/1375，暂未发现
+   Section metadata大面积支配候选，因此不修改SearchUnit权重。
 
 ## 8. 接下来最合理的实施顺序
 
@@ -223,7 +243,7 @@ BM25 与 Dense 的确互补，例如在 Top-20，BM25-only 命中 16 道、Dense
 
 ## 9. 可复核产物
 
-冻结前验证结果：28/28 SoftDoc 引用验证通过；193/193 pytest 通过；Python
+当前验证结果：28/28 SoftDoc 引用验证通过；195/195 pytest 通过；Python
 `compileall` 通过；`pip check` 未发现依赖冲突。
 
 - 全量检索：`data/processed/representative_28/retrieval_policy_v3/evaluation/`

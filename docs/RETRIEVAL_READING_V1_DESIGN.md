@@ -174,15 +174,19 @@ Exact handles 始终单独保存，不参与 RRF。在线时应先读取 unique 
 ## 9. CandidatePreview 与 SearchSession
 
 `CandidatePreview` 是“是否值得打开”的轻量卡片，不是 LLM 摘要，也不是 Evidence。
-它只包含 Element 类型、页码、Section path、命中 SearchUnit 的有界原文窗口、检索
-来源、原始 rank 和 content availability。它不包含完整 Element 对象、HTML、高清图片、
-Relation 目标或任何自动生成结论。
+它只包含 Element 类型、可选display label、页码、Section path、命中 SearchUnit 的
+有界原文窗口、检索来源、原始 rank 和 content availability。它不包含完整 Element
+对象、HTML、高清图片、Relation 目标或任何自动生成结论。
 
 BM25 Preview 围绕 matched offsets 截取；Dense Preview 使用最佳 Dense SearchUnit 的
-命中字符范围。相同 Element 即使被 BM25 和 Dense 同时发现，也只占一个候选位置，
-但同时保存两个来源、各自 rank 与 RRF score。两路均命中时，Preview 选择对当前 RRF
-贡献更大的来源窗口，避免用很弱的 BM25 尾部命中覆盖强 Dense 语义片段。Exact Element
-目标保持单独返回，不在普通序列重复。
+命中字符范围。offset明确属于`SearchUnit.search_text`，不能解释成原始Element字符坐标。
+相同 Element 即使被 BM25 和 Dense 同时发现，也只占一个候选位置，但同时保存两个来源、
+各自 rank 与 RRF score。`preview_source`记录实际展示来源，`match_scope`区分content、
+metadata、mixed和unknown。BM25只命中Section path/label而Dense覆盖正文时优先展示Dense，
+其他情况才按当前RRF贡献选择窗口。Exact Element目标保持单独返回，不在普通序列重复。
+
+有明确label的Figure/Table/Heading通过`display_label`展示。无label且无文本的visual-only
+对象不会产生虚假的空SearchUnit，必须由Exact、READ_PAGE、Relation或未来视觉检索发现。
 
 `SearchSession` 是可 JSON 序列化的候选游标，保存：
 
@@ -196,6 +200,10 @@ BM25 Preview 围绕 matched offsets 截取；Dense Preview 使用最佳 Dense Se
 SearchUnit index，就能从原 cursor 继续，也可以重新访问之前展示的卡片。创建 Session
 不会自动 READ 候选；有 Exact 命中时，调用方可以先直接读取 Exact 目标，只有证据不足
 时才请求普通候选批次。
+
+Session trace额外统计两路前5项中metadata-only命中数量，只用于诊断Section path是否
+挤占候选，不改变BM25、Dense或RRF排序。未来Exact目标的读取记录进入统一Action Trace；
+`opened_candidate_ids`继续只表示已经展示并打开的普通候选。
 
 ## 10. 代表性评测快照
 

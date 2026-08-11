@@ -42,6 +42,7 @@ class SearchUnitBuilder:
         for element in ordered:
             try:
                 body, context = _searchable_content(element)
+                display_label = _display_label(element)
                 if not body:
                     generated_visual = bool(
                         element.metadata.get("generated_visual_text")
@@ -77,6 +78,9 @@ class SearchUnitBuilder:
                 for part_index, (start, end) in enumerate(ranges):
                     content_text = body[start:end]
                     search_text = _join_search_text(context, content_text)
+                    content_search_start = search_text.rfind(content_text)
+                    if content_search_start < 0:
+                        raise ValueError("SearchUnit content is missing from search_text")
                     unit_id = "search-unit:" + stable_digest(
                         document.document_id,
                         element.element_id,
@@ -93,6 +97,11 @@ class SearchUnitBuilder:
                             part_count=part_count,
                             search_text=search_text,
                             content_text=content_text,
+                            display_label=display_label,
+                            content_search_char_start=content_search_start,
+                            content_search_char_end=(
+                                content_search_start + len(content_text)
+                            ),
                             source_char_start=start,
                             source_char_end=end,
                             page_id=element.page_id,
@@ -154,6 +163,16 @@ def _searchable_content(element: Element) -> tuple[str, list[str]]:
         return body, context
 
     return text, section_path
+
+
+def _display_label(element: Element) -> str | None:
+    label = _normalize_text(element.reference_label or "")
+    if label:
+        return label
+    if element.element_type == ElementType.HEADING:
+        heading = _normalize_text(element.text or "")
+        return heading or None
+    return None
 
 
 def _part_ranges(text: str, config: SearchUnitConfig) -> list[tuple[int, int]]:

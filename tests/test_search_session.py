@@ -16,6 +16,7 @@ from softdoc.retrieval import (
     ExactAnchorMatch,
     ExactLookupResult,
     MatchedOffset,
+    PreviewMatchScope,
     RetrievalSource,
     SearchSession,
     SearchSessionBuilder,
@@ -24,6 +25,7 @@ from softdoc.retrieval import (
     SearchUnit,
     SearchUnitBuildResult,
     SearchUnitConfig,
+    SnippetSource,
     SubQuestionInput,
 )
 
@@ -359,6 +361,10 @@ def test_dense_only_preview_uses_the_best_dense_search_unit() -> None:
     assert preview.matched_by == [RetrievalSource.DENSE]
     assert preview.dense_rank == 1
     assert preview.bm25_rank is None
+    assert preview.preview_source == RetrievalSource.DENSE
+    assert preview.match_scope == PreviewMatchScope.CONTENT
+    assert preview.snippet_source == SnippetSource.SEARCH_UNIT_TEXT
+    assert preview.snippet_source_id == preview.matched_search_unit_id
     assert "Candidate 5" in preview.matched_snippet
 
 
@@ -409,7 +415,145 @@ def test_rrf_preview_uses_the_source_with_the_larger_rank_contribution() -> None
     preview = batch.candidate_previews[0]
 
     assert preview.matched_search_unit_id == dense_unit.search_unit_id
+    assert preview.preview_source == RetrievalSource.DENSE
+    assert preview.match_scope == PreviewMatchScope.MIXED
     assert "Dense-specific" in preview.matched_snippet
+
+
+def test_metadata_only_bm25_hit_does_not_hide_dense_content_preview() -> None:
+    units = _search_units(1)
+    unit = units.units[0]
+    bm25 = BM25SearchResult(
+        subquestion_id="Q1",
+        document_id=DOCUMENT_ID,
+        index_version=INDEX_VERSION,
+        total_search_units=1,
+        total_candidates=1,
+        candidates=[
+            BM25ElementCandidate(
+                element_id=unit.element_id,
+                bm25_score=10.0,
+                bm25_rank=1,
+                matched_search_unit_id=unit.search_unit_id,
+                matched_part=0,
+                matched_terms=["Methods"],
+                matched_offsets=[MatchedOffset(term="Methods", start=0, end=7)],
+                page_id=unit.page_id,
+                page_number=unit.page_number,
+                section_id=unit.section_id,
+                element_type=unit.element_type,
+            )
+        ],
+    )
+    dense = DenseSearchResult(
+        subquestion_id="Q1",
+        document_id=DOCUMENT_ID,
+        index_version=INDEX_VERSION,
+        model_name="mock-e5",
+        total_search_units=1,
+        total_dense_segments=1,
+        total_candidates=1,
+        candidates=[
+            DenseElementCandidate(
+                element_id=unit.element_id,
+                dense_score=0.9,
+                dense_rank=1,
+                matched_search_unit_id=unit.search_unit_id,
+                matched_part=0,
+                matched_dense_segment_id="segment:content",
+                matched_segment_index=0,
+                matched_text_char_start=unit.search_text.index("Candidate"),
+                matched_text_char_end=len(unit.search_text),
+                page_id=unit.page_id,
+                page_number=unit.page_number,
+                section_id=unit.section_id,
+                element_type=unit.element_type,
+            )
+        ],
+    )
+    session = SearchSessionBuilder(
+        SearchSessionConfig(bm25_weight=3.0, dense_weight=1.0)
+    ).create(
+        subquestion=_question(),
+        search_units=units,
+        bm25=bm25,
+        dense=dense,
+    )
+
+    _, batch = SearchSessionNavigator(units).next_batch(session)
+    preview = batch.candidate_previews[0]
+
+    assert preview.preview_source == RetrievalSource.DENSE
+    assert preview.match_scope == PreviewMatchScope.CONTENT
+    assert "Candidate 0" in preview.matched_snippet
+    scope_audit = next(
+        item
+        for item in session.retrieval_trace
+        if item.code == "search_metadata_scope_audit"
+    )
+    assert scope_audit.data["bm25_metadata_only"] == 1
+    assert scope_audit.data["dense_metadata_only"] == 0
+
+
+def test_labeled_visual_candidate_exposes_display_label() -> None:
+    original = _search_units(1).units[0]
+    search_text = "Experiments\nFigure 5"
+    content_text = "Figure 5"
+    content_start = search_text.index(content_text)
+    visual = original.model_copy(
+        update={
+            "search_text": search_text,
+            "content_text": content_text,
+            "display_label": "Figure 5",
+            "content_search_char_start": content_start,
+            "content_search_char_end": len(search_text),
+            "source_char_end": len(content_text),
+            "element_type": ElementType.FIGURE,
+            "content_availability": ContentAvailability.VISUAL_ONLY,
+        }
+    )
+    units = _search_units(1).model_copy(update={"units": [visual]})
+    bm25 = BM25SearchResult(
+        subquestion_id="Q1",
+        document_id=DOCUMENT_ID,
+        index_version=INDEX_VERSION,
+        total_search_units=1,
+        total_candidates=1,
+        candidates=[
+            BM25ElementCandidate(
+                element_id=visual.element_id,
+                bm25_score=5.0,
+                bm25_rank=1,
+                matched_search_unit_id=visual.search_unit_id,
+                matched_part=0,
+                matched_terms=["Figure", "5"],
+                matched_offsets=[
+                    MatchedOffset(
+                        term="Figure",
+                        start=content_start,
+                        end=content_start + len("Figure"),
+                    )
+                ],
+                page_id=visual.page_id,
+                page_number=visual.page_number,
+                section_id=visual.section_id,
+                element_type=visual.element_type,
+            )
+        ],
+    )
+    session = SearchSessionBuilder().create(
+        subquestion=_question(), search_units=units, bm25=bm25
+    )
+
+    updated, batch = SearchSessionNavigator(units).next_batch(session)
+    restored = SearchSession.model_validate_json(updated.model_dump_json())
+    preview = batch.candidate_previews[0]
+
+    assert preview.display_label == "Figure 5"
+    assert preview.preview_source == RetrievalSource.BM25
+    assert preview.match_scope == PreviewMatchScope.CONTENT
+    assert preview.content_availability == ContentAvailability.VISUAL_ONLY
+    assert restored.candidate_catalog[0].display_label == "Figure 5"
 
 
 def test_session_identity_is_stable_and_input_mismatches_fail() -> None:

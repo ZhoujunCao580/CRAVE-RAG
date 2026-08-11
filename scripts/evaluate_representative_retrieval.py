@@ -144,6 +144,11 @@ def main(argv: list[str] | None = None) -> int:
                 bm25=bm25,
                 dense=dense,
             )
+            scope_audit = next(
+                item.data
+                for item in search_session.retrieval_trace
+                if item.code == "search_metadata_scope_audit"
+            )
             rrf_entries = [
                 {
                     "candidate_id": candidate.element_id,
@@ -209,6 +214,7 @@ def main(argv: list[str] | None = None) -> int:
                     "duplicate_candidates_top_50": len(
                         bm25_top_50_ids & dense_top_50_ids
                     ),
+                    "search_metadata_scope_audit": scope_audit,
                     "exact": {
                         "anchor_count": len(exact.anchor_resolutions),
                         "statuses": [
@@ -531,6 +537,7 @@ def _summary(
         "questions_without_gold_pages": len(rows) - len(evaluable),
         "elapsed_seconds": round(elapsed_seconds, 3),
         "query_latency_ms": _timing_metrics(rows),
+        "search_metadata_scope_audit": _metadata_scope_summary(rows),
         "candidate_inspection": _candidate_inspection_metrics(evaluable),
         "exact": {
             "questions_with_anchor": len(anchored),
@@ -600,6 +607,40 @@ def _timing_metrics(rows: list[dict[str, object]]) -> dict[str, object]:
         )
         for stage in ("exact", "bm25", "dense", "total")
     }
+
+
+def _metadata_scope_summary(
+    rows: list[dict[str, object]],
+) -> dict[str, object]:
+    result: dict[str, object] = {
+        "definition": (
+            "Metadata-only means the matched range is outside SearchUnit.content_text "
+            "and lies only in section_path or label context. This is diagnostic and "
+            "does not alter ranking."
+        ),
+        "questions": len(rows),
+    }
+    for source in ("bm25", "dense"):
+        evaluated = sum(
+            int(row["search_metadata_scope_audit"][f"{source}_evaluated"])
+            for row in rows
+        )
+        metadata_only = sum(
+            int(row["search_metadata_scope_audit"][f"{source}_metadata_only"])
+            for row in rows
+        )
+        result[source] = {
+            "top_n": 5,
+            "evaluated_candidates": evaluated,
+            "metadata_only_candidates": metadata_only,
+            "metadata_only_rate": metadata_only / evaluated if evaluated else None,
+            "questions_with_metadata_only_candidate": sum(
+                int(row["search_metadata_scope_audit"][f"{source}_metadata_only"])
+                > 0
+                for row in rows
+            ),
+        }
+    return result
 
 
 def _candidate_inspection_metrics(
@@ -767,6 +808,26 @@ def _summary_markdown(summary: dict[str, object]) -> str:
         )
     lines.extend(["", str(summary["combination_policy"]), ""])
     lines.extend([str(summary["complementarity_definition"]), ""])
+    scope_audit = summary["search_metadata_scope_audit"]
+    lines.extend(
+        [
+            "## Search metadata scope audit",
+            "",
+            str(scope_audit["definition"]),
+            "",
+            "| Source | Top-N | Evaluated | Metadata-only | Rate | Questions affected |",
+            "|---|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for source in ("bm25", "dense"):
+        item = scope_audit[source]
+        lines.append(
+            f"| {source} | {item['top_n']} | {item['evaluated_candidates']} | "
+            f"{item['metadata_only_candidates']} | "
+            f"{item['metadata_only_rate']:.4f} | "
+            f"{item['questions_with_metadata_only_candidate']} |"
+        )
+    lines.append("")
     inspection = summary["candidate_inspection"]
     lines.extend(
         [

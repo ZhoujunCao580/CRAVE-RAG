@@ -15,6 +15,7 @@ from softdoc.retrieval.models import (
     DenseSearchResult,
     ExactAnchorMatch,
     ExactLookupResult,
+    PreviewMatchScope,
     RetrievalSource,
     SearchBatch,
     SearchSession,
@@ -23,6 +24,7 @@ from softdoc.retrieval.models import (
     SearchUnit,
     SearchUnitBuildResult,
     SessionCandidate,
+    SnippetSource,
     SubQuestionInput,
 )
 
@@ -112,6 +114,7 @@ class SearchSessionBuilder:
             exact_element_ids=exact_element_ids,
             ranked_count=len(catalog),
             config=self.config,
+            units_by_id=units_by_id,
         )
         session_id = "search-session:" + stable_digest(
             search_units.document_id,
@@ -384,6 +387,7 @@ def _session_candidate(
         page_number=source_unit.page_number,
         section_id=source_unit.section_id,
         section_path=source_unit.section_path,
+        display_label=source_unit.display_label,
         content_availability=source_unit.content_availability,
         matched_by=matched_by,
         bm25_rank=bm25.bm25_rank if bm25 is not None else None,
@@ -416,6 +420,7 @@ def _session_trace(
     exact_element_ids: set[str],
     ranked_count: int,
     config: SearchSessionConfig,
+    units_by_id: dict[str, SearchUnit],
 ) -> list[SearchSessionTraceEntry]:
     trace = [
         SearchSessionTraceEntry(
@@ -437,6 +442,16 @@ def _session_trace(
             },
         )
     ]
+    trace.append(
+        SearchSessionTraceEntry(
+            code="search_metadata_scope_audit",
+            description=(
+                "Count metadata-only matches in each source's first five "
+                "candidates without changing their ranking."
+            ),
+            data=_metadata_scope_audit(bm25, dense, units_by_id, limit=5),
+        )
+    )
     if exact is not None:
         trace.extend(
             SearchSessionTraceEntry(
@@ -467,13 +482,58 @@ def _session_trace(
     return trace
 
 
+def _metadata_scope_audit(
+    bm25: BM25SearchResult | None,
+    dense: DenseSearchResult | None,
+    units_by_id: dict[str, SearchUnit],
+    *,
+    limit: int,
+) -> dict[str, int]:
+    bm25_scopes = [
+        _ranges_scope(
+            units_by_id[candidate.matched_search_unit_id],
+            [(offset.start, offset.end) for offset in candidate.matched_offsets],
+        )
+        for candidate in (bm25.candidates[:limit] if bm25 is not None else [])
+        if candidate.matched_search_unit_id in units_by_id
+    ]
+    dense_scopes = [
+        _ranges_scope(
+            units_by_id[candidate.matched_search_unit_id],
+            [
+                (
+                    candidate.matched_text_char_start,
+                    candidate.matched_text_char_end,
+                )
+            ],
+        )
+        for candidate in (dense.candidates[:limit] if dense is not None else [])
+        if candidate.matched_search_unit_id in units_by_id
+    ]
+    return {
+        "limit": limit,
+        "bm25_evaluated": len(bm25_scopes),
+        "bm25_metadata_only": sum(
+            scope == PreviewMatchScope.METADATA for scope in bm25_scopes
+        ),
+        "dense_evaluated": len(dense_scopes),
+        "dense_metadata_only": sum(
+            scope == PreviewMatchScope.METADATA for scope in dense_scopes
+        ),
+    }
+
+
 def _candidate_preview(
     candidate: SessionCandidate,
     config: SearchSessionConfig,
     units_by_id: dict[str, SearchUnit],
 ) -> CandidatePreview:
-    use_bm25 = _preview_uses_bm25(candidate, config)
-    if use_bm25:
+    preview_source, match_scope = _preview_choice(
+        candidate,
+        config,
+        units_by_id,
+    )
+    if preview_source == RetrievalSource.BM25:
         unit_id = candidate.bm25_search_unit_id
         offsets = candidate.bm25_matched_offsets
         anchor_start = min((offset.start for offset in offsets), default=0)
@@ -501,12 +561,17 @@ def _candidate_preview(
         page_id=candidate.page_id,
         page_number=candidate.page_number,
         section_path=candidate.section_path,
+        display_label=candidate.display_label,
         matched_snippet=text[start:end],
         snippet_char_start=start,
         snippet_char_end=end,
         snippet_truncated=start > 0 or end < len(text),
+        snippet_source=SnippetSource.SEARCH_UNIT_TEXT,
+        snippet_source_id=unit_id,
         matched_search_unit_id=unit_id,
         matched_by=candidate.matched_by,
+        preview_source=preview_source,
+        match_scope=match_scope,
         bm25_rank=candidate.bm25_rank,
         dense_rank=candidate.dense_rank,
         rrf_score=candidate.rrf_score,
@@ -514,21 +579,108 @@ def _candidate_preview(
     )
 
 
-def _preview_uses_bm25(
+def _preview_choice(
     candidate: SessionCandidate,
     config: SearchSessionConfig,
-) -> bool:
+    units_by_id: dict[str, SearchUnit],
+) -> tuple[RetrievalSource, PreviewMatchScope]:
     has_bm25 = RetrievalSource.BM25 in candidate.matched_by
     has_dense = RetrievalSource.DENSE in candidate.matched_by
     if not has_bm25:
-        return False
-    if not has_dense or config.merge_policy != CandidateMergePolicy.WEIGHTED_RRF:
-        return True
+        return RetrievalSource.DENSE, _dense_match_scope(candidate, units_by_id)
+    if not has_dense:
+        return RetrievalSource.BM25, _bm25_match_scope(candidate, units_by_id)
+
+    bm25_scope = _bm25_match_scope(candidate, units_by_id)
+    dense_scope = _dense_match_scope(candidate, units_by_id)
+    content_scopes = {PreviewMatchScope.CONTENT, PreviewMatchScope.MIXED}
+    if bm25_scope == PreviewMatchScope.METADATA and dense_scope in content_scopes:
+        return RetrievalSource.DENSE, dense_scope
+    if dense_scope == PreviewMatchScope.METADATA and bm25_scope in content_scopes:
+        return RetrievalSource.BM25, bm25_scope
+    if config.merge_policy != CandidateMergePolicy.WEIGHTED_RRF:
+        return RetrievalSource.BM25, bm25_scope
     assert candidate.bm25_rank is not None
     assert candidate.dense_rank is not None
     bm25_contribution = config.bm25_weight / (config.rrf_k + candidate.bm25_rank)
     dense_contribution = config.dense_weight / (config.rrf_k + candidate.dense_rank)
-    return bm25_contribution >= dense_contribution
+    if bm25_contribution >= dense_contribution:
+        return RetrievalSource.BM25, bm25_scope
+    return RetrievalSource.DENSE, dense_scope
+
+
+def _bm25_match_scope(
+    candidate: SessionCandidate,
+    units_by_id: dict[str, SearchUnit],
+) -> PreviewMatchScope:
+    unit = _candidate_unit(candidate.bm25_search_unit_id, candidate, units_by_id)
+    ranges = [(offset.start, offset.end) for offset in candidate.bm25_matched_offsets]
+    return _ranges_scope(unit, ranges)
+
+
+def _dense_match_scope(
+    candidate: SessionCandidate,
+    units_by_id: dict[str, SearchUnit],
+) -> PreviewMatchScope:
+    unit = _candidate_unit(candidate.dense_search_unit_id, candidate, units_by_id)
+    if candidate.dense_match_start is None or candidate.dense_match_end is None:
+        return PreviewMatchScope.UNKNOWN
+    return _ranges_scope(
+        unit,
+        [(candidate.dense_match_start, candidate.dense_match_end)],
+    )
+
+
+def _candidate_unit(
+    unit_id: str | None,
+    candidate: SessionCandidate,
+    units_by_id: dict[str, SearchUnit],
+) -> SearchUnit:
+    if not unit_id:
+        raise ValueError("Candidate source requires a matched SearchUnit")
+    unit = units_by_id.get(unit_id)
+    if unit is None or unit.element_id != candidate.element_id:
+        raise ValueError("Candidate source refers to an unavailable SearchUnit")
+    return unit
+
+
+def _ranges_scope(
+    unit: SearchUnit,
+    ranges: list[tuple[int, int]],
+) -> PreviewMatchScope:
+    if not ranges:
+        return PreviewMatchScope.UNKNOWN
+    content_range = _content_search_range(unit)
+    if content_range is None:
+        return PreviewMatchScope.UNKNOWN
+    content_start, content_end = content_range
+    touches_content = False
+    touches_metadata = False
+    for start, end in ranges:
+        if start < content_end and end > content_start:
+            touches_content = True
+        if start < content_start or end > content_end:
+            touches_metadata = True
+    if touches_content and touches_metadata:
+        return PreviewMatchScope.MIXED
+    if touches_content:
+        return PreviewMatchScope.CONTENT
+    if touches_metadata:
+        return PreviewMatchScope.METADATA
+    return PreviewMatchScope.UNKNOWN
+
+
+def _content_search_range(unit: SearchUnit) -> tuple[int, int] | None:
+    if (
+        unit.content_search_char_start is not None
+        and unit.content_search_char_end is not None
+    ):
+        return unit.content_search_char_start, unit.content_search_char_end
+    start = unit.search_text.rfind(unit.content_text)
+    if start < 0:
+        return None
+    return start, start + len(unit.content_text)
+
 
 def _snippet_window(
     *,
