@@ -381,3 +381,175 @@ class DenseSearchResult(SoftDocModel):
         ):
             raise ValueError("Dense candidate ranks must be contiguous")
         return self
+
+
+class RetrievalSource(str, Enum):
+    BM25 = "bm25"
+    DENSE = "dense"
+
+
+class SearchSessionConfig(SoftDocModel):
+    batch_size: int = Field(default=5, ge=1)
+    snippet_max_chars: int = Field(default=320, ge=40)
+    snippet_context_chars: int = Field(default=80, ge=0)
+
+    @model_validator(mode="after")
+    def validate_snippet_window(self) -> Self:
+        if self.snippet_context_chars * 2 >= self.snippet_max_chars:
+            raise ValueError(
+                "CandidatePreview context must leave room for matched content"
+            )
+        return self
+
+
+class SessionCandidate(SoftDocModel):
+    """Persisted retrieval metadata for one deduplicated Element candidate."""
+
+    element_id: str = Field(min_length=1)
+    element_type: ElementType
+    page_id: str = Field(min_length=1)
+    page_number: int = Field(ge=1)
+    section_id: str | None = None
+    section_path: list[str] = Field(default_factory=list)
+    content_availability: ContentAvailability
+    matched_by: list[RetrievalSource] = Field(min_length=1)
+    bm25_rank: int | None = Field(default=None, ge=1)
+    bm25_score: float | None = Field(default=None, gt=0.0)
+    bm25_search_unit_id: str | None = None
+    bm25_matched_terms: list[str] = Field(default_factory=list)
+    bm25_matched_offsets: list[MatchedOffset] = Field(default_factory=list)
+    dense_rank: int | None = Field(default=None, ge=1)
+    dense_score: float | None = Field(default=None, ge=-1.0, le=1.0)
+    dense_search_unit_id: str | None = None
+    dense_match_start: int | None = Field(default=None, ge=0)
+    dense_match_end: int | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def validate_sources(self) -> Self:
+        if len(set(self.matched_by)) != len(self.matched_by):
+            raise ValueError("SessionCandidate matched_by sources must be unique")
+        if RetrievalSource.BM25 in self.matched_by:
+            if self.bm25_rank is None or not self.bm25_search_unit_id:
+                raise ValueError("BM25 candidates require rank and SearchUnit")
+        elif any(
+            value is not None
+            for value in (self.bm25_rank, self.bm25_score, self.bm25_search_unit_id)
+        ):
+            raise ValueError("BM25 metadata requires the bm25 source")
+        if RetrievalSource.DENSE in self.matched_by:
+            if self.dense_rank is None or not self.dense_search_unit_id:
+                raise ValueError("Dense candidates require rank and SearchUnit")
+            if self.dense_match_start is None or self.dense_match_end is None:
+                raise ValueError("Dense candidates require a matched text range")
+            if self.dense_match_start >= self.dense_match_end:
+                raise ValueError("Dense candidate match range must be non-empty")
+        elif any(
+            value is not None
+            for value in (
+                self.dense_rank,
+                self.dense_score,
+                self.dense_search_unit_id,
+                self.dense_match_start,
+                self.dense_match_end,
+            )
+        ):
+            raise ValueError("Dense metadata requires the dense source")
+        return self
+
+
+class CandidatePreview(SoftDocModel):
+    """Small deterministic card used to choose what to READ next."""
+
+    element_id: str = Field(min_length=1)
+    element_type: ElementType
+    page_id: str = Field(min_length=1)
+    page_number: int = Field(ge=1)
+    section_path: list[str] = Field(default_factory=list)
+    matched_snippet: str
+    snippet_char_start: int = Field(ge=0)
+    snippet_char_end: int = Field(ge=0)
+    snippet_truncated: bool
+    matched_search_unit_id: str = Field(min_length=1)
+    matched_by: list[RetrievalSource] = Field(min_length=1)
+    bm25_rank: int | None = Field(default=None, ge=1)
+    dense_rank: int | None = Field(default=None, ge=1)
+    content_availability: ContentAvailability
+
+    @model_validator(mode="after")
+    def validate_snippet_range(self) -> Self:
+        if self.snippet_char_start > self.snippet_char_end:
+            raise ValueError("CandidatePreview snippet range is invalid")
+        if not self.matched_snippet and (
+            self.snippet_char_start != 0 or self.snippet_char_end != 0
+        ):
+            raise ValueError("An empty CandidatePreview must use range (0, 0)")
+        return self
+
+
+class SearchSessionTraceEntry(SoftDocModel):
+    code: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class SearchSession(SoftDocModel):
+    """Serializable cursor over a complete, deduplicated candidate ranking."""
+
+    search_session_id: str = Field(min_length=1)
+    subquestion_id: str = Field(min_length=1)
+    document_id: str = Field(min_length=1)
+    config: SearchSessionConfig
+    exact_anchor_matches: list[ExactAnchorMatch] = Field(default_factory=list)
+    unresolved_anchors: list[AnchorResolution] = Field(default_factory=list)
+    ranked_candidate_ids: list[str] = Field(default_factory=list)
+    candidate_catalog: list[SessionCandidate] = Field(default_factory=list)
+    shown_candidate_ids: list[str] = Field(default_factory=list)
+    opened_candidate_ids: list[str] = Field(default_factory=list)
+    cursor: int = Field(default=0, ge=0)
+    exhausted: bool = False
+    retrieval_trace: list[SearchSessionTraceEntry] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_session_state(self) -> Self:
+        catalog_ids = [item.element_id for item in self.candidate_catalog]
+        if len(set(catalog_ids)) != len(catalog_ids):
+            raise ValueError("SearchSession candidate IDs must be unique")
+        if catalog_ids != self.ranked_candidate_ids:
+            raise ValueError(
+                "SearchSession ranked_candidate_ids must match candidate catalog order"
+            )
+        if len(set(self.shown_candidate_ids)) != len(self.shown_candidate_ids):
+            raise ValueError("SearchSession shown candidate IDs must be unique")
+        if len(set(self.opened_candidate_ids)) != len(self.opened_candidate_ids):
+            raise ValueError("SearchSession opened candidate IDs must be unique")
+        ranked = set(self.ranked_candidate_ids)
+        if not set(self.shown_candidate_ids).issubset(ranked):
+            raise ValueError("Shown candidates must belong to the ranking")
+        if not set(self.opened_candidate_ids).issubset(
+            set(self.shown_candidate_ids)
+        ):
+            raise ValueError("Opened candidates must have been shown first")
+        if self.cursor > len(self.ranked_candidate_ids):
+            raise ValueError("SearchSession cursor exceeds candidate count")
+        if self.shown_candidate_ids != self.ranked_candidate_ids[: self.cursor]:
+            raise ValueError(
+                "Shown candidate IDs must be the ranking prefix before the cursor"
+            )
+        if self.exhausted != (self.cursor >= len(self.ranked_candidate_ids)):
+            raise ValueError("SearchSession exhausted state disagrees with cursor")
+        exact_ids = [item.target_id for item in self.exact_anchor_matches]
+        if len(set(exact_ids)) != len(exact_ids):
+            raise ValueError("Exact Anchor targets must be deduplicated")
+        if set(exact_ids).intersection(ranked):
+            raise ValueError("Exact Element targets must not repeat in normal ranking")
+        return self
+
+
+class SearchBatch(SoftDocModel):
+    search_session_id: str = Field(min_length=1)
+    exact_anchor_matches: list[ExactAnchorMatch] = Field(default_factory=list)
+    unresolved_anchors: list[AnchorResolution] = Field(default_factory=list)
+    candidate_previews: list[CandidatePreview] = Field(default_factory=list)
+    next_cursor: int = Field(ge=0)
+    exhausted: bool
+    retrieval_trace: list[SearchSessionTraceEntry] = Field(default_factory=list)

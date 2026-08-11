@@ -2,10 +2,10 @@
 
 Milestone 1 implements a parser-neutral Soft Document Structure for multimodal
 PDFs. The current retrieval milestone adds Exact Anchor Lookup, deterministic
-SearchUnits, BM25, and injectable multilingual-E5 Dense retrieval. Retrieval
-state remains outside the SoftDoc model and does not expand Relations. Reader
-tools, CandidatePreview/SearchSession, RRF, Evidence Checker, LLM/VLM calls,
-and the Agent loop are not implemented yet.
+SearchUnits, BM25, injectable multilingual-E5 Dense retrieval, deterministic
+CandidatePreviews, and resumable SearchSessions. Retrieval state remains outside
+the SoftDoc model and does not expand Relations. Reader tools, RRF, Evidence
+Checker, LLM/VLM calls, and the Agent loop are not implemented yet.
 
 ## Windows local environment
 
@@ -212,6 +212,12 @@ The retrieval boundary and current status are documented in
 [`docs/RETRIEVAL_READING_V1_DESIGN.md`](docs/RETRIEVAL_READING_V1_DESIGN.md).
 The shared `SearchUnit` representation is used by both BM25 and Dense retrieval;
 it never copies Relation-neighbor text into the index.
+
+`SearchSessionBuilder` keeps Exact handles separate, deduplicates the complete
+BM25/Dense Element rankings, and creates a serializable cursor. A
+`SearchSessionNavigator` returns five bounded original-text `CandidatePreview`
+cards by default, can resume with the same SearchUnit index, and never opens an
+Element or follows a Relation automatically.
 
 The local E5 model is stored outside Git at:
 

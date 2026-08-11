@@ -1,8 +1,8 @@
 # Retrieval and Reading v1：当前设计与实现状态
 
-> 更新日期：2026-08-04
-> 前置版本：SoftDoc Milestone 1 (`softdoc-v0.1-dev`)
-> 当前阶段：检索入口原型；尚未进入 Reader、Evidence Checker 或 Agent 循环
+> 更新日期：2026-08-11
+> 前置版本：Retrieval Entry (`softdoc-v0.2-retrieval-entry`)
+> 当前阶段：检索入口和可恢复候选会话；尚未进入 Reader、Evidence Checker 或 Agent 循环
 
 ## 1. 当前已经实现
 
@@ -13,12 +13,14 @@
 - 可注入 `TextEncoder`：单元测试使用 mock，不要求联网或 GPU；
 - E5 超长保护：公共 SearchUnit 不变，Dense 内部无损重叠切片；
 - 与文本、模型版本和索引版本绑定的 Embedding cache；
-- 14 份真实 SoftDoc 和 142 道 MMLongBench 问题上的离线评测。
+- `CandidatePreview`：由命中 SearchUnit 确定性截取的轻量原文卡片；
+- `SearchSession`：保存完整候选顺序、cursor、已展示和已打开状态；
+- 默认每批 5 个候选，支持 JSON round-trip 后从下一批继续；
+- 28 份真实 SoftDoc 和 275 道 MMLongBench 问题上的离线评测。
 
 当前没有实现：
 
 - RRF 或其他分数融合；
-- CandidatePreview、SearchSession、cursor 和分批返回接口；
 - `READ_ELEMENT`、`READ_PAGE`、`INSPECT_REGION`、`FOLLOW_RELATION`；
 - 子问题自动生成、Evidence State、Evidence Checker；
 - LLM/VLM 调用、Agent 循环和答案生成。
@@ -57,14 +59,15 @@ Exact 命中只是“从这里开始读”。例如问题同时提到 `Figure 3`
 SubQuestion
   -> BM25 完整 Element 排名
   -> Dense 完整 Element 排名
-  -> 当前：保持两条来源，按批轮转、Element 去重
+  -> 保持两条来源，稳定轮转、Element 去重
   -> 未来：是否加入 RRF 由实测决定
-  -> CandidatePreview
+  -> SearchSession 每批返回少量 CandidatePreview
   -> 主 Reading Agent 选择 READ_ELEMENT
 ```
 
 当前轮转策略不混合 BM25 与 Dense 分数，也不是 RRF。它只用于测量真实在线
-“两条候选通道同时存在”时的入口覆盖；它不是最终冻结的融合算法。
+“两条候选通道同时存在”时的入口覆盖。完整候选顺序保存在 SearchSession 中，
+默认只显示 5 条，但不存在固定最终 Top-k。
 
 ## 4. Exact Anchor Lookup
 
@@ -170,7 +173,31 @@ Exact handles（如有）
 时才展示。离线的 `exact_first_dual` 指标表示“最终入口序列”的覆盖，不表示所有通道
 会在线同时执行。
 
-## 9. 代表性评测快照
+## 9. CandidatePreview 与 SearchSession
+
+`CandidatePreview` 是“是否值得打开”的轻量卡片，不是 LLM 摘要，也不是 Evidence。
+它只包含 Element 类型、页码、Section path、命中 SearchUnit 的有界原文窗口、检索
+来源、原始 rank 和 content availability。它不包含完整 Element 对象、HTML、高清图片、
+Relation 目标或任何自动生成结论。
+
+BM25 Preview 围绕 matched offsets 截取；Dense Preview 使用最佳 Dense SearchUnit 的
+命中字符范围。相同 Element 即使被 BM25 和 Dense 同时发现，也只占一个候选位置，
+但同时保存两个来源及各自 rank。Exact Element 目标保持单独返回，不在普通序列重复。
+
+`SearchSession` 是可 JSON 序列化的候选游标，保存：
+
+- 完整 `ranked_candidate_ids`，不存在固定最终 Top-k；
+- `shown_candidate_ids`、`opened_candidate_ids`；
+- `cursor` 与 `exhausted`；
+- Exact matches、unresolved Anchors 和 retrieval trace；
+- 生成 Preview 所需的检索元数据，不复制 Relation 邻居或完整 Element。
+
+默认第一次显示 1—5，第二次显示 6—10。Session round-trip 后只要重新加载同一份
+SearchUnit index，就能从原 cursor 继续，也可以重新访问之前展示的卡片。创建 Session
+不会自动 READ 候选；有 Exact 命中时，调用方可以先直接读取 Exact 目标，只有证据不足
+时才请求普通候选批次。
+
+## 10. 代表性评测快照
 
 数据：14 份 PDF、505 页、5860 Elements、142 道问题。其中 107 道提供 Gold 物理
 证据页；其余 35 道保留结果但不计证据页指标。Gold Element ID 不存在，因此以下是
@@ -199,15 +226,14 @@ data/processed/representative_14/retrieval_dense_e5/evaluation/
   retrieval_results.jsonl
 ```
 
-## 10. 下一步边界
+## 11. 下一步边界
 
 当前先不实现 RRF。合理的下一步是：
 
-1. 人工查看 BM25-only、Dense-only 和 neither 的代表性失败；
-2. 定义 CandidatePreview 的最小字段与确定性原文窗口；
-3. 定义 SearchSession、cursor、批次和来源多样性策略；
+1. 实现 `READ_ELEMENT`、`READ_PAGE`、`INSPECT_REGION` 和 `FOLLOW_RELATION`；
+2. 让 READ 后才暴露 confirmed Relation handles；
+3. 定义从实际读取结果产生的 Observation / Evidence State；
 4. 重新比较轮转、按页去重和未来 RRF，而不是直接假定某种融合最好；
-5. 然后实现 Reader 工具；
-6. 最后接入子问题、Evidence State、Checker 与主 Agent 循环。
+5. 最后接入子问题、Evidence Checker 与主 Agent 循环。
 
 Relation navigation 继续只属于 READ 之后的主动阅读阶段。
