@@ -461,6 +461,201 @@ def test_empty_tables_are_preserved_as_degraded_fallback_crops(
     )
 
 
+def test_empty_content_list_table_recovers_unique_preproc_html(
+    mineru_degraded_fixture_dir: Path,
+    tmp_path: Path,
+) -> None:
+    layout_path = mineru_degraded_fixture_dir / "layout.json"
+    layout = json.loads(layout_path.read_text(encoding="utf-8"))
+    table_bbox = [78, 57, 968, 921]
+    recovered_html = (
+        "<table><tr><td>Category</td><td>Value</td></tr>"
+        "<tr><td>Recovered</td><td>23</td></tr></table>"
+    )
+    layout["pdf_info"][1]["preproc_blocks"] = [
+        {
+            "type": "table",
+            "bbox": table_bbox,
+            "blocks": [
+                {
+                    "type": "table_body",
+                    "bbox": table_bbox,
+                    "lines": [
+                        {
+                            "bbox": table_bbox,
+                            "spans": [
+                                {
+                                    "type": "table",
+                                    "bbox": table_bbox,
+                                    "html": recovered_html,
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+    layout_path.write_text(
+        json.dumps(layout, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    document = _parse_mineru(
+        mineru_degraded_fixture_dir,
+        tmp_path / "output",
+    )
+    recovered = next(
+        element
+        for element in document.elements
+        if element.element_type == ElementType.TABLE
+        and element.page_number == 2
+    )
+
+    assert recovered.html == recovered_html
+    assert recovered.parse_status == ElementParseStatus.PARSED
+    assert recovered.content_availability == ContentAvailability.MIXED
+    assert recovered.crop_image_path is not None
+    assert (tmp_path / "output" / recovered.crop_image_path).is_file()
+    assert recovered.provenance.raw_payload["content"]["html"] == ""
+    assert recovered.metadata["html_recovery"] == {
+        "source": "page_preproc_blocks",
+        "candidate_index": 0,
+        "content_bbox": table_bbox,
+        "preproc_bbox": table_bbox,
+        "bbox_iou": 1.0,
+    }
+    warnings = document.metadata["adapter_warnings"]
+    assert sum(
+        warning["code"] == "table_html_recovered_from_preproc"
+        for warning in warnings
+    ) == 1
+
+
+def test_empty_content_list_table_does_not_guess_between_preproc_matches(
+    mineru_degraded_fixture_dir: Path,
+    tmp_path: Path,
+) -> None:
+    layout_path = mineru_degraded_fixture_dir / "layout.json"
+    layout = json.loads(layout_path.read_text(encoding="utf-8"))
+    table_bbox = [78, 57, 968, 921]
+    candidates = []
+    for value in ("first", "second"):
+        candidates.append(
+            {
+                "type": "table",
+                "bbox": table_bbox,
+                "blocks": [
+                    {
+                        "type": "table_body",
+                        "bbox": table_bbox,
+                        "lines": [
+                            {
+                                "bbox": table_bbox,
+                                "spans": [
+                                    {
+                                        "type": "table",
+                                        "bbox": table_bbox,
+                                        "html": f"<table><tr><td>{value}</td></tr></table>",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+    layout["pdf_info"][1]["preproc_blocks"] = candidates
+    layout_path.write_text(json.dumps(layout, ensure_ascii=False), encoding="utf-8")
+
+    document = _parse_mineru(mineru_degraded_fixture_dir, tmp_path / "output")
+    table = next(
+        element
+        for element in document.elements
+        if element.element_type == ElementType.TABLE
+        and element.page_number == 2
+    )
+
+    assert table.html is None
+    assert "html_recovery" not in table.metadata
+    assert not any(
+        warning["code"] == "table_html_recovered_from_preproc"
+        for warning in document.metadata["adapter_warnings"]
+    )
+
+
+def test_table_html_images_are_copied_and_rewritten(
+    tmp_path: Path,
+) -> None:
+    input_dir = tmp_path / "mineru_embedded_assets"
+    images_dir = input_dir / "images"
+    pages_dir = input_dir / "pages"
+    images_dir.mkdir(parents=True)
+    pages_dir.mkdir()
+    Image.new("RGB", (20, 20), "red").save(images_dir / "cell.png")
+    Image.new("RGB", (100, 100), "white").save(pages_dir / "page_0.png")
+    layout = {
+        "pdf_info": [
+            {
+                "page_idx": 0,
+                "page_size": [100, 100],
+                "para_blocks": [
+                    {"type": "table", "bbox": [10, 10, 90, 90]}
+                ],
+            }
+        ]
+    }
+    original_html = (
+        '<table><tr><td><img src="images/cell.png"/></td>'
+        '<td><img src="images/missing.png"/></td></tr></table>'
+    )
+    content = [
+        [
+            {
+                "type": "table",
+                "bbox": [10, 10, 90, 90],
+                "content": {"html": original_html},
+            }
+        ]
+    ]
+    (input_dir / "layout.json").write_text(
+        json.dumps(layout), encoding="utf-8"
+    )
+    (input_dir / "fixture_content_list_v2.json").write_text(
+        json.dumps(content), encoding="utf-8"
+    )
+
+    output_dir = tmp_path / "output"
+    document = _parse_mineru(input_dir, output_dir)
+    table = next(
+        element
+        for element in document.elements
+        if element.element_type == ElementType.TABLE
+    )
+
+    assets = table.metadata["embedded_html_assets"]
+    assert len(assets) == 2
+    assert assets[0]["available"] is True
+    assert assets[0]["reason"] == "copied"
+    stored = Path(assets[0]["stored_path"])
+    assert (output_dir / stored).is_file()
+    assert stored.as_posix() in (table.html or "")
+    assert assets[1] == {
+        "original_src": "images/missing.png",
+        "stored_path": None,
+        "available": False,
+        "reason": "source_file_missing",
+    }
+    assert 'src="images/missing.png"' in (table.html or "")
+    assert table.provenance.raw_payload["content"]["html"] == original_html
+    assert table.crop_image_path is not None
+    assert (output_dir / table.crop_image_path).is_file()
+    assert any(
+        warning["code"] == "missing_embedded_html_asset"
+        for warning in document.metadata["adapter_warnings"]
+    )
+
+
 def test_block_conversion_error_is_isolated_and_round_trips(
     mineru_degraded_fixture_dir: Path,
     tmp_path: Path,

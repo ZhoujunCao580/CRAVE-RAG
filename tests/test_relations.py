@@ -1447,6 +1447,90 @@ def test_numbered_caption_spans_aligned_chart_panels(
     } == {panel.element_id for panel in panels}
 
 
+def test_composite_visual_fallback_label_is_idempotent(parsed_document) -> None:
+    document = parsed_document.model_copy(deep=True)
+    page = document.pages[0]
+    source = Element(
+        element_id=element_id(
+            document.document_id,
+            page.page_index,
+            90,
+            ElementType.PARAGRAPH.value,
+            "composite-reference",
+        ),
+        document_id=document.document_id,
+        page_id=page.page_id,
+        page_number=page.page_number,
+        element_type=ElementType.PARAGRAPH,
+        reading_order=0,
+        text="See Figure 9 for the complete result.",
+        provenance=document.provenance.model_copy(deep=True),
+    )
+    visual = Element(
+        element_id=element_id(
+            document.document_id,
+            page.page_index,
+            91,
+            ElementType.FIGURE.value,
+            "composite-visual",
+        ),
+        document_id=document.document_id,
+        page_id=page.page_id,
+        page_number=page.page_number,
+        element_type=ElementType.FIGURE,
+        reading_order=1,
+        text="composite visual panels",
+        bbox=BoundingBox.from_raw(
+            bbox_id="bbox:composite-visual",
+            raw=(100, 100, 900, 600),
+            page_width=1000,
+            page_height=1400,
+        ),
+        provenance=document.provenance.model_copy(deep=True),
+    )
+    caption = Element(
+        element_id=element_id(
+            document.document_id,
+            page.page_index,
+            92,
+            ElementType.CAPTION.value,
+            "composite-caption",
+        ),
+        document_id=document.document_id,
+        page_id=page.page_id,
+        page_number=page.page_number,
+        element_type=ElementType.CAPTION,
+        reading_order=2,
+        text="Figure 4: Composite panel labels.",
+        provenance=document.provenance.model_copy(deep=True),
+        metadata={"target_element_id": visual.element_id},
+    )
+    document.elements = [source, visual, caption]
+    document.pages = [
+        page.model_copy(
+            update={
+                "element_ids": [
+                    source.element_id,
+                    visual.element_id,
+                    caption.element_id,
+                ],
+                "reading_order": [
+                    source.element_id,
+                    visual.element_id,
+                    caption.element_id,
+                ],
+            }
+        )
+    ]
+    document.sections = []
+    document.relations = []
+
+    RelationBuilder(document).build_all()
+    RelationBuilder(document).build_all()
+
+    assert visual.metadata["logical_reference_labels"] == ["Figure 9"]
+
+
 def test_no_pairwise_near_or_semantic_relations(parsed_document) -> None:
     relation_values = {relation.relation_type.value for relation in parsed_document.relations}
     assert "near" not in relation_values

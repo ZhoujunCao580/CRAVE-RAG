@@ -53,6 +53,7 @@ from softdoc.pipeline import (
     RuleAuditPass,
     SoftDocPipeline,
     StructurePass,
+    TableFragmentReconciliationPass,
     ValidationPass,
 )
 from softdoc.page_labels import (
@@ -68,6 +69,23 @@ from softdoc.repetition import (
 )
 from softdoc.sections import SectionBuilder
 from softdoc.structure import SoftDocumentStructureBuilder, StructureBuildResult
+from softdoc.table_view import (
+    TableCell,
+    TableMaterializer,
+    TableView,
+    TableViewBuildResult,
+    TableViewIssue,
+    TableViewIssueCode,
+    TableVisualAsset,
+    TableVisualAssetSource,
+)
+from softdoc.table_fragments import (
+    TableFragmentAssignment,
+    TableReconciliationDecision,
+    TableReconciliationResult,
+    TableReconciliationStatus,
+    reconcile_mineru_aggregate_tables,
+)
 
 __all__ = [
     "BoundingBox",
@@ -120,5 +138,19 @@ __all__ = [
     "RuleAuditPass",
     "SoftDocPipeline",
     "StructurePass",
+    "TableFragmentReconciliationPass",
     "ValidationPass",
+    "TableCell",
+    "TableMaterializer",
+    "TableView",
+    "TableViewBuildResult",
+    "TableViewIssue",
+    "TableViewIssueCode",
+    "TableVisualAsset",
+    "TableVisualAssetSource",
+    "TableFragmentAssignment",
+    "TableReconciliationDecision",
+    "TableReconciliationResult",
+    "TableReconciliationStatus",
+    "reconcile_mineru_aggregate_tables",
 ]

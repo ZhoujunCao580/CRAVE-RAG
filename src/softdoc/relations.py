@@ -27,6 +27,7 @@ from softdoc.models import (
     RelationStatus,
     RelationType,
 )
+from softdoc.table_fragments import FRAGMENT_METADATA_KEY, RULE_ID as TABLE_FRAGMENT_RULE_ID
 
 
 _SUBREFERENCE = r"[A-Za-z](?:\s*[-\u2012\u2013\u2014]\s*[A-Za-z])?"
@@ -590,6 +591,9 @@ class RelationBuilder:
         generated.extend(footnote_relations)
         generated.extend(self.build_explicit_reference_relations(caption_relations))
         generated.extend(self.build_cross_page_continuation_candidates())
+        # Parser-backed aggregate reconciliation is stronger than layout
+        # candidates and is intentionally appended last.
+        generated.extend(self.build_confirmed_table_fragment_relations())
         by_id = {
             relation.relation_id: relation
             for relation in self.document.relations
@@ -598,6 +602,62 @@ class RelationBuilder:
         by_id.update({relation.relation_id: relation for relation in generated})
         self.document.relations = list(by_id.values())
         return self.document.relations
+
+    def build_confirmed_table_fragment_relations(self) -> list[Relation]:
+        """Connect adjacent page fragments proven to share aggregate HTML."""
+
+        groups: dict[str, list[Element]] = defaultdict(list)
+        for element in self.document.elements:
+            metadata = element.metadata.get(FRAGMENT_METADATA_KEY)
+            if (
+                element.element_type == ElementType.TABLE
+                and isinstance(metadata, dict)
+                and metadata.get("status") == "confirmed"
+                and isinstance(metadata.get("group_id"), str)
+            ):
+                groups[metadata["group_id"]].append(element)
+
+        relations: list[Relation] = []
+        for group_id, fragments in sorted(groups.items()):
+            ordered = sorted(
+                fragments,
+                key=lambda element: int(
+                    element.metadata[FRAGMENT_METADATA_KEY]["fragment_index"]
+                ),
+            )
+            for source, target in zip(ordered, ordered[1:]):
+                source_metadata = source.metadata[FRAGMENT_METADATA_KEY]
+                target_metadata = target.metadata[FRAGMENT_METADATA_KEY]
+                relations.append(
+                    self._relation(
+                        source.element_id,
+                        target.element_id,
+                        RelationType.CONTINUED_ON,
+                        confidence=1.0,
+                        status=RelationStatus.CONFIRMED,
+                        created_by=RelationSource.DETERMINISTIC_RULE,
+                        rule=TABLE_FRAGMENT_RULE_ID,
+                        description=(
+                            "Page-local table fragments uniquely reconstruct "
+                            "the MinerU aggregate table in physical page order."
+                        ),
+                        data={
+                            "group_id": group_id,
+                            "source_page_number": source.page_number,
+                            "target_page_number": target.page_number,
+                            "source_aggregate_row_range": [
+                                source_metadata["aggregate_row_start"],
+                                source_metadata["aggregate_row_end"],
+                            ],
+                            "target_aggregate_row_range": [
+                                target_metadata["aggregate_row_start"],
+                                target_metadata["aggregate_row_end"],
+                            ],
+                            "aggregate_html_preserved_in_provenance": True,
+                        },
+                    )
+                )
+        return relations
 
     def build_containment_relations(self) -> list[Relation]:
         relations: list[Relation] = []
@@ -1086,9 +1146,16 @@ class RelationBuilder:
         section_root = (
             visual.section_path[0] if visual.section_path else None
         )
-        visual.metadata.setdefault("logical_reference_labels", []).append(
-            f"Figure {number}"
+        label = f"Figure {number}"
+        existing_labels = visual.metadata.get("logical_reference_labels", [])
+        labels = (
+            list(dict.fromkeys(existing_labels))
+            if isinstance(existing_labels, list)
+            else []
         )
+        if label not in labels:
+            labels.append(label)
+        visual.metadata["logical_reference_labels"] = labels
         visual.metadata["composite_visual_candidate"] = True
         return ReferenceTarget(
             target_id=visual.element_id,
@@ -1667,6 +1734,17 @@ class RelationBuilder:
         if not source_tables or not target_tables:
             return []
         source, target = source_tables[-1], target_tables[0]
+        source_fragment = source.metadata.get(FRAGMENT_METADATA_KEY)
+        target_fragment = target.metadata.get(FRAGMENT_METADATA_KEY)
+        if (
+            isinstance(source_fragment, dict)
+            and isinstance(target_fragment, dict)
+            and source_fragment.get("status") == "confirmed"
+            and source_fragment.get("group_id") == target_fragment.get("group_id")
+            and int(target_fragment.get("fragment_index", -1))
+            == int(source_fragment.get("fragment_index", -2)) + 1
+        ):
+            return []
         source_label = _table_label_for_element(source, self.document.elements)
         target_label = _table_label_for_element(target, self.document.elements)
         same_label = bool(source_label and source_label == target_label)

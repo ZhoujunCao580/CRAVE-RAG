@@ -61,6 +61,82 @@ softdoc-v0.4.1-retrieval-schema
 最后一个schema收尾版本增加display label、明确snippet坐标空间、preview source和
 content/metadata match scope。它不改变检索排名，195项测试通过，28文档Hit@K保持不变。
 
+## Initial Planner v0基础设施
+
+检索冻结后增加了question-only Initial Planner边界：严格SubQuestion DAG schema、Prompt、
+可注入模型接口、Pydantic/DAG校验和Mock测试。随后接入本地Ollama与
+`qwen3:4b-instruct-2507-q4_K_M`，增加最多6节点、Root计入的最大深度4、数字忠实性校验，
+以及一次可追踪的验证纠错重试。Planner仍不选择阅读动作，也不实现动态重规划；动态
+`REFINE_PLAN`必须等待Evidence State和Evidence Checker提供明确gap。
+
+真实Planner复测后将Prompt升级为`planner-v0.3`：完整Anchor直接复用Exact Lookup语法校验，
+拒绝把`Figure 3`拆成`Figure`和`3`；原问题的隐式Root负责比较、求差等无新增证据的合成，
+子问题只保留证据需求，并要求覆盖原问题中的全部实体、约束、输出和解释义务。
+
+在28份真实文档对应的275道MMLongBench-Doc问题上完成`planner-v0.3`基线后，将Prompt升级
+为`planner-v0.4`：用正反例禁止纯计算、排名、排序、格式化和定位脚手架节点；要求同一局部
+证据范围尽量形成一个最小信息需求；明确只有单个编号Exact引用进入`explicit_anchors`，命名
+章节、相对位置、序数和页码范围只保留在文本约束中。
+
+对101道高风险真实题复测后，`planner-v0.5`继续收敛少量残余模式：必须逐字复制原问题字段，
+不得把count改成list或丢失序数/top-N/阈值；同一视觉区域的多条件筛选保持一个证据需求，
+而“先确定未知实体、再到另一处查其属性”保留为真正的依赖节点。
+
+24道残余模式探针显示局部语义仍可能丢失排除范围、yes/no阈值、比较集合或总体样本数，
+因此`planner-v0.6`为这些证据充分性边界以及成对年份计算增加通用正例；仍未增加新的
+Planner schema或数据集专属规则。
+
+最终残余探针促成`planner-v0.7`：强化yes/no阈值的字面保留、已知比较集合的并行关系，
+并将“与参照对象相似的对象数量”限制为参照与候选两类证据需求，比较和计数仍由Root执行。
+
+随后在28份本地文档对应的275道真实问题上完成全量生成和逐题计划级审阅。`planner-v0.8`
+修复兄弟节点requirements串线、错误比例操作数、排除条件丢失和相似Figure计算节点；
+`planner-v0.9`进一步要求共享年份/范围逐节点保留、同一局部来源的多值合并，并硬性禁止
+公式计算节点。最终使用同一`planner-v0.9`对275道题完整重跑，全部结构合法，其中7道经过
+一次验证纠错；人工审阅标记231道正确、39道可接受、5道错误。未修改Planner schema、
+Pydantic验证、SoftDoc或检索逻辑。
+
+随后将Prompt升级为`planner-v0.10`并收缩Planner schema：删除由开发阶段自行引入、与`text`
+重复且没有任何Search、Reader或Evidence消费者的`answer_requirements`。SubQuestion现在只用
+`text`表达证据需求；相应的重复字段校验和Prompt要求一并删除，DAG、稳定ID、显式Anchor、
+节点数与深度边界保持不变。`planner-v0.9`的275题审计保留为历史结果，不冒充新Schema结果。
+
+随后使用`planner-v0.10`重跑旧审计中的44道非完美高风险题，44道均通过结构验证，其中2道
+经过一次自动纠错；人工计划级结果为32道正确、3道可接受、9道错误。旧版5道错误中3道修复、
+1道改善为可接受、1道仍错误。残余错误集中于“把最终计算值当成文档证据”以及病句中的语义
+角色反转，因此冻结结果并保留审计，不再以个案继续膨胀Prompt。
+
+为避免开发题驱动的Prompt过拟合，`planner-v0.11`移除了BBA、500 MHz、Figure 6、Page 42等
+来源于MMLongBench审计题的案例，只保留两个虚构示例和八条Planner通用边界。隐式Root明确
+不属于SubQuestion、不执行检索且不增加Agent动作；Exact Anchor继续由确定性组件独立处理。
+
+随后以同一`planner-v0.11`在44道历史高风险题上对比Qwen3 4B Instruct-2507与Qwen3 8B。
+两者均显式关闭Thinking以隔离参数规模差异；8B可在RTX 4060 Laptop 8GB上100% GPU运行。
+4B得到21正确、15可接受、7语义错误、1结构错误，8B得到22正确、12可接受、10语义错误；
+平均耗时均约6.3秒。因此暂不切换默认模型，也不根据这批开发题继续追加Prompt案例。
+
+`planner-v0.12`只增加一条与数据集无关的保守原则：当拆分必要性、隐藏公式或语义角色不明确
+时，保留完整原问题作为一个SubQuestion，不强行猜测。InitialPlan同时冻结为provisional
+计划：原问题Root始终是最终目标，未来Controller必须依据Root级Evidence gap通过既有
+`UPDATE_PLAN`做版本化修订，而不能盲信或机械完成初始节点。v0.11的4B实验结果继续作为原始
+基线，不冒充v0.12评测。完整说明见`docs/PLANNER_V0_SUMMARY.md`。
+
+根据外部设计复核，`planner-v0.13`继续做通用化收缩：删除差值、比例、总计、百分比等题型
+枚举，改为禁止新增“只对其他节点已请求事实执行确定性运算”的节点；同时明确若比较、排序或
+选择可由同一局部证据直接回答，它本身仍可作为一个SubQuestion。Planner的模型输出与运行时
+`InitialPlan`均删除`explicit_anchors`，确定性Anchor结果由Exact Lookup独立保存。
+这些变化未重跑真实模型，不能借用v0.11的结果。
+
+`planner-v0.14`把依赖关系从“未知实体或短语”推广为“前序答案是否为实例化后续证据需求所
+必需”，覆盖条件、类别、数值、时期等未知槽位；只要后续需求能够仅凭Root独立搜索，就保持
+并行。同时冻结Conservative + Deferred Planning边界：初始Planner不确定时不猜，真实阅读后
+再由Evidence gap触发`UPDATE_PLAN`。此后不再按开发错误题扩充Prompt。
+
+冻结决定：`planner-v0.14`成为Initial Planner v0正式冻结版本，Prompt、LLM输出Schema、默认
+6节点与4层深度均由快照测试保护。未来只在Reader和Evidence闭环完成后，以相同下游组件和预算
+比较No Planner、Initial Planner和Deferred Planner；该实验已登记在`docs/TODO.md`，执行前不
+宣称Planner或动态修订具有净收益。
+
 ## 已完成但不再保留的大型产物
 
 - representative-14与extension-14的旧SoftDoc版本；
@@ -72,7 +148,20 @@ content/metadata match scope。它不改变检索排名，195项测试通过，2
 关键结论已保存在Git、`PROJECT_GUIDE.md`和当前retrieval summary中。上述产物都可由28份
 原始PDF、当前代码和本地模型重新生成。
 
-## 下一冻结目标
+## Reading foundation 冻结
 
-Reader v1：`READ_ELEMENT / READ_PAGE / INSPECT_REGION / FOLLOW_RELATION`，统一输出
-ReadObservation，但暂不实现Evidence Checker或Agent循环。
+在进入视觉阅读前，冻结以下基础设施：
+
+- `planner-v0.14` 的 Conservative + Deferred Initial Planner 边界；
+- parser-neutral TableView：只序列化真实 HTML 单元格，`rowspan/colspan` 由运行时 occupancy grid 解析；
+- MinerU Table HTML 和视觉资源恢复；
+- 保守的跨页聚合表重组：只有页归属唯一、顺序完整、无跨边界 `rowspan` 且重组校验通过时，才按物理页拆分并生成 confirmed `continued_on`；否则整个组保持原样；
+- 28 份开发文档视觉资源审计：1743/1743 个 Figure/Chart/Table/Equation 均有合法 bbox 和可读取视觉来源，其中 2 个恢复对象使用 `page image + bbox` 延迟裁剪。
+
+冻结标签：
+
+```text
+softdoc-v0.5-reading-foundation
+```
+
+下一阶段只实现 Visual Reading Environment / Observation 边界，不在本次冻结中实现 Evidence Checker 或 Agent 循环。

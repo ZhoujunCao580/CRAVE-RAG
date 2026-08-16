@@ -17,6 +17,7 @@ def test_output_files_and_json_round_trip(parsed_document, tmp_path) -> None:
         "elements.jsonl",
         "relations.jsonl",
         "debug/cross_page_relations.json",
+        "debug/cross_page_table_reconciliation.json",
         "debug/adapter_warnings.json",
         "debug/document_outline.json",
         "debug/document_outline.md",

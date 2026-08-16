@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+from softdoc.assets import crop_page_bbox
 from softdoc.ids import (
     bbox_id,
     document_id,
@@ -29,6 +31,12 @@ from softdoc.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+_HTML_IMAGE_SOURCE = re.compile(
+    r"(?P<prefix><img\b[^>]*?\bsrc\s*=\s*)(?P<quote>[\"'])(?P<src>.*?)(?P=quote)",
+    re.IGNORECASE,
+)
 
 
 _BLOCK_TYPE_MAP: dict[str, ElementType] = {
@@ -182,6 +190,7 @@ class MinerUAdapter:
                 page_width=width,
                 page_height=height,
                 page_image=page_image,
+                page_payload=page_payload,
                 blocks=blocks,
                 layout_blocks=layout_blocks,
                 content_bbox_coordinate_system=content_bbox_coordinate_system,
@@ -336,6 +345,7 @@ class MinerUAdapter:
         page_width: float,
         page_height: float,
         page_image: Path | None,
+        page_payload: dict[str, Any],
         blocks: list[dict[str, Any]],
         layout_blocks: list[dict[str, Any] | None],
         content_bbox_coordinate_system: str,
@@ -358,6 +368,7 @@ class MinerUAdapter:
                     page_width=page_width,
                     page_height=page_height,
                     page_image=page_image,
+                    page_payload=page_payload,
                     block=block,
                     block_index=block_index,
                     layout_block=layout_block,
@@ -398,6 +409,7 @@ class MinerUAdapter:
         page_width: float,
         page_height: float,
         page_image: Path | None,
+        page_payload: dict[str, Any],
         block: dict[str, Any],
         block_index: int,
         layout_block: dict[str, Any] | None,
@@ -419,6 +431,27 @@ class MinerUAdapter:
         main_id = element_id(doc_id, page_index, source_index, element_type.value)
         content = block.get("content") if isinstance(block.get("content"), dict) else {}
         text, html = _element_content(element_type, block, content)
+        html_recovery: dict[str, Any] | None = None
+        if element_type == ElementType.TABLE and not (html or "").strip():
+            recovered = self._recover_table_html_from_preproc(
+                page_payload=page_payload,
+                layout_block=layout_block,
+            )
+            if recovered is not None:
+                html, html_recovery = recovered
+                self._warn(
+                    "table_html_recovered_from_preproc",
+                    (
+                        f"Recovered missing table HTML from MinerU preproc_blocks "
+                        f"at page {page_index}, block {block_index}"
+                    ),
+                    {
+                        "page_index": page_index,
+                        "block_index": block_index,
+                        "source_locator": f"page[{page_index}].block[{block_index}]",
+                        **html_recovery,
+                    },
+                )
         if element_type == ElementType.HEADING and not (text or "").strip():
             self._warn(
                 "empty_heading_skipped",
@@ -434,6 +467,14 @@ class MinerUAdapter:
             return []
 
         image_path = self._copy_element_asset(input_path, output_dir, block, content, main_id)
+        embedded_html_assets: list[dict[str, Any]] = []
+        if html:
+            html, embedded_html_assets = self._copy_embedded_html_assets(
+                input_path=input_path,
+                output_dir=output_dir,
+                html=html,
+                owner_id=main_id,
+            )
         layout_bbox = layout_block.get("bbox") if layout_block else None
         bbox = self._bbox(
             owner_id=main_id,
@@ -489,15 +530,22 @@ class MinerUAdapter:
                 },
             )
 
+        provenance_metadata = {"layout_payload": layout_block} if layout_block else {}
+        if html_recovery is not None:
+            provenance_metadata["html_recovery"] = html_recovery
         provenance = self._provenance(
             source_path=content_path.relative_to(input_path),
             source_locator=f"page[{page_index}].block[{block_index}]",
             raw_payload=block,
-            metadata={"layout_payload": layout_block} if layout_block else {},
+            metadata=provenance_metadata,
         )
         metadata = dict(block.get("metadata") or {})
         metadata["mineru_type"] = raw_type
         metadata["parser_backend"] = self.backend
+        if html_recovery is not None:
+            metadata["html_recovery"] = html_recovery
+        if embedded_html_assets:
+            metadata["embedded_html_assets"] = embedded_html_assets
         block_sub_type = block.get("sub_type")
         if block_sub_type is not None:
             metadata["mineru_sub_type"] = str(block_sub_type)
@@ -869,6 +917,92 @@ class MinerUAdapter:
             source = None
         return self._copy_asset(source, output_dir / "assets" / "elements", owner_id, output_dir)
 
+    def _copy_embedded_html_assets(
+        self,
+        *,
+        input_path: Path,
+        output_dir: Path,
+        html: str,
+        owner_id: str,
+    ) -> tuple[str, list[dict[str, Any]]]:
+        """Copy local ``<img src>`` resources and rewrite their HTML paths.
+
+        MinerU may place visual table cells in separate image files referenced
+        only from the table HTML.  Copying just ``content.image_source`` keeps
+        the outer table crop but leaves those cell images dangling.  Raw MinerU
+        HTML remains available in provenance; the Element HTML is rewritten to
+        portable paths inside the SoftDoc output.
+        """
+
+        records: list[dict[str, Any]] = []
+        input_root = input_path.resolve()
+
+        def replace(match: re.Match[str]) -> str:
+            source_text = match.group("src").strip()
+            record: dict[str, Any] = {
+                "original_src": source_text,
+                "stored_path": None,
+                "available": False,
+            }
+            records.append(record)
+            if not source_text:
+                record["reason"] = "empty_src"
+                return match.group(0)
+            lowered = source_text.casefold()
+            if lowered.startswith("data:"):
+                record["available"] = True
+                record["reason"] = "inline_data_uri"
+                return match.group(0)
+            if lowered.startswith(("http://", "https://")):
+                record["reason"] = "external_url_not_copied"
+                return match.group(0)
+
+            # Forward slashes are valid on Windows and native on Linux;
+            # normalize the uncommon backslash form for cross-platform runs.
+            relative_source = Path(source_text.replace("\\", "/"))
+            candidates = [input_root / relative_source]
+            if len(relative_source.parts) == 1:
+                candidates.append(input_root / "images" / relative_source.name)
+            source = next((path for path in candidates if path.is_file()), None)
+            if source is None:
+                record["reason"] = "source_file_missing"
+                self._warn(
+                    "missing_embedded_html_asset",
+                    f"Referenced HTML image asset does not exist: {source_text}",
+                    {"owner_id": owner_id, "src": source_text},
+                )
+                return match.group(0)
+            try:
+                source.resolve().relative_to(input_root)
+            except ValueError:
+                record["reason"] = "source_outside_input_root"
+                self._warn(
+                    "unsafe_embedded_html_asset",
+                    f"Ignored HTML image outside MinerU input: {source_text}",
+                    {"owner_id": owner_id, "src": source_text},
+                )
+                return match.group(0)
+
+            copied = self._copy_asset(
+                source,
+                output_dir / "assets" / "elements",
+                f"{owner_id}:embedded-html:{len(records) - 1}:{source_text}",
+                output_dir,
+            )
+            if copied is None:  # Defensive; ``source`` is a verified file.
+                record["reason"] = "copy_failed"
+                return match.group(0)
+            portable = copied.as_posix()
+            record["stored_path"] = portable
+            record["available"] = True
+            record["reason"] = "copied"
+            return (
+                f"{match.group('prefix')}{match.group('quote')}"
+                f"{portable}{match.group('quote')}"
+            )
+
+        return _HTML_IMAGE_SOURCE.sub(replace, html), records
+
     def _copy_asset(self, source: Path | None, destination_dir: Path, owner_id: str, output_dir: Path) -> Path | None:
         if source is None:
             return None
@@ -886,31 +1020,14 @@ class MinerUAdapter:
         bbox: BoundingBox | None,
         owner_id: str,
     ) -> Path | None:
-        if page_image is None or bbox is None:
-            return None
-        source = output_dir / page_image
-        if not source.is_file():
-            return None
         try:
-            from PIL import Image
-
-            with Image.open(source) as image:
-                width, height = image.size
-                x1, y1, x2, y2 = bbox.normalized
-                left = max(0, min(width - 1, int(round(x1 * width))))
-                top = max(0, min(height - 1, int(round(y1 * height))))
-                right = max(left + 1, min(width, int(round(x2 * width))))
-                bottom = max(top + 1, min(height, int(round(y2 * height))))
-                crop = image.crop((left, top, right, bottom))
-                destination = (
-                    output_dir
-                    / "assets"
-                    / "elements"
-                    / f"{stable_digest(f'{owner_id}:fallback-crop')}.png"
-                )
-                crop.save(destination)
-                crop.close()
-        except Exception as exc:
+            destination = crop_page_bbox(
+                output_dir=output_dir,
+                page_image=page_image,
+                normalized_bbox=bbox.normalized if bbox else None,
+                owner_id=owner_id,
+            )
+        except Exception as exc:  # Defensive: helper normally returns None.
             self._warn(
                 "fallback_crop_failed",
                 f"Failed to crop page image for {owner_id}: {type(exc).__name__}: {exc}",
@@ -921,7 +1038,17 @@ class MinerUAdapter:
                 },
             )
             return None
-        return destination.relative_to(output_dir)
+        if destination is None and page_image is not None and bbox is not None:
+            self._warn(
+                "fallback_crop_failed",
+                f"Failed to crop page image for {owner_id}",
+                {
+                    "owner_id": owner_id,
+                    "page_image": page_image.as_posix(),
+                    "bbox": bbox.model_dump(mode="json"),
+                },
+            )
+        return destination
 
     def _record_unknown_fields(self, block: dict[str, Any], page_index: int, block_index: int) -> None:
         unknown_block = sorted(set(block) - _KNOWN_BLOCK_KEYS)
@@ -1077,6 +1204,57 @@ class MinerUAdapter:
         return aligned
 
     @staticmethod
+    def _recover_table_html_from_preproc(
+        *,
+        page_payload: dict[str, Any],
+        layout_block: dict[str, Any] | None,
+    ) -> tuple[str, dict[str, Any]] | None:
+        """Recover table HTML omitted from content_list_v2.
+
+        Some MinerU pipeline outputs retain an empty table in
+        ``*_content_list_v2.json`` while the same table, with complete HTML,
+        remains in ``*_middle.json`` under ``preproc_blocks``.  Recovery is
+        intentionally conservative: the content-list table must already have
+        an aligned layout block, and exactly one preproc table must overlap its
+        page-coordinate bbox with IoU >= 0.95.
+        """
+
+        reference_bbox = layout_block.get("bbox") if layout_block else None
+        if not _valid_bbox_values(reference_bbox):
+            return None
+
+        matches: list[tuple[float, int, dict[str, Any], str]] = []
+        for candidate_index, candidate in enumerate(
+            page_payload.get("preproc_blocks", [])
+        ):
+            if not isinstance(candidate, dict):
+                continue
+            if _normalized_layout_type(candidate.get("type")) != "table":
+                continue
+            candidate_bbox = candidate.get("bbox")
+            if not _valid_bbox_values(candidate_bbox):
+                continue
+            candidate_html = _first_nonempty_html(candidate)
+            if candidate_html is None:
+                continue
+            overlap = _bbox_iou(reference_bbox, candidate_bbox)
+            if overlap >= 0.95:
+                matches.append(
+                    (overlap, candidate_index, candidate, candidate_html)
+                )
+
+        if len(matches) != 1:
+            return None
+        overlap, candidate_index, candidate, candidate_html = matches[0]
+        return candidate_html, {
+            "source": "page_preproc_blocks",
+            "candidate_index": candidate_index,
+            "content_bbox": list(reference_bbox),
+            "preproc_bbox": list(candidate["bbox"]),
+            "bbox_iou": round(overlap, 6),
+        }
+
+    @staticmethod
     def _find_content_path(input_path: Path) -> Path:
         direct = input_path / "content_list_v2.json"
         if direct.exists():
@@ -1206,6 +1384,47 @@ def _element_content(
             )
         ), None
     return _optional_text(block.get("text")), None
+
+
+def _first_nonempty_html(payload: Any) -> str | None:
+    if isinstance(payload, dict):
+        direct = payload.get("html")
+        if isinstance(direct, str) and direct.strip():
+            return direct
+        for value in payload.values():
+            recovered = _first_nonempty_html(value)
+            if recovered is not None:
+                return recovered
+    elif isinstance(payload, list):
+        for value in payload:
+            recovered = _first_nonempty_html(value)
+            if recovered is not None:
+                return recovered
+    return None
+
+
+def _valid_bbox_values(value: Any) -> bool:
+    if not isinstance(value, (list, tuple)) or len(value) != 4:
+        return False
+    try:
+        x1, y1, x2, y2 = (float(item) for item in value)
+    except (TypeError, ValueError):
+        return False
+    return x1 < x2 and y1 < y2
+
+
+def _bbox_iou(first: Any, second: Any) -> float:
+    if not _valid_bbox_values(first) or not _valid_bbox_values(second):
+        return 0.0
+    ax1, ay1, ax2, ay2 = (float(item) for item in first)
+    bx1, by1, bx2, by2 = (float(item) for item in second)
+    intersection_width = max(0.0, min(ax2, bx2) - max(ax1, bx1))
+    intersection_height = max(0.0, min(ay2, by2) - max(ay1, by1))
+    intersection = intersection_width * intersection_height
+    first_area = (ax2 - ax1) * (ay2 - ay1)
+    second_area = (bx2 - bx1) * (by2 - by1)
+    union = first_area + second_area - intersection
+    return intersection / union if union > 0.0 else 0.0
 
 
 def _spans_text(value: Any) -> str:

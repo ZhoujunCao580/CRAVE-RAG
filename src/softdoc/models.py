@@ -176,6 +176,17 @@ class Element(SoftDocModel):
     provenance: Provenance
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    @property
+    def visual_asset_path(self) -> Path | None:
+        """Return the canonical visual resource without erasing its origin.
+
+        ``image_path`` means the parser exported an Element image, whereas
+        ``crop_image_path`` means SoftDoc recovered it from the page and bbox.
+        Consumers use this property so both cases behave identically.
+        """
+
+        return self.image_path or self.crop_image_path
+
     @model_validator(mode="after")
     def validate_content(self) -> Self:
         if self.content_availability is None:

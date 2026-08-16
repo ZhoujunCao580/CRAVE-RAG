@@ -3,9 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from softdoc.adapters import MinerUAdapter
 from softdoc.coverage import CoverageRecoveryResult
+from softdoc.models import ElementType
 from softdoc.pipeline import (
     CoverageRecoveryPass,
     FloatingSectionPass,
@@ -15,7 +17,9 @@ from softdoc.pipeline import (
     RuleAuditPass,
     SoftDocPipeline,
     StructurePass,
+    TableFragmentReconciliationPass,
     ValidationPass,
+    VisualAssetRecoveryPass,
 )
 
 
@@ -24,6 +28,8 @@ def _passes():
         CoverageRecoveryPass(),
         PageLabelPass(),
         StructurePass(),
+        VisualAssetRecoveryPass(),
+        TableFragmentReconciliationPass(),
         RelationPass(),
         FloatingSectionPass(),
         ValidationPass(),
@@ -50,6 +56,8 @@ def test_pipeline_is_the_only_full_orchestration_entry(
         "coverage_recovery",
         "page_label_resolver",
         "document_structure",
+        "visual_asset_recovery",
+        "table_fragment_reconciliation",
         "relation_builder",
         "floating_section_resolver",
         "reference_validation",
@@ -138,3 +146,84 @@ def test_pipeline_rejects_unsatisfied_pass_dependencies(
 
     with pytest.raises(RuntimeError, match="requires unavailable"):
         pipeline.run(mineru_fixture_dir, tmp_path / "output")
+
+
+def test_visual_asset_pass_recovers_normalized_visual_element(
+    parsed_document,
+    tmp_path: Path,
+) -> None:
+    document = parsed_document.model_copy(deep=True)
+    page = document.pages[0]
+    element = next(
+        item for item in document.elements if item.page_id == page.page_id
+    )
+    element.element_type = ElementType.FIGURE
+    element.image_path = None
+    element.crop_image_path = None
+    output_dir = tmp_path / "visual_recovery"
+    page_asset = output_dir / "assets" / "pages" / "page.png"
+    page_asset.parent.mkdir(parents=True)
+    Image.new("RGB", (1000, 1000), "white").save(page_asset)
+    page.image_path = page_asset.relative_to(output_dir)
+    context = PassContext(
+        input_path=tmp_path,
+        output_dir=output_dir,
+        available={"document_structure"},
+    )
+    document_pass = VisualAssetRecoveryPass()
+
+    first = document_pass.apply(document, context)
+    second = document_pass.apply(document, context)
+
+    assert first.changed
+    assert element.element_id in first.details["recovered_element_ids"]
+    assert element.crop_image_path is not None
+    assert (output_dir / element.crop_image_path).is_file()
+    assert element.metadata["visual_asset_recovery"]["status"] == "recovered"
+    assert second.changed is False
+
+
+def test_visual_asset_pass_recovers_empty_textual_element(
+    parsed_document,
+    tmp_path: Path,
+) -> None:
+    document = parsed_document.model_copy(deep=True)
+    page = document.pages[0]
+    element = next(
+        item for item in document.elements if item.page_id == page.page_id
+    )
+    element.element_type = ElementType.PARAGRAPH
+    element.text = None
+    element.html = None
+    element.image_path = None
+    element.crop_image_path = None
+    output_dir = tmp_path / "empty_text_recovery"
+    page_asset = output_dir / "assets" / "pages" / "page.png"
+    page_asset.parent.mkdir(parents=True)
+    Image.new("RGB", (1000, 1000), "white").save(page_asset)
+    page.image_path = page_asset.relative_to(output_dir)
+    context = PassContext(
+        input_path=tmp_path,
+        output_dir=output_dir,
+        available={"document_structure"},
+    )
+
+    report = VisualAssetRecoveryPass().apply(document, context)
+
+    assert report.changed
+    assert element.element_id in report.details["recovered_element_ids"]
+    assert element.crop_image_path is not None
+    assert (output_dir / element.crop_image_path).is_file()
+    assert element.metadata["visual_asset_recovery"]["status"] == "recovered"
+
+
+def test_element_visual_asset_path_unifies_parser_and_fallback_assets(
+    parsed_document,
+) -> None:
+    element = parsed_document.elements[0].model_copy(deep=True)
+    element.image_path = Path("parser.png")
+    element.crop_image_path = Path("fallback.png")
+    assert element.visual_asset_path == Path("parser.png")
+
+    element.image_path = None
+    assert element.visual_asset_path == Path("fallback.png")

@@ -9,6 +9,7 @@ from typing import Any
 from softdoc.models import Document, RelationType
 from softdoc.outline import build_document_outline, outline_markdown
 from softdoc.store import DocumentStore
+from softdoc.table_fragments import METADATA_KEY as TABLE_RECONCILIATION_METADATA_KEY
 from softdoc.visualization import (
     render_cross_page_relation_overlays,
     render_page_overlays,
@@ -33,6 +34,10 @@ def write_document(document: Document, output_dir: Path, *, render_overlays: boo
     _write_jsonl(output_dir / "elements.jsonl", [element.model_dump(mode="json") for element in document.elements])
     _write_jsonl(output_dir / "relations.jsonl", [relation.model_dump(mode="json") for relation in document.relations])
     _write_json(output_dir / "debug" / "cross_page_relations.json", _cross_page_relations(document))
+    _write_json(
+        output_dir / "debug" / "cross_page_table_reconciliation.json",
+        document.metadata.get(TABLE_RECONCILIATION_METADATA_KEY, {}),
+    )
     _write_json(
         output_dir / "debug" / "adapter_warnings.json",
         document.metadata.get("adapter_warnings", []),

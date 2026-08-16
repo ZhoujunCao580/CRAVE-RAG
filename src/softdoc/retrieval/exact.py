@@ -92,6 +92,25 @@ class _AnchorMention:
     pattern_order: int
 
 
+def is_complete_supported_anchor(text: str) -> bool:
+    """Return whether ``text`` is exactly one supported Anchor expression.
+
+    This exposes the Exact Lookup grammar to upstream producers such as the
+    Planner without introducing a second Figure/Table/Page/Section grammar.
+    """
+
+    stripped = text.strip()
+    if not stripped:
+        return False
+    mentions, _ = _extract_mentions(stripped)
+    return (
+        len(mentions) == 1
+        and mentions[0].start == 0
+        and mentions[0].end == len(stripped)
+        and mentions[0].anchor_text == stripped
+    )
+
+
 class ExactAnchorLookup:
     """Resolve explicit page and numbered document anchors without mutation."""
 

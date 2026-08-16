@@ -18,13 +18,14 @@ PDF
   -> Element级weighted RRF
   -> SearchSession
   -> 分批CandidatePreview
+  -> Initial Planner：Question -> SubQuestion DAG（本地Ollama + Qwen3 4B）
 ```
 
 已完成的是“找到值得开始阅读的位置”。尚未实现：
 
 - `READ_ELEMENT`、`READ_PAGE`、`INSPECT_REGION`、`FOLLOW_RELATION`；
 - ReadObservation、Evidence State、Evidence Checker；
-- 子问题生成、Reading Agent循环和答案生成。
+- 真实LLM生成SubQuestion、动态REFINE_PLAN、Reading Agent循环和答案生成。
 
 因此当前检索指标不是最终QA正确率。
 
@@ -183,7 +184,103 @@ Evidence          哪段Observation支持哪个子问题事实
 
 Exact目标的读取进入统一Action Trace；`opened_candidate_ids`只管理普通搜索候选。
 
-## 7. 常用命令
+## 7. Initial Planner v0
+
+Planner v0只定义“原问题需要回答哪些独立信息需求”：
+
+```text
+Question
+  -> one or more PlannedSubQuestion
+  -> logical depends_on DAG
+```
+
+当前已实现严格Pydantic schema、question-only Prompt、可注入`PlannerBackend`、DAG与显式
+Anchor校验，以及Mock测试。首个真实backend为本地`OllamaPlannerBackend`，默认模型是
+`qwen3:4b-instruct-2507-q4_K_M`。它通过`http://localhost:11434/api/chat`请求JSON Schema
+约束输出；模型只能返回`PlannerDraft`，backend名称、模型名称、Prompt版本和重试记录由程序
+写入`PlannerTrace`，不接受模型伪造。
+
+边界：
+
+- 简单事实题允许只有一个SubQuestion；
+- 原问题是隐式Root；默认最多6个SubQuestion，最大深度4（Root计为第1层）；
+- `depends_on`只表示回答当前问题所需的逻辑前置，不表示普通执行顺序；
+- 显式Anchor必须从原问题逐字保留，不能预测未出现的Figure/Table/Page；
+- 显式Anchor必须是Exact Lookup支持的完整引用（如`Figure 3`），不能拆成`Figure`和`3`；
+- Prompt要求数字约束在SubQuestion文本中原样保留；Pydantic不冒充语义裁判去猜哪些数字相关；
+- 对Schema、Anchor、ID、依赖或DAG等确定性验证失败，最多自动纠正一次并记录warning；
+- 子问题只表达需要从文档取得的新证据；比较、求差和选择由隐式Root基于已取得事实完成；
+- 原问题中的实体、指标、时间/条件、输出要求和解释要求必须保持可回答，不能只覆盖部分问法；
+- `planner-v0.4`进一步禁止计算/排序/格式化与定位脚手架节点；命名章节、序数位置和页码范围
+  保留在问题文本中，但不写入只服务于Exact Lookup的`explicit_anchors`；
+- `planner-v0.5`补充count/list、序数、top-N、阈值和视觉条件的忠实性示例，并明确真正的
+  未知实体桥接应形成依赖，而同一局部视觉筛选不形成多步流水线；
+- `planner-v0.6`补充排除集合、yes/no阈值、最高/最低比较集合、总体样本范围和成对年份
+  示例，避免子问题只保留焦点对象却缺少足以完成Root判断的对照证据；
+- `planner-v0.7`最终明确yes/no数值阈值必须出现在子问题中、焦点对象与已知比较集合保持
+  并行，以及相似性计数只收集参照与候选证据而不新增比较/计数节点；
+- `planner-v0.8`和`planner-v0.9`根据275道真实问题审计收紧节点职责边界：兄弟节点不得
+  共享或串入彼此的证据需求，比例/差值读取真实操作数，共享年份和范围必须在
+  每个相关节点保留，同一局部来源的多值优先合并，计算与补集仍由隐式Root完成；
+- `planner-v0.10`删除了重复表达`text`内容、且尚无下游消费者的`answer_requirements`；每个
+  节点现在只以`text`表达证据需求，旧字段会被严格Schema拒绝并进入一次可追踪纠错重试；
+- `planner-v0.11`删除由开发集错误反向写入的题型案例，只保留隐式Root、最小证据需求、真实
+  依赖、语义范围保持等通用原则与两个虚构示例；显式Anchor由独立Exact Lookup负责；
+- `planner-v0.12`只增加通用保守边界：无法可靠判断是否应拆分时，将完整原问题保留为一个
+  SubQuestion；该单节点计划是合法起点，不代表Planner失败；
+- `planner-v0.13`以“是否重复处理已请求的事实”取代差值、比例、总计等题型枚举，并明确同一
+  局部证据可直接回答的比较/排序仍可作为一个节点；LLM schema也删除了永远为空的
+  `explicit_anchors`；Anchor解析结果由Exact Lookup独立保存，不写回InitialPlan；
+- `planner-v0.14`将`depends_on`定义为：前一个答案是否是实例化后一个证据需求所必需；缺失的
+  可以是实体、条件、类别、数值、时期或搜索短语，只要后一个问题能从Root独立搜索就保持并行；
+- Planner采用Conservative + Deferred边界：初始只拆明显需求，不确定时整体阅读，后续根据
+  实际Evidence gap通过`UPDATE_PLAN`细化；
+- `planner-v0.14`的Prompt、Schema、默认6节点与4层深度正式冻结；未来价值判断见
+  [`TODO.md`](TODO.md)中的No Planner / Initial Planner / Deferred Planner同条件对照；
+- Planner不选择SEARCH、READ、FOLLOW_RELATION、INSPECT_REGION等动作；
+- Planner不检索、不阅读、不判断Evidence充分性，也不提前回答；
+- 当前没有动态`REFINE_PLAN`。
+
+动态重规划将在ReadObservation、Evidence State和Evidence Checker完成后实现；它只能由明确的
+missing、ambiguous或conflicting evidence gap触发，不因一次搜索失败而随意改写问题。
+
+本地28份文档对应的275道真实问题曾使用`planner-v0.9`完整重跑，全部通过Planner结构
+验证，其中7道需要第二次验证纠错。逐题计划级审计结果为231道正确、39道可接受但有轻微
+表达/最小性问题、5道错误。错误集中于含混gap、比较集合缺失、约束丢失、比较对象幻觉和
+财务比率漏操作数；这说明Prompt显著改善了整体规划，但4B模型仍不能视为语义验证器。
+详细逐题结果保存在`.runlogs/planner_v09_manual_audit.md`和`.jsonl`；它们是旧Schema下的本地
+可再生审计产物，不等同于`planner-v0.10`结果、检索命中率或最终回答准确率。
+
+删除重复字段后，`planner-v0.10`只重跑了旧审计中的44道高风险题：44/44结构合法，人工
+计划级审计为32道正确、3道可接受但有小问题、9道错误。旧版5道错误中3道完全修复、1道
+改善但冗余、1道仍错误；新增错误主要来自4B模型把最终计算结果当作证据需求，以及对病句中
+主客体方向的误读。结果见`.runlogs/planner_v10_highrisk_audit.md`；本轮不据此继续追加Prompt
+补丁，也不能将这一高风险子集的比例外推为全数据集准确率。
+
+使用通用`planner-v0.11`、相同JSON Schema、温度和`think=false`设置，对同一44题比较
+`qwen3:4b-instruct-2507-q4_K_M`与`qwen3:8b`。4B为21正确、15可接受、7语义错误和1个仅由
+原问题双空格被正规化造成的结构错误；8B为22正确、12可接受、10语义错误。平均耗时分别为
+6.247秒与6.280秒。该结果只说明8B在这个开发高风险回归集上没有稳定优于4B，不是全数据集
+泛化准确率。逐题错误与生成计划见`.runlogs/planner_v11_4b_vs_8b_audit.md`。
+当前Prompt、实验边界以及“InitialPlan只是可修订假设、Root始终是权威目标”的Controller
+契约见[`PLANNER_V0_SUMMARY.md`](PLANNER_V0_SUMMARY.md)。v0.11的4B/8B结果未被后续Prompt覆盖。
+
+## 8. Visual Reader 前的资源审计
+
+在进入视觉阅读实现前，对 `representative_28` 的当前 SoftDoc 做了资源完整性审计：
+
+- 28 份文档、1238 页；
+- 1141 个 Figure、160 个 Chart、403 个 Table、39 个 Equation，共 1743 个需要视觉读取的 Element；
+- 1743/1743 均有合法 bbox、可读取的视觉资源和可读取的页面图；
+- 1741 个使用独立 Element asset，另外 2 个恢复型 Figure 明确使用 `page image + bbox`，读取时必须按 bbox 裁剪；
+- 归一化 bbox 中 3 个对象因原始坐标比页面边界多 1 像素而被合法 clamp 到 1.0，不是资源错配；
+- 独立 asset 与页面 bbox crop 的像素相关性中位数为 0.9809；唯一较大的低相关样本经人工并排检查，内容与目标区域一致，差异来自缩放/压缩和细线表格。
+
+该审计证明的是“当前 SoftDoc 指向的视觉文件存在，并与所存 bbox 对应”，不能证明 MinerU 没有漏掉任何视觉对象，也不能证明每个语义边界都达到人工标注级精度。Visual Reader 应同时支持两种输入句柄：独立 Element asset，以及 `page image + bbox` 的延迟裁剪。
+
+本轮清理删除了 8 个可由脚本重新生成的 Table review/example 目录，保留原始 PDF、当前 SoftDoc、检索结果、少量结论报告以及 TableView/审计代码。
+
+## 9. 常用命令
 
 ```powershell
 conda activate multimodal_pdf_rag

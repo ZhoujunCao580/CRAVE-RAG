@@ -10,6 +10,7 @@ from typing import Any, ClassVar, Protocol, Sequence, runtime_checkable
 
 from pydantic import Field
 
+from softdoc.assets import recover_visual_element_assets
 from softdoc.coverage import recover_pdf_text_layer_coverage
 from softdoc.floating_sections import FloatingContentSectionResolver
 from softdoc.models import Document, SoftDocModel
@@ -19,6 +20,10 @@ from softdoc.relations import RelationBuilder
 from softdoc.rule_audit import collect_rule_coverage
 from softdoc.store import DocumentStore
 from softdoc.structure import SoftDocumentStructureBuilder
+from softdoc.table_fragments import (
+    METADATA_KEY as TABLE_RECONCILIATION_METADATA_KEY,
+    reconcile_mineru_aggregate_tables,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -262,7 +267,7 @@ class RelationPass(_BasePass):
     """Build the existing deterministic relation set unchanged."""
 
     name = "relation_builder"
-    requires = frozenset({"document_structure"})
+    requires = frozenset({"table_fragments_reconciled"})
     provides = frozenset({"relations_built"})
 
     def apply(self, document: Document, context: PassContext) -> PassReport:
@@ -272,6 +277,60 @@ class RelationPass(_BasePass):
             document,
             before=before,
             details={"relation_count": len(relations)},
+        )
+
+
+class VisualAssetRecoveryPass(_BasePass):
+    """Recover missing visual Element crops after type normalization."""
+
+    name = "visual_asset_recovery"
+    requires = frozenset({"document_structure"})
+    provides = frozenset({"visual_assets_recovered"})
+
+    def apply(self, document: Document, context: PassContext) -> PassReport:
+        before = document_fingerprint(document)
+        result = recover_visual_element_assets(document, context.output_dir)
+        return self._report(
+            document,
+            before=before,
+            details={
+                "recovered_count": len(result.recovered_element_ids),
+                "recovered_element_ids": list(result.recovered_element_ids),
+                "unavailable_count": len(result.unavailable_element_ids),
+                "unavailable_element_ids": list(result.unavailable_element_ids),
+            },
+        )
+
+
+class TableFragmentReconciliationPass(_BasePass):
+    """Reconcile only provable MinerU aggregate tables into page fragments."""
+
+    name = "table_fragment_reconciliation"
+    requires = frozenset({"visual_assets_recovered"})
+    provides = frozenset({"table_fragments_reconciled"})
+
+    def apply(self, document: Document, context: PassContext) -> PassReport:
+        before = document_fingerprint(document)
+        if TABLE_RECONCILIATION_METADATA_KEY in document.metadata:
+            return self._report(
+                document,
+                before=before,
+                skipped=True,
+                details={"reason": "table_fragments_already_reconciled"},
+            )
+        result = reconcile_mineru_aggregate_tables(document)
+        confirmed = result.confirmed_decisions
+        return self._report(
+            document,
+            before=before,
+            details={
+                "decision_count": len(result.decisions),
+                "confirmed_group_count": len(confirmed),
+                "confirmed_fragment_count": sum(
+                    len(decision.assignments) for decision in confirmed
+                ),
+                "skipped_group_count": len(result.decisions) - len(confirmed),
+            },
         )
 
 
@@ -336,6 +395,8 @@ DEFAULT_PASSES: tuple[DocumentPass, ...] = (
     CoverageRecoveryPass(),
     PageLabelPass(),
     StructurePass(),
+    VisualAssetRecoveryPass(),
+    TableFragmentReconciliationPass(),
     RelationPass(),
     FloatingSectionPass(),
     ValidationPass(),
