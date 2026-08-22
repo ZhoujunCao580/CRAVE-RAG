@@ -1,6 +1,6 @@
 # Soft-Structured Document Reading Agent：项目指南
 
-更新日期：2026-08-11
+更新日期：2026-08-21
 
 这份文件是项目当前状态的唯一详细说明。README只保留安装和常用命令，历史决策见
 [`HISTORY.md`](HISTORY.md)。
@@ -19,13 +19,16 @@ PDF
   -> SearchSession
   -> 分批CandidatePreview
   -> Initial Planner：Question -> SubQuestion DAG（本地Ollama + Qwen3 4B）
+  -> Visual Reader v0接口与Reading State v0数据模型
 ```
 
 已完成的是“找到值得开始阅读的位置”。尚未实现：
 
-- `READ_ELEMENT`、`READ_PAGE`、`INSPECT_REGION`、`FOLLOW_RELATION`；
-- ReadObservation、Evidence State、Evidence Checker；
+- `READ_ELEMENT`、`READ_PAGE`、`INSPECT_REGION`、`FOLLOW_RELATION`的正式环境执行闭环；
+- Evidence Checker实现与`EvidenceCheckResult`运行时更新；
 - 真实LLM生成SubQuestion、动态REFINE_PLAN、Reading Agent循环和答案生成。
+
+`ObservationStore`、`EvidenceMemory`、`ActionTrace`、`ExplorationState`以及Reader/Checker边界已经冻结为本指南第9—10节的v0契约。代码已统一到`action_id + input_id + observation_id + evidence_id`边界；Reader limitation只保留自由文本描述与受影响的动作内输入。
 
 因此当前检索指标不是最终QA正确率。
 
@@ -270,17 +273,469 @@ missing、ambiguous或conflicting evidence gap触发，不因一次搜索失败�
 在进入视觉阅读实现前，对 `representative_28` 的当前 SoftDoc 做了资源完整性审计：
 
 - 28 份文档、1238 页；
-- 1141 个 Figure、160 个 Chart、403 个 Table、39 个 Equation，共 1743 个需要视觉读取的 Element；
-- 1743/1743 均有合法 bbox、可读取的视觉资源和可读取的页面图；
-- 1741 个使用独立 Element asset，另外 2 个恢复型 Figure 明确使用 `page image + bbox`，读取时必须按 bbox 裁剪；
+- 1139 个 Figure、160 个 Chart、403 个 Table、39 个 Equation，共 1741 个需要视觉读取的 Element；
+- 1741/1741 均有合法 bbox、可读取的独立视觉资源和可读取的页面图；
+- 曾有 2 个 Figure 由 `ElementNormalizer` 从相邻渐进式幻灯片复制 bbox 合成；消融发现该条件过窄、会级联使用合成结果且 bbox 包含标题，因此已删除。对应视觉内容仍存在于页面图中，但不再伪装成高可靠 Figure Element；
 - 归一化 bbox 中 3 个对象因原始坐标比页面边界多 1 像素而被合法 clamp 到 1.0，不是资源错配；
 - 独立 asset 与页面 bbox crop 的像素相关性中位数为 0.9809；唯一较大的低相关样本经人工并排检查，内容与目标区域一致，差异来自缩放/压缩和细线表格。
 
-该审计证明的是“当前 SoftDoc 指向的视觉文件存在，并与所存 bbox 对应”，不能证明 MinerU 没有漏掉任何视觉对象，也不能证明每个语义边界都达到人工标注级精度。Visual Reader 应同时支持两种输入句柄：独立 Element asset，以及 `page image + bbox` 的延迟裁剪。
+该审计证明的是“当前 SoftDoc 指向的视觉文件存在，并与所存 bbox 对应”，不能证明 MinerU 没有漏掉任何视觉对象，也不能证明每个语义边界都达到人工标注级精度。Visual Reader 默认读取 Element asset；当上游漏检或需要布局上下文时，可显式读取页面图，但 SoftDoc 不再用跨页复制 bbox 的方式合成视觉 Element。
 
 本轮清理删除了 8 个可由脚本重新生成的 Table review/example 目录，保留原始 PDF、当前 SoftDoc、检索结果、少量结论报告以及 TableView/审计代码。
 
-## 9. 常用命令
+## 9. Visual Reader v0 边界
+
+Visual Reader v0只负责把本次提供的一个或多个视觉输入转换为可追溯的可靠Observation。
+`problem`用于限定当前需要观察的内容，不代表Reader需要生成问答式答案。Reader不输出
+`answer`、`conclusion`或`supported_by_observation_ids`；Evidence层以后负责判断哪些Observation
+可以提升为EvidenceItem，并由EvidenceItem保存其`observation_ids`。
+
+Reader模型只返回局部内容；全局`action_id/observation_id`由Environment在校验后补入。输出Schema冻结为：
+
+```json
+{
+  "observations": [
+    {
+      "text": "The tallest visible bar is approximately 79.",
+      "sources": [
+        {
+          "input_id": "I1",
+          "bbox": null
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    {
+      "description": "The legend in I1 is too small to identify the corresponding method.",
+      "input_ids": ["I1"]
+    }
+  ]
+}
+```
+
+约束如下：
+
+- `input_id`是一次Action内部的局部别名（`I1/I2/...`），不是全局ID；稳定来源仍由Environment保存的`source_id/visual_asset_id`确定；
+- 单图事实Observation通常引用一个`input_id`；真正依赖多图视觉关系的Observation可以引用多个；
+- Observation的`sources`只能引用本轮实际提供的输入，`bbox`是相对该输入的可选归一化区域；Table读取还可以引用稳定`cell_id`；
+- 不要求每个输入图片都出现在Observation中，未使用且不影响判断的图片不应制造Observation；
+- 若只能确定部分内容，保留可靠Observation，并用`limitations`说明没有可靠读出的内容；limitation不评价Observation是否对问题有用；
+- limitation v0只保存自然语言`description`及受影响的`input_ids`，不固定错误`code`枚举；
+- Reader不判断Evidence是否充分，不生成文档级最终回答，不决定导航、Relation或后续工具动作。
+
+冻结的System Prompt为：
+
+```text
+You are a visual reader for long PDF documents.
+
+You receive:
+- one local reading problem;
+- one or more document images;
+- metadata identifying each supplied input as I1, I2, and so on.
+
+The images are provided in the same order as inputs.
+
+Your responsibility is to inspect the supplied images and record the concrete,
+reliable visual observations needed for the local reading problem.
+
+The local problem tells you what to inspect. It does not ask you to produce an
+answer field or a separate final response. Return observations and limitations
+only, even when the observations directly resolve the local problem. Express
+relevant visible facts only as Observation.text; do not restate them as an answer.
+
+Rules:
+
+1. Use only information visibly supported by the supplied images.
+
+2. If multiple images are supplied, use them jointly when the local problem
+   requires a visual relationship across those images. Do not ignore any supplied
+   image that is relevant to the local problem. Do not request additional images
+   yourself.
+
+3. Record each concrete fact as an Observation. Keep independently useful facts
+   separate. Use the smallest non-duplicative set of Observations needed for the
+   local problem, and never repeat an equivalent Observation.
+
+4. Every Observation must list the input_ids that support it through sources.
+   Its source regions must refer only to those inputs. If an Observation compares, links, aligns, or
+   claims continuity or correspondence between multiple images, express that
+   relationship as one Observation whose sources include every input needed
+   to establish it, with at least one source entry for each input. Do not
+   split one multi-image relationship into separate single-image Observations.
+   Do not require an irrelevant supplied image to appear in an Observation.
+
+5. A bbox is optional. If used, it must be an approximate normalized box
+   [x1, y1, x2, y2] relative to the corresponding supplied image, with values
+   between 0 and 1. Use null when reliable localization is not possible.
+
+6. If information needed by the local problem is too small, blurred, cropped,
+   occluded, missing, or otherwise unreadable, do not guess. Preserve any facts
+   that can still be observed reliably and describe the remaining uncertainty
+   in limitations.
+
+   Every limitation must contain a concise description and the input_ids whose
+   unreadable or missing content caused it. A limitation describes what could
+   not be read reliably; it does not assess Evidence relevance or sufficiency.
+
+7. Do not invent unreadable text, hidden content, missing values, or details
+   from images that were not supplied.
+
+8. Do not output answer, conclusion, supported_by_observation_ids, Evidence
+   sufficiency, navigation advice, Relation status, or Controller actions.
+
+9. The top-level JSON object must contain exactly these keys:
+   observations and limitations. Do not invent action, observation, Evidence,
+   or global source IDs; the program assigns them after validation.
+
+10. Return valid JSON only, without Markdown or additional commentary.
+
+11. Return at most 16 Observations.
+```
+
+对应输出模板为：
+
+模板会按本次输入动态列出局部别名：单图请求示例只含`I1`，多图请求示例会在同一个Observation中列出`I1`、`I2`等及各自的source region，避免固定单图示例误导小模型。实际输出仍只引用真正支持该Observation的输入。
+
+```json
+{
+  "observations": [
+    {
+      "text": "<one concrete fact visibly supported by the supplied images>",
+      "sources": [
+        {
+          "input_id": "I1",
+          "bbox": null
+        }
+      ]
+    }
+  ],
+  "limitations": []
+}
+```
+
+如果无法完整判断，不返回答案，而是保留安全的局部观察并报告限制：
+
+```json
+{
+  "observations": [],
+  "limitations": [
+    {
+      "description": "The legend labels needed by the local problem are too small to read reliably.",
+      "input_ids": ["I1"]
+    }
+  ]
+}
+```
+
+## 10. Reading State v0
+
+本节是2026-08-22重新冻结的唯一Reading State v0契约。本阶段不实现Controller、Evidence Checker模型或Observation Recall，但已经实现Checker输入/输出数据边界、问题DAG运行状态和delta的安全应用。Reading Session、ObservationStore和EvidenceMemory都以Root Question为范围；Controller与Checker每轮只聚焦`EvidenceMemory.current_target`指向的一个问题。不存在第二个`current_question_id`状态源，也不得为每个子问题建立平行EvidenceMemory。
+
+### 事实源与派生视图
+
+| 对象 | 性质 | 职责 |
+|---|---|---|
+| `ObservationStore / ReadRecord` | canonical | 永久记录Reader实际收到什么、读出什么及局限 |
+| `SearchSession` | canonical | 保存检索候选、cursor、shown/opened状态 |
+| `ActionTrace` | canonical | 按顺序记录环境动作及结果 |
+| `EvidenceMemory` | canonical | 未来由Checker维护Evidence与当前缺口 |
+| `ExplorationState` | derived | 从上述日志压缩出的Controller工作快照，不是第四份历史数据库 |
+| `EvidenceCheckResult` | transient result | 一次Checker调用的受验证返回值；不建立独立canonical store |
+
+### ObservationStore
+
+一次Controller动作使用唯一`action_id`贯穿ActionTrace、ReadRecord、本轮Observation和可选Checker更新。v0规定一次Read Action只触发一次Reader调用；视觉fallback、补读另一页或换表示必须由Controller发起新Action，因此不再需要独立`read_request_id`。如果未来确实允许一个Action自动产生多个内部Reader子调用，再在该Action内部增加局部substep，不提前恢复第二套全局ID。
+
+`ReadRecord.inputs`保存结构化的完整Reader输入，因此单图、多图、整页、Region和TableView读取都可复现。`input_id`只是该Action内部的局部别名（如`I1`），`source_id`和`visual_asset_id`才是系统稳定handle。模型不生成全局Observation ID；Environment校验模型输出后确定性分配。`subquestion_id`允许为`null`，所以No-Planner与Deferred Planner同样可以记录读取。
+
+```json
+{
+  "reading_session_id": "reading:1",
+  "root_question_id": "root:1",
+  "read_records": [
+    {
+      "action_id": "action:1",
+      "reader_kind": "visual",
+      "document_id": "doc:1",
+      "subquestion_id": "Q1",
+      "local_problem": "Which method has the tallest bar?",
+      "inputs": [
+        {
+          "input_id": "I1",
+          "source_id": "element:figure:1",
+          "source_type": "element",
+          "representation": "element_visual",
+          "page_id": "page:1",
+          "element_id": "element:figure:1",
+          "visual_asset_id": "visual:1",
+          "bbox": null
+        }
+      ],
+      "observation_ids": ["obs:abc:00"],
+      "limitations": [
+        {
+          "description": "The legend in I1 is too small to identify the corresponding method.",
+          "input_ids": ["I1"]
+        }
+      ]
+    }
+  ],
+  "observations": [
+    {
+      "observation_id": "obs:abc:00",
+      "action_id": "action:1",
+      "text": "The tallest visible bar is approximately 79.",
+      "sources": [
+        {
+          "input_id": "I1",
+          "bbox": [0.5, 0.3, 0.7, 0.8]
+        }
+      ]
+    }
+  ]
+}
+```
+
+Table Reader读取整个`TableView`时，Observation source可以在`input_id`之外进一步引用稳定`cell_id`。因此表格事实能够定位到行列单元格，而不是只能引用整个Table Element。limitation只记录Reader没有可靠读出的部分，不判断Observation是否相关、正确或足以成为Evidence；后者属于Checker。
+
+### EvidenceCheckResult
+
+Checker不是Controller可选动作。一次Read Action产生非空Observation后，Environment自动调用Checker；完全没有Observation时通常跳过Checker，把失败或limitation留在ReadRecord和ActionTrace中。Checker读取Root Question，并从完整EvidenceMemory的`current_target.question_id`和`questions`中确定本轮目标；不再另传一份可能冲突的current-question对象。它另外读取本轮Observation及同一Action的limitations，不读取完整探索历史、候选排名或Relation图。
+
+`EvidenceCheckResult`沿用触发它的`action_id`，不新增`evidence_check_id`。它是受验证的临时返回值，不是第四个canonical store。Checker不重写完整EvidenceMemory，只返回本轮delta、`current_target_status`、`root_status`、可选`remaining_gap_description`和简短assessment；程序在当前Memory的副本上应用delta、更新当前问题状态并选择下一目标，验证完整结果后才一次性提交。任一操作或引用无效时，canonical EvidenceMemory完全不变。
+
+#### Checker输入contract
+
+delta只减少Checker的**输出**，不会减少它的判断上下文。每轮Checker与Controller都可以读取当前唯一、完整的canonical `EvidenceMemory`；Checker另外只接收本Action的新Observation与limitations：
+
+```json
+{
+  "action_id": "action:1",
+  "root_question": {
+    "question_id": "root:1",
+    "text": "How did revenue change from 2022 to 2023?"
+  },
+  "evidence_memory": {
+    "reading_session_id": "reading:1",
+    "root_question_id": "root:1",
+    "root_status": "incomplete",
+    "questions": [
+      {
+        "question_id": "Q1",
+        "text": "What was the revenue in 2022?",
+        "depends_on": [],
+        "status": "satisfied"
+      },
+      {
+        "question_id": "Q2",
+        "text": "What was the revenue in 2023?",
+        "depends_on": [],
+        "status": "incomplete"
+      }
+    ],
+    "evidence": [
+      {
+        "evidence_id": "evidence:old",
+        "statement": "Revenue in 2022 was 10 million.",
+        "observation_ids": ["obs:old"],
+        "supports_question_ids": ["Q1"]
+      }
+    ],
+    "current_target": {
+      "question_id": "Q2",
+      "gap_description": "The 2023 revenue is unknown."
+    }
+  },
+  "observations": [
+    {
+      "observation_id": "obs:abc:00",
+      "action_id": "action:1",
+      "text": "Revenue in 2023 was 12 million.",
+      "sources": [{"input_id": "I1", "bbox": null}]
+    }
+  ],
+  "limitations": []
+}
+```
+
+Checker不读取完整ObservationStore、ExplorationState、SearchSession、候选排序或Relation图。旧Evidence已经通过其`observation_ids`保持可追溯；只有需要复核原Observation时，才由未来的Observation Recall显式取回，而不是每轮塞入全部历史。
+
+#### Checker输出contract
+
+```json
+{
+  "action_id": "action:1",
+  "observation_assessments": [
+    {
+      "observation_id": "obs:abc:00",
+      "used_for_evidence": true,
+      "assessment": "The Observation supplies the missing 2023 value."
+    }
+  ],
+  "evidence_updates": {
+    "add": [
+      {
+        "statement": "Revenue in 2023 was 12 million.",
+        "observation_ids": ["obs:abc:00"],
+        "supports_question_ids": ["Q2"]
+      }
+    ],
+    "replace": [],
+    "remove": []
+  },
+  "current_target_status": "satisfied",
+  "root_status": "ready",
+  "remaining_gap_description": null
+}
+```
+
+`add`不含`evidence_id`，由程序按`action_id + add序号`确定性分配；`replace/remove`必须引用当前Memory中真实存在的`evidence_id`，同一ID不能同时替换和删除。每个新增或替换Evidence必须声明`supports_question_ids`。程序固定执行`remove -> replace -> add -> current target状态更新 -> 下一目标选择`，但只在最终完整EvidenceMemory通过Pydantic状态约束和跨存储引用验证后提交。
+
+`used_for_evidence`表示该Observation是否被最终EvidenceMemory中的任一EvidenceItem引用；程序在delta应用后交叉验证，避免assessment与实际结果自相矛盾。它不限于“首次提升”：Observation也可以补强或修订已有Evidence。每条assessment只说明该Observation的证据作用及原因，不输出隐藏推理，不规定`gap_change/reason_code`枚举，也不命令Controller执行下一工具。
+
+`current_target_status`由未来的Checker模型依据`current_target`、完整EvidenceMemory、本轮Observations和limitations进行语义判断；当前阶段只实现严格数据契约，不假装用确定性程序判断问题是否已经回答。`apply_evidence_check_result()`只把它写回当前目标对应的`QuestionState.status`，不会修改其他问题。若目标就是Root，程序强制该状态与`root_status`一致。
+
+下一轮Controller不是只看delta。它读取提交后的**完整EvidenceMemory**（包括全部已注册问题和唯一`current_target`）、派生的`ExplorationState`以及上一Action的简短assessment；delta主要用于安全更新、审计“本轮改了什么”和减少Checker输出长度。下一轮Checker同样从提交后的完整EvidenceMemory开始，因此多条Evidence的联合判断不会丢失。
+
+### EvidenceMemory
+
+`EvidenceMemory`是一个Root Question范围内、跨初始和延迟注册子问题共享的工作记忆。它保存全部运行时问题节点（文本、依赖、状态）、已经提升为Evidence的陈述，以及唯一`current_target`。它不是append-only日志：Checker可以通过受验证delta重建、替换或移除Evidence。`root_status=incomplete`必须有`current_target`；`root_status=ready`必须没有`current_target`。
+
+```json
+{
+  "reading_session_id": "reading:1",
+  "root_question_id": "root:1",
+  "root_status": "incomplete",
+  "questions": [
+    {
+      "question_id": "Q1",
+      "text": "What was the revenue in 2022?",
+      "depends_on": [],
+      "status": "satisfied"
+    },
+    {
+      "question_id": "Q2",
+      "text": "What was the revenue in 2023?",
+      "depends_on": [],
+      "status": "incomplete"
+    }
+  ],
+  "evidence": [
+    {
+      "evidence_id": "evidence:abc:0000",
+      "statement": "Revenue in 2022 was 10 million.",
+      "observation_ids": ["obs:abc:00"],
+      "supports_question_ids": ["Q1"]
+    }
+  ],
+  "current_target": {
+    "question_id": "Q2",
+    "gap_description": "The 2023 revenue is still unknown."
+  }
+}
+```
+
+`root_status=ready`表示当前Evidence集合整体足以回答Root Question，不表示答案已经生成，也不要求某一条Evidence单独包含最终结论；跨Evidence联合推理与答案生成仍由Answerer完成。`questions`是InitialPlan及Deferred Planner节点的运行时物化，不是第二份计划数据库；列表顺序保留Planner稳定顺序。`supports_question_ids`记录Evidence直接支持哪个Root/SubQuestion。v0每轮只评估`current_target`，本轮新增/替换Evidence也只能支持该目标，不会顺便改变其他问题状态；跨问题Observation复用留待TODO中的Recall实验。
+
+依赖与切换由程序执行：目标问题只有在全部`depends_on`已`satisfied`时才可激活；当前目标满足后，程序按Planner原顺序选择第一个依赖就绪且未完成的问题。不能由Checker跳到任意问题。现有计划全部完成但Root仍`incomplete`时，目标回到Root；Deferred Planner若提出新证据需求，必须先由程序分配唯一ID、验证依赖/DAG/数量/深度并注册到`questions`，之后才能成为`current_target`。
+
+### 冻结的普通循环与结果语义
+
+```text
+Controller选择Action
+  -> Environment/Reader产生ReadRecord与0..N条Observation
+  -> 0条Observation：不调用Checker，记录失败/limitation后返回Controller
+  -> 非空Observation：Checker只围绕current_target评估并返回delta
+  -> 程序验证并原子应用delta
+  -> current_target satisfied但Root incomplete：程序按DAG选择下一题；计划耗尽则回到Root等待直接阅读或Deferred Planning
+  -> current_target incomplete：Controller依据同一目标的gap、探索状态和简短assessment继续
+  -> Root ready：Answerer基于Evidence集合生成最终答案
+```
+
+- Observation补齐当前gap时，提升为带`supports_question_ids`的Evidence；Checker返回`current_target_status=satisfied`，但下一问题由程序选择，Checker不指定下一题。
+- Observation部分有用时只提升可靠、相关的原子事实；无关、重复、对象/时间/范围不符或已被识别为错误时不提升，`current_target`保持同一问题并更新或保留gap。
+- Observation与已有Evidence冲突时不得静默覆盖，当前gap可改写为需要消解的冲突。
+- 看似合理但实际错误、且没有冲突或额外信息的Observation不能被架构凭空识别；依靠精确grounding、后续冲突、机会性交叉表示及高风险事实的选择性复核恢复。
+- 候选、导航路线或动作预算耗尽时仍保持`incomplete`，由Reading Session记录证据不足而停止；不得伪装成`ready`或无限循环。
+
+### ExplorationState
+
+`ExplorationStateBuilder`从`ReadRecord + SearchSession + ActionTrace + Relation`生成快照。`attempted_source_ids`表示已经发生过读取尝试，不承诺读取成功；实际结果仍查看`ReadRecord.limitations`或`recent_actions.outcome`。`attempted_search_queries`保留实际规范化查询，不调用LLM生成summary。完整候选排序仍由`SearchSession`保存。
+
+`current_focus`由最近一次`outcome=succeeded/degraded`且声明了`primary_target`的Action确定性派生；失败Action不改变focus。多图联合读取没有唯一主要目标时，Action可以不声明`primary_target`：若此前已有focus则保持原focus，否则为`null`，Builder不会擅自从I1/I2中挑选。
+
+```json
+{
+  "reading_session_id": "reading:1",
+  "root_question_id": "root:1",
+  "current_focus": {
+    "source_id": "element:table:1",
+    "source_type": "element",
+    "document_id": "doc:1",
+    "page_id": "page:1",
+    "element_id": "element:table:1",
+    "visual_asset_id": null,
+    "bbox": null
+  },
+  "attempted_source_ids": ["element:table:1"],
+  "attempted_search_queries": ["2023 revenue table"],
+  "active_search_session_ids": ["search_session:1"],
+  "confirmed_relation_handles": [
+    {
+      "relation_id": "relation:1",
+      "relation_type": "belongs_to_section",
+      "source_id": "element:table:1",
+      "target_id": "section:revenue"
+    }
+  ],
+  "candidate_navigation_hints": [
+    {
+      "relation_id": "relation:2",
+      "relation_type": "continued_on",
+      "source_id": "element:table:1",
+      "target_id": "element:table:2",
+      "confidence": 0.82
+    }
+  ],
+  "recent_actions": [
+    {
+      "action_id": "action:17",
+      "question_id": "Q2",
+      "action_name": "READ_ELEMENT",
+      "target_ids": ["element:table:1"],
+      "outcome": "degraded",
+      "result_summary": "Table text was readable but one label was unclear."
+    }
+  ]
+}
+```
+
+`confirmed_relation_handles`表示SoftDoc当前接受、可供正常`FOLLOW_RELATION`使用的关系；`candidate_navigation_hints`只表示target值得调查，不能声称关系成立；`rejected`不暴露。Builder只暴露与`current_focus`直接相连的局部关系，不把整份Document的关系图塞进Controller状态。两类对象都不会自动执行。
+
+`active_search_session_ids`来自当前仍交给Controller使用的canonical `SearchSession`对象，只是引用，不复制ranking、cursor或候选内容。`recent_actions`来自`ActionTrace`最后若干步，必须保留`outcome`和`result_summary`；Read Action的summary可以包含最新简短Checker assessment，用于让Controller理解上一步的证据效果并避免重复无效动作，但不能包含Checker对下一工具的命令。
+
+### 跨存储引用验证
+
+`ReadingStateReferenceValidator`只验证不同状态边界之间的引用完整性，不判断Observation事实是否正确，也不决定Evidence是否充分。它集中检查：
+
+- `ObservationStore`、`EvidenceMemory`、`ActionTrace`与可选`ExplorationState`是否属于同一reading session和root question；
+- 每个`ReadRecord.action_id`是否唯一存在于`ActionTrace`，且每条Observation指回同一Action；
+- `ActionTrace.observation_ids`与对应`ReadRecord.observation_ids`是否指向同一批Observation；
+- 每条Evidence引用的Observation是否真实存在；
+- 可选`ExplorationState`中的source、recent action、SearchSession和Relation引用是否存在。
+
+`ObservationStore`内部的ReadRecord、Observation和input grounding仍由其自身Pydantic验证器负责。跨存储验证器返回全部错误；需要在保存或执行前强制失败时可使用`raise_on_error=True`。未传入SearchSession或Relation registry时，不对相应可选引用作存在性判断。
+
+### ID边界
+
+Document、Page、Section、Element、Relation、SearchSession和视觉asset的现有稳定ID保持不变。ID只作为不透明handle；业务逻辑必须读取显式类型字段，不能从ID字符串反推类型。
+
+Reading v0只新增四类全局运行时ID：`reading_session_id`、`action_id`、`observation_id`和`evidence_id`；`root_question_id`沿用Root Question身份，Action的`question_id`引用Root或`EvidenceMemory.questions`中已注册的问题。它们均由程序按session与序号确定性生成，不接受模型随意生成的`O1/E1`作为全局ID。Deferred Planner只提出内容与依赖，程序负责分配/校验问题ID并注册。`input_id`仅是单个Action内部的`I1/I2/...`局部别名。v0已经删除独立`read_request_id`、`request_source_id`、`request_visual_id`和`evidence_check_id`，不长期兼容两套scheme。
+
+Observation Recall当前只记录在`TODO.md`，以后通过闭环实验决定是否实现。
+
+## 11. 常用命令
 
 ```powershell
 conda activate multimodal_pdf_rag

@@ -217,6 +217,54 @@ def test_visual_asset_pass_recovers_empty_textual_element(
     assert element.metadata["visual_asset_recovery"]["status"] == "recovered"
 
 
+def test_visual_asset_pass_materializes_recovered_page_region(
+    parsed_document,
+    tmp_path: Path,
+) -> None:
+    document = parsed_document.model_copy(deep=True)
+    page = document.pages[0]
+    element = next(
+        item for item in document.elements if item.page_id == page.page_id
+    )
+    element.element_type = ElementType.FIGURE
+    output_dir = tmp_path / "page_region_recovery"
+    page_asset = output_dir / "assets" / "pages" / "page.png"
+    page_asset.parent.mkdir(parents=True)
+    image = Image.new("RGB", (200, 100), "white")
+    for x in range(40, 120):
+        for y in range(20, 80):
+            image.putpixel((x, y), (255, 0, 0))
+    image.save(page_asset)
+    page.image_path = page_asset.relative_to(output_dir)
+    element.image_path = page.image_path
+    element.crop_image_path = None
+    element.metadata["recovered_visual_region"] = True
+    element.metadata["uses_page_image_region"] = True
+    element.bbox = element.bbox.model_copy(
+        update={"normalized": (0.2, 0.2, 0.6, 0.8)}
+    )
+    context = PassContext(
+        input_path=tmp_path,
+        output_dir=output_dir,
+        available={"document_structure"},
+    )
+    document_pass = VisualAssetRecoveryPass()
+
+    first = document_pass.apply(document, context)
+    second = document_pass.apply(document, context)
+
+    assert first.changed
+    assert element.image_path is None
+    assert element.crop_image_path is not None
+    assert (output_dir / element.crop_image_path).is_file()
+    with Image.open(output_dir / element.crop_image_path) as crop:
+        assert crop.size == (80, 60)
+        assert crop.getpixel((40, 30)) == (255, 0, 0)
+    assert element.metadata["uses_page_image_region"] is False
+    assert element.metadata["visual_asset_origin"] == "page_image_bbox"
+    assert second.changed is False
+
+
 def test_element_visual_asset_path_unifies_parser_and_fallback_assets(
     parsed_document,
 ) -> None:

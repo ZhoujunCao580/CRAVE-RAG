@@ -11,10 +11,8 @@ from pydantic import Field
 from softdoc.ids import bbox_id, stable_digest
 from softdoc.models import (
     BoundingBox,
-    ContentAvailability,
     Document,
     Element,
-    ElementParseStatus,
     ElementType,
     Provenance,
     RelationSource,
@@ -83,10 +81,6 @@ class ElementNormalizer:
     _FINANCIAL_STATEMENT = re.compile(
         r"\b(?:balance sheet|profit and loss|income statement|"
         r"cash flow statement|statement of cash flows)\b",
-        re.IGNORECASE,
-    )
-    _SLIDE_FEATURE_LABEL = re.compile(
-        r"^\s*\d+\s+features?\s*$",
         re.IGNORECASE,
     )
     _SLIDE_VISUAL_NOTE = re.compile(
@@ -189,25 +183,6 @@ class ElementNormalizer:
                 else None
             )
             if (
-                profile == DocumentProfile.MANUAL
-                and element.element_type == ElementType.PARAGRAPH
-                and following is not None
-                and following.element_type == ElementType.TABLE
-                and re.fullmatch(
-                    r"(?:[\u4e00-\u9fff]{1,6}|"
-                    r"(?:china|japan|korea|canada|australia|europe))",
-                    text,
-                    re.IGNORECASE,
-                )
-            ):
-                element.element_type = ElementType.HEADING
-                element.heading_level = 3
-                element.metadata["forced_heading_level"] = 3
-                rule = "manual_regulatory_table_label_promoted"
-                confidence = 0.91
-                evidence["following_table_id"] = following.element_id
-
-            elif (
                 structural is not None
                 and element.element_type
                 in {ElementType.PARAGRAPH, ElementType.CAPTION}
@@ -303,15 +278,6 @@ class ElementNormalizer:
                     profile == DocumentProfile.SLIDES
                     and target is not None
                     and self._is_visual(target)
-                    and self._SLIDE_FEATURE_LABEL.fullmatch(text)
-                ):
-                    rule = "slide_feature_label_preserved_as_caption"
-                    confidence = 0.98
-                    evidence["target_element_id"] = target.element_id
-                elif (
-                    profile == DocumentProfile.SLIDES
-                    and target is not None
-                    and self._is_visual(target)
                     and not self._CAPTION_LABEL.search(text)
                     and not re.search(
                         r"\b(?:picture|photo|chart)\s+by\b|"
@@ -372,16 +338,6 @@ class ElementNormalizer:
                     evidence["target_element_id"] = target.element_id
 
             if (
-                element.element_type == ElementType.CHART
-                and self._looks_like_page_decoration(element)
-            ):
-                element.element_type = ElementType.FIGURE
-                element.metadata["page_decoration_candidate"] = True
-                element.metadata["excluded_from_relations"] = True
-                rule = "empty_marginal_chart_demoted_to_decoration_figure"
-                confidence = 0.88
-
-            if (
                 element.element_type == ElementType.LIST
                 and self._is_empty_list(element)
             ):
@@ -424,22 +380,12 @@ class ElementNormalizer:
             decisions.append(decision)
 
         if profile == DocumentProfile.SLIDES:
-            decisions.extend(self._normalize_slide_grouped_titles(document))
-            decisions.extend(
-                self._normalize_slide_sparse_divider_paragraphs(document)
-            )
             decisions.extend(self._normalize_slide_primary_titles(document))
         decisions.extend(
             self._normalize_chart_titles(document, profile, elements)
         )
         decisions.extend(
             self._normalize_slide_chart_titles(document, profile, elements)
-        )
-        decisions.extend(
-            self._repair_repeated_slide_visual_labels(
-                document,
-                profile,
-            )
         )
         self._mark_duplicate_code_blocks(document)
         self._mark_visual_groups(document)
@@ -936,87 +882,6 @@ class ElementNormalizer:
             ),
         )
 
-    def _normalize_slide_grouped_titles(
-        self,
-        document: Document,
-    ) -> list[ElementNormalizationDecision]:
-        """Recover a divider title from a full-page grouped-text block."""
-
-        decisions: list[ElementNormalizationDecision] = []
-        for element in document.elements:
-            items = element.metadata.get("grouped_items")
-            if (
-                element.element_type != ElementType.LIST
-                or element.metadata.get("mineru_type") != "index"
-                or element.bbox is None
-                or element.bbox.width < 0.80
-                or element.bbox.height < 0.80
-                or not isinstance(items, list)
-                or not items
-            ):
-                continue
-            first = items[0] if isinstance(items[0], dict) else {}
-            title = self._plain_text(str(first.get("text") or ""))
-            normalized_bbox = first.get("normalized_bbox")
-            raw_bbox = first.get("raw_bbox")
-            if (
-                not title
-                or len(title) > 100
-                or title.isdigit()
-                or self._has_code_syntax(title)
-                or re.search(r"(?:https?://|www\.|\.com\b)", title, re.I)
-                or not (
-                    isinstance(normalized_bbox, list)
-                    and len(normalized_bbox) == 4
-                    and 0.15 <= float(normalized_bbox[1]) <= 0.75
-                )
-            ):
-                continue
-            original = element.element_type
-            original_text = element.text
-            element.element_type = ElementType.HEADING
-            element.heading_level = 1
-            element.text = title
-            element.metadata["normalization_original_text"] = original_text
-            element.metadata["grouped_auxiliary_items"] = items[1:]
-            element.metadata["forced_heading_level"] = 1
-            element.metadata["semantic_marginal_override"] = "slide_title"
-            if (
-                isinstance(raw_bbox, list)
-                and len(raw_bbox) == 4
-                and all(
-                    0.0 <= float(value) <= 1.0
-                    for value in normalized_bbox
-                )
-            ):
-                element.bbox = BoundingBox(
-                    bbox_id=element.bbox.bbox_id,
-                    raw=tuple(float(value) for value in raw_bbox),
-                    normalized=tuple(
-                        float(value) for value in normalized_bbox
-                    ),
-                )
-            decision = ElementNormalizationDecision(
-                element_id=element.element_id,
-                page_id=element.page_id,
-                page_number=element.page_number,
-                original_type=original,
-                normalized_type=element.element_type,
-                changed=True,
-                confidence=0.97,
-                rule="slide_grouped_divider_title_recovered",
-                evidence={
-                    "selected_item_index": 0,
-                    "selected_text": title,
-                    "preserved_auxiliary_item_count": len(items) - 1,
-                },
-            )
-            element.metadata["element_normalization"] = decision.model_dump(
-                mode="json"
-            )
-            decisions.append(decision)
-        return decisions
-
     def _normalize_slide_primary_titles(
         self,
         document: Document,
@@ -1090,39 +955,6 @@ class ElementNormalizer:
             )
             decisions.append(decision)
 
-        for element in document.elements:
-            if (
-                element.page_id not in promoted_pages
-                or element.element_type != ElementType.HEADING
-                or element in candidates
-                or element.bbox is None
-                or element.bbox.normalized[1] <= 0.20
-                or len(self._plain_text(element.text or "").split()) < 10
-            ):
-                continue
-            original = element.element_type
-            element.element_type = ElementType.PARAGRAPH
-            element.heading_level = None
-            decision = ElementNormalizationDecision(
-                element_id=element.element_id,
-                page_id=element.page_id,
-                page_number=element.page_number,
-                original_type=original,
-                normalized_type=element.element_type,
-                changed=True,
-                confidence=0.96,
-                rule="slide_body_text_demoted_below_primary_title",
-                evidence={
-                    "primary_title_style_instances": len(candidates),
-                    "word_count": len(
-                        self._plain_text(element.text or "").split()
-                    ),
-                },
-            )
-            element.metadata["element_normalization"] = decision.model_dump(
-                mode="json"
-            )
-            decisions.append(decision)
         candidate_ids = {element.element_id for element in candidates}
         by_page: dict[str, list[Element]] = defaultdict(list)
         for element in document.elements:
@@ -1159,70 +991,6 @@ class ElementNormalizer:
             )
         return decisions
 
-    def _normalize_slide_sparse_divider_paragraphs(
-        self,
-        document: Document,
-    ) -> list[ElementNormalizationDecision]:
-        """Promote the sole central title on a sparse divider slide."""
-
-        by_page: dict[str, list[Element]] = defaultdict(list)
-        for element in document.elements:
-            by_page[element.page_id].append(element)
-        decisions: list[ElementNormalizationDecision] = []
-        for element in document.elements:
-            if (
-                element.element_type != ElementType.PARAGRAPH
-                or element.bbox is None
-                or not (element.text or "").strip()
-            ):
-                continue
-            text = self._plain_text(element.text or "")
-            _, y1, _, y2 = element.bbox.normalized
-            if (
-                not (0.35 <= y1 <= 0.65)
-                or y2 - y1 < 0.035
-                or not (1 <= len(text.split()) <= 12)
-                or not (
-                    text.upper() == text
-                    or text.endswith(("?", "：", ":"))
-                )
-            ):
-                continue
-            meaningful = [
-                item
-                for item in by_page[element.page_id]
-                if item.metadata.get("mineru_type")
-                not in {"page_footer", "footer", "page_number"}
-                and item.metadata.get("repeated_region")
-                not in {"page_header", "page_footer"}
-            ]
-            if meaningful != [element]:
-                continue
-            original = element.element_type
-            element.element_type = ElementType.HEADING
-            element.heading_level = 1
-            element.metadata["forced_heading_level"] = 1
-            element.metadata["semantic_marginal_override"] = "slide_title"
-            decision = ElementNormalizationDecision(
-                element_id=element.element_id,
-                page_id=element.page_id,
-                page_number=element.page_number,
-                original_type=original,
-                normalized_type=element.element_type,
-                changed=True,
-                confidence=0.96,
-                rule="sparse_slide_divider_paragraph_promoted",
-                evidence={
-                    "meaningful_element_count": 1,
-                    "normalized_bbox": list(element.bbox.normalized),
-                },
-            )
-            element.metadata["element_normalization"] = decision.model_dump(
-                mode="json"
-            )
-            decisions.append(decision)
-        return decisions
-
     @staticmethod
     def _correct_slide_ocr(
         text: str,
@@ -1247,7 +1015,6 @@ class ElementNormalizer:
                 "missing_year_apostrophe",
             ),
             (r"(?<=#)[Il]\b", "1", "numbered_hash_label"),
-            (r"\b[Il](?=\s+features?\b)", "1", "feature_count_one"),
             (
                 r"\b[Il](?=(?:EB|PB|TB|GB|MB|KB|B)\b)",
                 "1",
@@ -1268,221 +1035,6 @@ class ElementNormalizer:
                 )
                 corrected = updated
         return corrected, corrections
-
-    def _repair_repeated_slide_visual_labels(
-        self,
-        document: Document,
-        profile: DocumentProfile,
-    ) -> list[ElementNormalizationDecision]:
-        """Repair a caption attached to the wrong panel in progressive slides.
-
-        The repair requires an adjacent-page template with the same label at
-        the same position and a visual immediately above it.  No relation is
-        inferred from an isolated label or from page proximity alone.
-        """
-
-        if profile != DocumentProfile.SLIDES:
-            return []
-        pages = {page.page_id: page for page in document.pages}
-        page_elements: dict[str, list[Element]] = defaultdict(list)
-        for element in document.elements:
-            page_elements[element.page_id].append(element)
-        labels = [
-            element
-            for element in document.elements
-            if element.element_type
-            in {ElementType.CAPTION, ElementType.PARAGRAPH}
-            and element.bbox is not None
-            and self._SLIDE_FEATURE_LABEL.fullmatch(element.text or "")
-        ]
-        repairs: list[ElementNormalizationDecision] = []
-        added: list[Element] = []
-        for label in labels:
-            current_target = next(
-                (
-                    item
-                    for item in page_elements[label.page_id]
-                    if item.element_id
-                    == label.metadata.get("target_element_id")
-                ),
-                None,
-            )
-            if (
-                current_target is not None
-                and current_target.bbox is not None
-                and current_target.bbox.normalized[3]
-                <= label.bbox.normalized[1] + 0.01
-            ):
-                continue
-            source_page_index = pages[label.page_id].page_index
-            templates: list[tuple[int, Element, Element]] = []
-            for template_label in labels:
-                if (
-                    template_label.element_id == label.element_id
-                    or self._normalized_text(template_label.text or "")
-                    != self._normalized_text(label.text or "")
-                    or template_label.bbox is None
-                    or self._bbox_iou(template_label, label) < 0.80
-                ):
-                    continue
-                distance = abs(
-                    pages[template_label.page_id].page_index
-                    - source_page_index
-                )
-                distance_limit = (
-                    2
-                    if label.element_type == ElementType.PARAGRAPH
-                    else 1
-                )
-                if distance > distance_limit:
-                    continue
-                for visual in page_elements[template_label.page_id]:
-                    if (
-                        not self._is_visual(visual)
-                        or visual.bbox is None
-                        or visual.bbox.normalized[3]
-                        > template_label.bbox.normalized[1] + 0.01
-                        or self._vertical_gap(visual, template_label) > 0.08
-                        or self._horizontal_overlap(
-                            visual,
-                            template_label,
-                        )
-                        < 0.30
-                    ):
-                        continue
-                    templates.append((distance, template_label, visual))
-            if not templates:
-                continue
-            _, template_label, template_visual = min(
-                templates,
-                key=lambda item: (
-                    item[0],
-                    self._vertical_gap(item[1], item[2]),
-                ),
-            )
-            page = pages[label.page_id]
-            if page.image_path is None:
-                continue
-            recovered_id = f"{label.element_id}:recovered-visual"
-            if any(
-                element.element_id == recovered_id
-                for element in document.elements
-            ):
-                continue
-            normalized = template_visual.bbox.normalized
-            raw = (
-                normalized[0] * page.width,
-                normalized[1] * page.height,
-                normalized[2] * page.width,
-                normalized[3] * page.height,
-            )
-            recovered = Element(
-                element_id=recovered_id,
-                document_id=document.document_id,
-                page_id=page.page_id,
-                page_number=page.page_number,
-                element_type=ElementType.FIGURE,
-                reading_order=label.reading_order,
-                bbox=BoundingBox(
-                    bbox_id=bbox_id(recovered_id),
-                    raw=raw,
-                    normalized=normalized,
-                ),
-                image_path=page.image_path,
-                parse_status=ElementParseStatus.DEGRADED,
-                content_availability=ContentAvailability.VISUAL_ONLY,
-                provenance=Provenance(
-                    provenance_id=(
-                        f"prov:softdoc:{stable_digest(recovered_id, length=12)}"
-                    ),
-                    adapter="softdoc",
-                    source_path=label.provenance.source_path,
-                    source_locator=f"recovered:{label.element_id}",
-                    raw_payload={},
-                    metadata={
-                        "template_label_id": template_label.element_id,
-                        "template_visual_id": template_visual.element_id,
-                    },
-                ),
-                metadata={
-                    "recovered_visual_region": True,
-                    "uses_page_image_region": True,
-                    "recovery_rule": (
-                        "adjacent_progressive_slide_same_label_template"
-                    ),
-                    "template_label_id": template_label.element_id,
-                    "template_visual_id": template_visual.element_id,
-                },
-            )
-            added.append(recovered)
-            page_elements[page.page_id].append(recovered)
-            original_type = label.element_type
-            if label.element_type == ElementType.PARAGRAPH:
-                label.element_type = ElementType.CAPTION
-                label.metadata.setdefault(
-                    "parser_element_type",
-                    ElementType.PARAGRAPH.value,
-                )
-            label.metadata["target_element_id"] = recovered.element_id
-            label.metadata["relation_target_repaired"] = True
-            decision = ElementNormalizationDecision(
-                element_id=label.element_id,
-                page_id=label.page_id,
-                page_number=label.page_number,
-                original_type=original_type,
-                normalized_type=label.element_type,
-                changed=original_type != label.element_type,
-                confidence=0.94,
-                rule="progressive_slide_caption_target_repaired",
-                evidence={
-                    "original_target_id": (
-                        current_target.element_id
-                        if current_target is not None
-                        else None
-                    ),
-                    "resolved_target_id": recovered.element_id,
-                    "template_label_id": template_label.element_id,
-                    "template_visual_id": template_visual.element_id,
-                    "template_page_distance": abs(
-                        pages[template_label.page_id].page_index
-                        - source_page_index
-                    ),
-                },
-            )
-            label.metadata["element_normalization"] = decision.model_dump(
-                mode="json"
-            )
-            repairs.append(decision)
-        if added:
-            document.elements.extend(added)
-            for page in document.pages:
-                if not any(
-                    element.page_id == page.page_id for element in added
-                ):
-                    continue
-                ordered = sorted(
-                    page_elements[page.page_id],
-                    key=lambda element: (
-                        element.bbox.normalized[1]
-                        if element.bbox is not None
-                        else 2.0,
-                        element.bbox.normalized[0]
-                        if element.bbox is not None
-                        else 2.0,
-                        element.element_id,
-                    ),
-                )
-                for reading_order, element in enumerate(ordered):
-                    element.reading_order = reading_order
-                ordered_ids = [element.element_id for element in ordered]
-                # These two fields are a validated pair; update atomically.
-                object.__setattr__(page, "element_ids", ordered_ids)
-                object.__setattr__(
-                    page,
-                    "reading_order",
-                    list(ordered_ids),
-                )
-        return repairs
 
     def _normalize_chart_titles(
         self,
@@ -1955,17 +1507,6 @@ class ElementNormalizer:
                 text,
             )
         )
-
-    @staticmethod
-    def _looks_like_page_decoration(element: Element) -> bool:
-        if (
-            element.bbox is None
-            or (element.text or "").strip()
-            or element.reference_label
-        ):
-            return False
-        _, y1, _, y2 = element.bbox.normalized
-        return y1 >= 0.68 and y2 >= 0.985
 
     @staticmethod
     def _is_visual(element: Element) -> bool:

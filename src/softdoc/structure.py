@@ -190,8 +190,6 @@ class SoftDocumentStructureBuilder:
         words = stem.replace("_", " ").replace("-", " ").split()
         if not words:
             return None
-        if stem.casefold().replace("-", "_") == "macbook_air":
-            return "MacBook Air User's Guide"
         return " ".join(
             word if any(character.isupper() for character in word[1:])
             else word.capitalize()

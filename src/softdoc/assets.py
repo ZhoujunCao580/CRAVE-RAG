@@ -47,9 +47,25 @@ def recover_visual_element_assets(
     for element in document.elements:
         if not _requires_visual_asset(element):
             continue
-        if _element_has_valid_visual_asset(element, output_dir):
-            continue
         page = pages[element.page_id]
+        uses_page_region = bool(
+            element.metadata.get("uses_page_image_region")
+        )
+        if uses_page_region and _asset_exists(
+            element.crop_image_path,
+            output_dir,
+        ):
+            # A previous pass already materialized the page region.  Do not
+            # leave the whole page masquerading as an Element image.
+            if _same_asset_path(element.image_path, page.image_path):
+                element.image_path = None
+            element.metadata["uses_page_image_region"] = False
+            continue
+        if not uses_page_region and _element_has_valid_visual_asset(
+            element,
+            output_dir,
+        ):
+            continue
         destination = crop_page_bbox(
             output_dir=output_dir,
             page_image=page.image_path,
@@ -71,6 +87,14 @@ def recover_visual_element_assets(
             recovery["status"] = "recovered"
             recovery["crop_image_path"] = destination.as_posix()
             element.crop_image_path = destination
+            if uses_page_region and _same_asset_path(
+                element.image_path,
+                page.image_path,
+            ):
+                element.image_path = None
+            if uses_page_region:
+                element.metadata["uses_page_image_region"] = False
+                element.metadata["visual_asset_origin"] = "page_image_bbox"
             element.content_availability = (
                 ContentAvailability.MIXED
                 if bool((element.text or "").strip() or (element.html or "").strip())
@@ -124,12 +148,22 @@ def _element_has_valid_visual_asset(
     output_dir: Path,
 ) -> bool:
     for value in (element.image_path, element.crop_image_path):
-        if value is None:
-            continue
-        path = value if value.is_absolute() else output_dir / value
-        if path.is_file():
+        if _asset_exists(value, output_dir):
             return True
     return False
+
+
+def _asset_exists(value: Path | None, output_dir: Path) -> bool:
+    if value is None:
+        return False
+    path = value if value.is_absolute() else output_dir / value
+    return path.is_file()
+
+
+def _same_asset_path(left: Path | None, right: Path | None) -> bool:
+    if left is None or right is None:
+        return False
+    return Path(left) == Path(right)
 
 
 def _requires_visual_asset(element: Element) -> bool:

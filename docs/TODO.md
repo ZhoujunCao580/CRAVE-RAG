@@ -35,5 +35,50 @@
 ## 4. 是否需要专门 Reader
 
 - [ ] 先比较“Controller直接读取Element/TableView”和“专门Reader返回Observation”；只有后者明显改善大表、复杂视觉内容或成本时才实现Reader。
-- [ ] 若实现Reader：Reader只报告本次读到的内容与限制；`continued_on`缺失、`candidate` Relation和文本/HTML读取失败后的视觉fallback，均交给Controller决策，不自动导航或调用VLM。
+- [ ] Visual Reader v0 暂时统一读取整页和 Figure、Chart 等非 Table 视觉元素；以后再用质量、延迟和成本实验决定是否拆分 Page/Element Reader，以及是否为 Figure/Chart 设置专门Reader。
+- [ ] 若实现Reader：Reader只报告本次读到的可靠Observation与limitations，不输出answer/conclusion；`continued_on`缺失、`candidate` Relation和文本/HTML读取失败后的视觉fallback，均交给Controller决策，不自动导航或调用VLM。
 - [ ] 用答案质量、证据完整性、动作数、视觉调用和成本决定是否保留Reader。
+
+### Controller 训练备忘（已定设计，不是待办）
+
+- Controller主导选择Visual Reader输入。默认单图读取；能还原为独立事实的比较（如分别读取A、B数值）应分开读取，将事实写入Evidence，最后由Answerer比较。
+- 只有无法安全拆成独立事实的视觉比较（如波动、形状、对应关系）以及跨页连续判断，才在一次请求中联合提供多张图，由Reader输出引用多个`input_id`的关系型Observation。
+- 训练Controller时应学习“单图读取、补读另一图、联合视觉读取”三种决策；不要让Controller亲自解释图像或生成最终答案。
+Visual reading 默认把可独立事实拆开单独读取；事实级比较由 Evidence/Answerer 汇总。只有当前判断本身依赖多个视觉输入间的视觉关系时，Controller 才发起 multi-image joint reading。何时进行单图或多图读取属于未来 Controller policy 的一部分。
+
+## 5. 激进规则审计
+
+- [ ] 在更完整数据集和真实QA轨迹上审计当前激进但仍有通用价值的规则；优先检查 `parser_declared_function_target`、`bounded_nearest_compatible_element` 和 `profile_forced_sibling_level`，再评估其余标题、Section、页码及视觉Caption规则。比较关系准确率、Section变化和最终QA收益后再决定保留、降为candidate或删除。
+
+## 6. Observation Recall
+
+- [ ] Controller闭环可运行后，比较“只使用新Observation”和“`current_target`变化时从未采用的旧Observation中召回少量候选并重新交给Checker”；只有后者改善证据完整性或减少重复阅读时才保留Recall。
+- [ ] v0一次只评估当前问题；同一Observation若也能解决后续问题，可能发生重复读取。以后对比“后续问题重新读取”和“从ObservationStore召回并重新交给Checker”，用读取数、成本和错误率决定是否实现跨问题复用。
+
+## 7. Evidence Checker 闭环
+
+- [x] 收缩ID边界：v0以`action_id`串起一次Controller动作、对应`ReadRecord`、其Observation和可选Checker更新；删除独立`read_request_id/request_source_id/request_visual_id`。`EvidenceCheckResult`不新增全局`evidence_check_id`或第四个canonical store。多输入读取仅保留动作内局部`input_id`和稳定`source_id/visual_asset_id`。
+- [x] 收缩limitation：它只描述Reader本轮没有可靠读出的内容，不评价Observation是否对问题有用。删除分类`code`，保留简短`description`及受影响的动作内`input_id`；Checker评价仍单独存在。
+- [x] 实现最小`EvidenceCheckResult` delta：用`action_id`关联本轮，逐条返回`observation_id + used_for_evidence + assessment`、`add/replace/remove`、`current_target_status`、`root_status`及可选剩余gap。程序在Memory副本上应用、验证完整结果后原子提交；未提及的旧Evidence不会因模型漏抄而消失。
+- [x] 固定普通循环：一个Root Question共用唯一ObservationStore与EvidenceMemory；Controller/Checker每轮聚焦一个current question。Evidence用`supports_question_ids`保留目标归属；当前子问题满足但Root仍不充分时切换或细化问题，只有`root_status=ready`才交给Answerer。
+- [x] 持久化问题DAG运行状态：`EvidenceMemory.questions`保存全部已注册问题的文本、依赖和状态，`current_target`唯一表示当前问题与gap；Checker只更新当前项，程序按依赖和Planner稳定顺序选择下一项。ActionTrace只引用本步`question_id`，不再维护第二份current-question状态。
+
+### 情况清单与处理
+
+- [ ] **C1：没有Observation，只有读取失败或limitation。** 不调用Checker；在`ReadRecord/ActionTrace`保留结果，Controller看到失败后换候选、表示或读取范围，避免原样重试。
+- [ ] **C2：Observation正确且补齐当前gap。** 提升为Evidence并把`current_target_status`设为`satisfied`；程序选择下一个依赖就绪的问题，或在Root充分时设为`ready`。
+- [ ] **C3：Observation只有部分有用。** 原子Observation逐条评估，只提升可靠且相关的部分；`current_target`保持同一问题并描述仍缺的事实。
+- [ ] **C4：Observation正确但无关、重复、对象/时间/范围不符。** 不提升，当前target与gap保持不变；Checker只给简短评价，Controller自行决定换候选、下一批、重新SEARCH、导航或换表示。
+- [ ] **C5：Observation明显错误或受limitation影响，Checker能够识别。** 不提升，当前target与gap保持不变；错误读取仍留在append-only ObservationStore中供审计和防重复。
+- [ ] **C6：Observation与已有Evidence冲突。** 不静默覆盖；EvidenceMemory保留可追溯来源，并把当前gap改写为需要消解的冲突，Controller再选择独立来源或另一表示核验。
+- [ ] **C7：Observation看似合理但实际错误，当前没有冲突或额外信息。** 系统不能凭同一信息必然发现；依靠精确grounding、后续冲突、已有多表示的机会性交叉检查及答案关键事实的选择性复核，不默认全部读两遍。
+- [ ] **C8：Checker进行集合级联动。** 每轮读取完整但精简的EvidenceMemory，判断多条Evidence联合后是否充分、重复或冲突；不读取全部历史Observation，`ready`只表示证据集合足以回答，不表示答案已经生成。
+- [ ] **C9：候选、导航路线或动作预算耗尽但gap仍未解决。** 不得伪装成`ready`；在Reading Session/Answerer边界记录“证据不足而停止”，避免Controller无限循环。闭环后再决定是否扩展`EvidenceStatus`。
+- [ ] 闭环后做错误注入与反馈消融：注入错误数值、错误对象/范围、无关Observation、冲突和不可读结果；比较“只给status/gap”“给简短`EvidenceCheckResult`评价”“给自由文本长reason”在错误恢复率、false-ready率、重复动作、答案质量、动作数和成本上的差异。
+
+### 四项主要风险与预定处理
+
+- [ ] **R1：坏Observation被Checker错误提升为Evidence。** 保留Observation到精确source的grounding和Evidence到Observation的引用；使用原子Observation、同轮limitations、已有Evidence一致性检查和高风险事实的选择性复核；通过错误值、错误对象和错误范围注入测量错误恢复率。没有任何额外信息且错误内容自身完全合理时，不宣称系统能够必然识别。
+- [ ] **R2：Checker过早给出`ready`。** `ready`必须由完整Root Question与完整但精简的Evidence集合共同判断，所有答案要求均有来源支持且不存在未解决冲突；Answerer不得把无引用推断补成缺失事实；以false-ready率单独评估，并与最终答案正确率分开报告。
+- [ ] **R3：Controller重复无效动作。** 从canonical `ActionTrace`、`ReadRecord`和`SearchSession`派生已尝试source、实际查询、候选cursor及近期动作结果；让Controller看到最新简短Checker评价；对完全相同的动作、目标和查询建立循环保护，除非Evidence/gap或可用输入发生变化。
+- [ ] **R4：路线或预算耗尽但Evidence仍不充分。** 保持`EvidenceMemory.root_status=incomplete`，在Reading Session边界记录停止原因并允许Answerer明确拒答或报告证据不足；不得把“无法继续”改写为`ready`。闭环实验后再决定是否需要第三种`EvidenceStatus`，避免现在过早扩展schema。

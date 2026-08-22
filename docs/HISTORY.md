@@ -156,7 +156,8 @@ Pydantic验证、SoftDoc或检索逻辑。
 - parser-neutral TableView：只序列化真实 HTML 单元格，`rowspan/colspan` 由运行时 occupancy grid 解析；
 - MinerU Table HTML 和视觉资源恢复；
 - 保守的跨页聚合表重组：只有页归属唯一、顺序完整、无跨边界 `rowspan` 且重组校验通过时，才按物理页拆分并生成 confirmed `continued_on`；否则整个组保持原样；
-- 28 份开发文档视觉资源审计：1743/1743 个 Figure/Chart/Table/Equation 均有合法 bbox 和可读取视觉来源，其中 2 个恢复对象使用 `page image + bbox` 延迟裁剪。
+- 删除 `progressive_slide_caption_target_repaired`：该规则曾从相邻幻灯片复制 bbox 并合成 Figure，28 份文档中只触发 2 次，且出现“合成对象继续充当下一次模板”的级联和标题被框入图片的问题。宁可保留可审计的上游漏检，也不把不可靠区域写成确认的 Figure。
+- 删除上述 2 个合成对象后，28 份开发文档仍有 1741/1741 个 Figure/Chart/Table/Equation 具备合法 bbox 和可读取的独立视觉资源；原始页面图片仍完整保留，可供后续页面级视觉 fallback 使用。
 
 冻结标签：
 
@@ -165,3 +166,46 @@ softdoc-v0.5-reading-foundation
 ```
 
 下一阶段只实现 Visual Reading Environment / Observation 边界，不在本次冻结中实现 Evidence Checker 或 Agent 循环。
+
+Visual Reader v0进一步收缩为纯观察器：输入中的`problem`只限定阅读目标，输出只包含可追溯
+`observations`和`limitations`。删除设计中的`answer`、`conclusion`和
+`supported_by_observation_ids`；可分解的多图事实由后续Evidence/Answerer汇总，无法分解的视觉
+关系则直接表示为引用多个`input_id`的关系型Observation。Evidence充分性、最终回答和下一步
+导航仍不属于Reader职责。
+
+Reading State v0随后冻结：`ObservationStore`和`ActionTrace`分别作为读取历史与动作历史的
+canonical source of truth，`SearchSession`继续保存候选状态，`ExplorationState`只由这些对象
+派生为Controller working view。`ReadRecord`保存结构化`inputs`，使单图、多图、整页、Region及
+TableView输入可复现；动作内局部`input_id`与稳定资源`visual_asset_id`明确分开，Table
+Observation可进一步引用稳定`cell_id`。
+
+Relation入口同时拆成`confirmed_relation_handles`与`candidate_navigation_hints`：前者表示可正常
+导航的已确认关系，后者只表示值得调查的目标，不把candidate升级为事实；rejected不暴露。
+运行时只新增Session、Action、Observation和Evidence全局ID；Reader输入只使用动作内局部
+`input_id`。核心SoftDoc ID保持不变且一律作为不透明handle使用。
+
+第二次接口审计后，`ExplorationState`把`visited`改成语义更准确的`attempted_source_ids`，只保留
+实际`attempted_search_queries`；`current_focus`由最近一次成功或degraded且带`primary_target`的
+Action确定性派生。Relation handle/hint只暴露与当前focus直接相连的局部关系，不再dump全图。
+`EvidenceMemory`明确为Checker可修订的工作记忆，`ready`只代表Evidence集合充分，不代表答案已生成。
+随后将Checker输出从完整Memory重写改为`add/replace/remove` delta：Checker输入仍读取完整当前
+EvidenceMemory，程序只在副本上应用delta并验证完整结果，成功后一次性提交，避免模型漏抄旧
+Evidence造成静默删除。
+
+Reading State v0最终补齐多子问题边界：一个Root Question只建立一份ObservationStore和
+EvidenceMemory，但Controller与Checker每轮只聚焦一个`current_question`。Checker输入用
+`QuestionContext`同时保存Root与current question；每条Evidence增加`supports_question_ids`，
+使共享Memory仍能区分Q1/Q2证据。`current_question_status`与`root_status`正式分离，结构化
+`active_gap`同时保存目标问题ID和缺口描述；当前子问题完成不再被误写成整个Root已ready。
+
+全项目一致性复核发现临时`EvidenceCheckResult.current_question_status`原本未写入任何canonical状态。
+因此在不修改Planner DAG的前提下，为Root级`EvidenceMemory`增加精简`question_progress`：每次应用
+Checker delta时自动更新当前SubQuestion并保留旧状态；当current question就是Root时，程序强制
+其状态与`root_status`一致。`ActionTraceEntry`和派生`RecentActionSummary`同时记录
+`current_question_id`，跨存储验证器检查ReadRecord与ActionTrace的问题归属一致。
+
+2026-08-22再次收口后，删除了重复的`QuestionContext/current_question_id`状态源：
+`EvidenceMemory.questions`现在物化全部已注册问题的文本、依赖与运行状态，唯一
+`current_target`同时给出当前问题ID和证据缺口。Checker只评估当前目标并返回delta；程序负责
+依赖校验、原子应用以及按Planner稳定顺序选择下一项。Initial Plan耗尽而Root仍不充分时目标回到
+Root；Deferred Planner的新问题必须先由程序分配/验证ID、注册进DAG，之后才能激活。

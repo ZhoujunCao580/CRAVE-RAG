@@ -695,7 +695,7 @@ def test_block_conversion_error_is_isolated_and_round_trips(
     }
 
 
-def test_slide_index_block_and_external_chart_title_are_preserved(
+def test_slide_index_block_stays_list_and_external_chart_title_is_preserved(
     tmp_path: Path,
 ) -> None:
     input_dir = tmp_path / "mineru_slides"
@@ -874,15 +874,12 @@ def test_slide_index_block_and_external_chart_title_are_preserved(
         for element in document.elements
         if element.metadata.get("mineru_type") == "index"
     )
-    assert index_element.element_type == ElementType.HEADING
-    assert index_element.text == "MARKET GROWTH"
-    assert index_element.heading_level == 1
-    assert (
-        index_element.metadata["element_normalization"]["rule"]
-        == "slide_grouped_divider_title_recovered"
-    )
-    assert index_element.metadata["grouped_auxiliary_items"][0]["text"] == (
-        "THEBIGDATAGROUP.COM"
+    assert index_element.element_type == ElementType.LIST
+    assert "MARKET GROWTH" in (index_element.text or "")
+    assert "THEBIGDATAGROUP.COM" in (index_element.text or "")
+    assert index_element.heading_level is None
+    assert index_element.metadata["element_normalization"]["rule"] == (
+        "preserve_parser_type"
     )
     assert not any(
         warning["code"] == "unsupported_block_type"
@@ -1026,27 +1023,30 @@ def test_repeated_slide_header_style_becomes_primary_heading(
         "DATA SENSED PER YEAR",
         "BIG DATA LAW #2",
         "Contact",
+        "This is explanatory slide body text rather than another section heading.",
     }
-    assert all(element.heading_level == 1 for element in headings)
-    assert all(element.reading_order == 0 for element in headings)
+    page_titles = [
+        element
+        for element in headings
+        if element.metadata.get("mineru_type") == "page_header"
+    ]
+    assert all(element.heading_level == 1 for element in page_titles)
+    assert all(element.reading_order == 0 for element in page_titles)
     body = next(
         element
         for element in document.elements
         if element.page_number == 3
-        and element.element_type == ElementType.PARAGRAPH
+        and element.element_type == ElementType.HEADING
         and "explanatory" in (element.text or "")
     )
-    page_heading = next(
-        element for element in headings if element.page_number == 3
+    assert body.heading_level is None
+    assert body.metadata["element_normalization"]["rule"] == (
+        "preserve_parser_type"
     )
-    assert body.section_id == page_heading.section_id
-    assert (
-        body.metadata["element_normalization"]["rule"]
-        == "slide_body_text_demoted_below_primary_title"
-    )
+    assert body.metadata["heading_eligibility"]["eligible"] is False
 
 
-def test_sparse_central_slide_title_is_promoted(
+def test_sparse_central_slide_paragraph_is_not_promoted_by_layout_alone(
     tmp_path: Path,
 ) -> None:
     input_dir = tmp_path / "sparse_divider_slides"
@@ -1139,12 +1139,10 @@ def test_sparse_central_slide_title_is_promoted(
         for element in document.elements
         if element.text == "WHAT IS BIG DATA?"
     )
-    assert title.element_type == ElementType.HEADING
-    assert title.heading_level == 1
-    assert title.section_id is not None
-    assert (
-        title.metadata["element_normalization"]["rule"]
-        == "sparse_slide_divider_paragraph_promoted"
+    assert title.element_type == ElementType.PARAGRAPH
+    assert title.heading_level is None
+    assert title.metadata["element_normalization"]["rule"] == (
+        "preserve_parser_type"
     )
 
 
@@ -1220,7 +1218,7 @@ def test_spatially_distinct_caption_array_is_not_concatenated(
     assert len({caption.element_id for caption in captions}) == 2
 
 
-def test_progressive_slide_repairs_missing_upper_visual_target(
+def test_progressive_slide_does_not_invent_visuals_from_other_pages(
     tmp_path: Path,
 ) -> None:
     input_dir = tmp_path / "progressive_slides"
@@ -1332,19 +1330,12 @@ def test_progressive_slide_repairs_missing_upper_visual_target(
     paragraph_label = next(
         element
         for element in paragraph_elements
-        if element.text == "1 feature"
+        if element.text == "I feature"
     )
-    paragraph_visual = next(
-        element
-        for element in paragraph_elements
-        if element.metadata.get("recovered_visual_region")
-    )
-    assert paragraph_label.element_type == ElementType.CAPTION
-    assert any(
-        relation.relation_type == RelationType.CAPTION_OF
-        and relation.source_id == paragraph_label.element_id
-        and relation.target_id == paragraph_visual.element_id
-        for relation in document.relations
+    assert paragraph_label.element_type == ElementType.PARAGRAPH
+    assert not any(
+        element.metadata.get("recovered_visual_region")
+        for element in document.elements
     )
 
     first_page = next(page for page in document.pages if page.page_number == 2)
@@ -1353,11 +1344,6 @@ def test_progressive_slide_repairs_missing_upper_visual_target(
         for element in document.elements
         if element.page_id == first_page.page_id
     ]
-    recovered = next(
-        element
-        for element in first_elements
-        if element.metadata.get("recovered_visual_region")
-    )
     captions = {
         element.text: element
         for element in first_elements
@@ -1382,7 +1368,12 @@ def test_progressive_slide_repairs_missing_upper_visual_target(
         element
         for element in first_elements
         if element.element_type == ElementType.FIGURE
-        and element.element_id != recovered.element_id
     )
-    assert targets["1 feature"] == recovered.element_id
-    assert targets["2 features"] == original_visual.element_id
+    # The parser-declared caption remains attached to its visual.  A later
+    # visual reader may use the page image as fallback, but normalization must
+    # not synthesize another Figure from a label or another page's bbox.
+    assert targets["I feature"] == original_visual.element_id
+    assert sum(
+        element.element_type == ElementType.FIGURE
+        for element in first_elements
+    ) == 1

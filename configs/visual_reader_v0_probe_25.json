@@ -1,0 +1,231 @@
+﻿{
+  "name": "visual_reader_v0_probe_25",
+  "model": "qwen3-vl:2b",
+  "description": "Development-only probe of observation-only Visual Reader behavior on the representative-28 corpus.",
+  "cases": [
+    {
+      "probe_id": "VR001",
+      "category": "single_visual_fact",
+      "dataset_index": 18,
+      "problem": "Which continent has the most registered participants for the CTBTO advanced science course?",
+      "expected": "Europe",
+      "inputs": [{"doc_id": "0e94b4197b10096b1f4c699701570fbf.pdf", "page_number": 13, "selection": "largest_visual_element"}]
+    },
+    {
+      "probe_id": "VR002",
+      "category": "single_visual_fact",
+      "dataset_index": 179,
+      "problem": "How many MMMU samples belong to the Sociology subject?",
+      "expected": "287",
+      "inputs": [{"doc_id": "2311.16502v3.pdf", "page_number": 3, "selection": "largest_visual_element"}]
+    },
+    {
+      "probe_id": "VR003",
+      "category": "single_visual_fact",
+      "dataset_index": 200,
+      "problem": "How many figures are shown to teach Two-finger scrolling?",
+      "expected": "1",
+      "inputs": [{"doc_id": "Macbook_air.pdf", "page_number": 33, "selection": "page"}]
+    },
+    {
+      "probe_id": "VR004",
+      "category": "single_visual_fact",
+      "dataset_index": 201,
+      "problem": "Which jacks or ports are shown on the right side of the MacBook Air?",
+      "expected": "Headphone jack; USB 2.0 port; Micro-DVI port",
+      "inputs": [{"doc_id": "Macbook_air.pdf", "page_number": 30, "selection": "page"}]
+    },
+    {
+      "probe_id": "VR005",
+      "category": "single_visual_fact",
+      "dataset_index": 204,
+      "problem": "What is shown on the left side of the MacBook Air camera?",
+      "expected": "Ambient light sensor",
+      "inputs": [{"doc_id": "Macbook_air.pdf", "page_number": 26, "selection": "page"}]
+    },
+    {
+      "probe_id": "VR006",
+      "category": "single_visual_fact",
+      "dataset_index": 230,
+      "problem": "Who is identified as the commanding officer in the first figure?",
+      "expected": "Capt. John W. Sanders",
+      "inputs": [{"doc_id": "0b85477387a9d0cc33fca0f4becaa0e5.pdf", "page_number": 2, "selection": "page"}]
+    },
+    {
+      "probe_id": "VR007",
+      "category": "single_visual_fact",
+      "dataset_index": 634,
+      "problem": "Which Program Execution function name has a blue background in the first figure?",
+      "expected": "Fact Checker",
+      "inputs": [{"doc_id": "2023.acl-long.386.pdf", "page_number": 2, "selection": "largest_visual_element"}]
+    },
+    {
+      "probe_id": "VR008",
+      "category": "single_visual_fact",
+      "dataset_index": 637,
+      "problem": "How many complete in-context examples are visible in the figure at the top of printed page 6985?",
+      "expected": "1",
+      "inputs": [{"doc_id": "2023.acl-long.386.pdf", "page_number": 5, "selection": "page"}]
+    },
+    {
+      "probe_id": "VR009",
+      "category": "single_visual_fact",
+      "dataset_index": 763,
+      "problem": "How many strategies visibly outperform the random-selection baseline on CIFAR-10-LT?",
+      "expected": "4",
+      "inputs": [{"doc_id": "2210.02442v1.pdf", "page_number": 7, "selection": "page"}]
+    },
+    {
+      "probe_id": "VR010",
+      "category": "single_visual_fact",
+      "dataset_index": 769,
+      "problem": "For PathMNIST, which map has the larger confidence variance: ground truth or pseudo-labels?",
+      "expected": "ground truth",
+      "inputs": [{"doc_id": "2210.02442v1.pdf", "page_number": 22, "selection": "page"}]
+    },
+    {
+      "probe_id": "VR011",
+      "category": "single_visual_fact",
+      "dataset_index": 425,
+      "problem": "The overlap of which two capabilities is labeled as the danger zone?",
+      "expected": "Hacking Skills; Substantive Expertise",
+      "inputs": [{"doc_id": "catvsdogdlpycon15se-150512122612-lva1-app6891_95.pdf", "page_number": 11, "selection": "largest_visual_element"}]
+    },
+    {
+      "probe_id": "VR012",
+      "category": "single_visual_fact",
+      "dataset_index": 428,
+      "problem": "Which three people are presented as the deep learning conspirators?",
+      "expected": "Bengio; Hinton; LeCun",
+      "inputs": [{"doc_id": "catvsdogdlpycon15se-150512122612-lva1-app6891_95.pdf", "page_number": 23, "selection": "largest_visual_element"}]
+    },
+    {
+      "probe_id": "VR013",
+      "category": "single_visual_fact",
+      "dataset_index": 1002,
+      "problem": "In the photo credited to BRYAN VOON, how many different people are wearing glasses?",
+      "expected": "3",
+      "inputs": [{"doc_id": "NUS-Business-School-BBA-Brochure-2024.pdf", "page_number": 22, "selection": "page"}]
+    },
+    {
+      "probe_id": "VR014",
+      "category": "single_visual_fact",
+      "dataset_index": 856,
+      "problem": "Which three tabs are visible on the Garmin Connect interface?",
+      "expected": "Home; Features; Get Started",
+      "inputs": [{"doc_id": "bigdatatrends-120723191058-phpapp02_95.pdf", "page_number": 5, "selection": "page"}]
+    },
+
+    {
+      "probe_id": "VR015",
+      "category": "decomposed_comparison_fact",
+      "dataset_index": 359,
+      "parent_problem": "What is the percentage difference between people who say the U.S. should help other countries and people who say the U.S. did a poor job dealing with the outbreak?",
+      "problem": "What percentage says the U.S. should help other countries deal with their problems?",
+      "expected": "39%",
+      "comparison_group": "CG1",
+      "inputs": [{"doc_id": "PG_2020.05.21_International-Cooperation-COVID_FINAL.pdf", "page_number": 11, "selection": "page"}]
+    },
+    {
+      "probe_id": "VR016",
+      "category": "decomposed_comparison_fact",
+      "dataset_index": 359,
+      "parent_problem": "What is the percentage difference between people who say the U.S. should help other countries and people who say the U.S. did a poor job dealing with the outbreak?",
+      "problem": "What percentage says the U.S. has done a poor or only fair job dealing with the coronavirus outbreak?",
+      "expected": "52%",
+      "comparison_group": "CG1",
+      "inputs": [{"doc_id": "PG_2020.05.21_International-Cooperation-COVID_FINAL.pdf", "page_number": 12, "selection": "page"}]
+    },
+    {
+      "probe_id": "VR017",
+      "category": "decomposed_comparison_fact",
+      "dataset_index": 362,
+      "parent_problem": "By what percentage is the U.S. rating higher than the WHO rating for handling the outbreak?",
+      "problem": "What percentage says the U.S. has done an excellent or good job dealing with the coronavirus outbreak?",
+      "expected": "47%",
+      "comparison_group": "CG2",
+      "inputs": [{"doc_id": "PG_2020.05.21_International-Cooperation-COVID_FINAL.pdf", "page_number": 12, "selection": "page"}]
+    },
+    {
+      "probe_id": "VR018",
+      "category": "decomposed_comparison_fact",
+      "dataset_index": 362,
+      "parent_problem": "By what percentage is the U.S. rating higher than the WHO rating for handling the outbreak?",
+      "problem": "What percentage says the World Health Organization has done an excellent or good job dealing with the outbreak?",
+      "expected": "46%",
+      "comparison_group": "CG2",
+      "inputs": [{"doc_id": "PG_2020.05.21_International-Cooperation-COVID_FINAL.pdf", "page_number": 16, "selection": "page"}]
+    },
+    {
+      "probe_id": "VR019",
+      "category": "decomposed_comparison_fact",
+      "dataset_index": 363,
+      "parent_problem": "How many more adults 65+ do not trust WHO information than postgraduates who do not trust EU information?",
+      "problem": "What percentage of adults age 65 and older trust information from the World Health Organization?",
+      "expected": "51%",
+      "comparison_group": "CG3",
+      "inputs": [{"doc_id": "PG_2020.05.21_International-Cooperation-COVID_FINAL.pdf", "page_number": 18, "selection": "page"}]
+    },
+    {
+      "probe_id": "VR020",
+      "category": "decomposed_comparison_fact",
+      "dataset_index": 363,
+      "parent_problem": "How many more adults 65+ do not trust WHO information than postgraduates who do not trust EU information?",
+      "problem": "What percentage of postgraduates trust information from the European Union?",
+      "expected": "78%",
+      "comparison_group": "CG3",
+      "inputs": [{"doc_id": "PG_2020.05.21_International-Cooperation-COVID_FINAL.pdf", "page_number": 17, "selection": "page"}]
+    },
+
+    {
+      "probe_id": "VR021",
+      "category": "joint_visual_relation",
+      "problem": "Does the content at the end of V1 visibly continue at the beginning of V2? Record concrete visual evidence for or against continuity.",
+      "expected": null,
+      "inputs": [
+        {"doc_id": "0b85477387a9d0cc33fca0f4becaa0e5.pdf", "page_number": 2, "selection": "page"},
+        {"doc_id": "0b85477387a9d0cc33fca0f4becaa0e5.pdf", "page_number": 3, "selection": "page"}
+      ]
+    },
+    {
+      "probe_id": "VR022",
+      "category": "joint_visual_relation",
+      "problem": "Does the body text at the end of V1 visibly continue at the beginning of V2? Record concrete visual evidence for or against continuity.",
+      "expected": null,
+      "inputs": [
+        {"doc_id": "2005.12872v3.pdf", "page_number": 4, "selection": "page"},
+        {"doc_id": "2005.12872v3.pdf", "page_number": 5, "selection": "page"}
+      ]
+    },
+    {
+      "probe_id": "VR023",
+      "category": "joint_visual_relation",
+      "problem": "Does the table visible on V1 continue as the same logical table on V2? Record the visual cues that support or weaken continuity.",
+      "expected": null,
+      "inputs": [
+        {"doc_id": "936c0e2c2e6c8e0c07c51bfaf7fd0a83.pdf", "page_number": 2, "selection": "page"},
+        {"doc_id": "936c0e2c2e6c8e0c07c51bfaf7fd0a83.pdf", "page_number": 3, "selection": "page"}
+      ]
+    },
+    {
+      "probe_id": "VR024",
+      "category": "joint_visual_relation",
+      "problem": "Does the table visible on V1 continue as the same logical table on V2? Record the visual cues that support or weaken continuity.",
+      "expected": null,
+      "inputs": [
+        {"doc_id": "BESTBUY_2023_10K.pdf", "page_number": 53, "selection": "page"},
+        {"doc_id": "BESTBUY_2023_10K.pdf", "page_number": 54, "selection": "page"}
+      ]
+    },
+    {
+      "probe_id": "VR025",
+      "category": "joint_visual_relation",
+      "problem": "Does the numbered or bulleted content at the end of V1 continue at the beginning of V2? Record concrete visual evidence for or against continuity.",
+      "expected": null,
+      "inputs": [
+        {"doc_id": "t480_ug_en.pdf", "page_number": 30, "selection": "page"},
+        {"doc_id": "t480_ug_en.pdf", "page_number": 31, "selection": "page"}
+      ]
+    }
+  ]
+}

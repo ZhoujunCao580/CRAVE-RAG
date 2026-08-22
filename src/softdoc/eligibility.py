@@ -243,34 +243,6 @@ class HeadingEligibilityDetector:
                 reason = "financial_statement_sibling"
                 confidence = 0.96
             elif (
-                profile == DocumentProfile.REPORT
-                and re.search(
-                    r"^\s*2\.\s+financial statement schedules?\b",
-                    text,
-                    re.IGNORECASE,
-                )
-            ):
-                element.metadata["forced_heading_level"] = 3
-                reason = "financial_schedule_under_item"
-                confidence = 0.96
-            elif (
-                profile == DocumentProfile.BROCHURE
-                and normalized
-                in {
-                    "about",
-                    "i about",
-                    "our advantages",
-                    "programme features",
-                    "program features",
-                    "guide",
-                    "services include",
-                    "requirements",
-                }
-            ):
-                eligible = False
-                reason = "brochure_generic_local_label"
-                confidence = 0.96
-            elif (
                 profile == DocumentProfile.BROCHURE
                 and text.rstrip().endswith(":")
                 and normalized not in self._KNOWN_GLOBAL
@@ -306,28 +278,6 @@ class HeadingEligibilityDetector:
                 eligible = False
                 reason = "table_notes_label"
                 confidence = 0.96
-            elif (
-                profile == DocumentProfile.BROCHURE
-                and re.fullmatch(
-                    r"brief descriptions? of programmes?",
-                    normalized,
-                )
-            ):
-                element.metadata["forced_heading_level"] = 1
-                reason = "brochure_programme_group"
-                confidence = 0.96
-            elif (
-                profile == DocumentProfile.BROCHURE
-                and re.match(
-                    r"^\s*[a-z]\.\s+(?:master|advanced diploma|diploma|"
-                    r"doctor|bachelor|postgraduate)\b",
-                    text,
-                    re.IGNORECASE,
-                )
-            ):
-                element.metadata["forced_heading_level"] = 2
-                reason = "brochure_programme_entry"
-                confidence = 0.97
             elif (
                 normalized not in self._KNOWN_GLOBAL
                 and len(text.split()) <= 4
@@ -592,7 +542,7 @@ class HeadingEligibilityDetector:
         return bool(
             re.match(
                 r"^(?:signed|signature|to the (?:members|stockholders)|"
-                r"copyright\b|[^\n]{0,20}\bapple inc\.?$)",
+                r"copyright\b)",
                 normalized,
             )
             or re.match(r"^/s/\s+", normalized)
