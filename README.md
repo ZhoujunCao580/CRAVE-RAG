@@ -1,6 +1,8 @@
-# Soft-Structured Document Reading Agent
+# TREVA
 
-A research prototype for **evidence-driven, multimodal long-document reading**.
+**Typed-Relation Evidence-guided Visual Agent for Multimodal Long-Document QA**
+
+TREVA is a research prototype for **evidence-driven, multimodal long-document reading**. Its parser-neutral intermediate representation is still called **SoftDoc**, and the stable Python package remains `softdoc`.
 
 The project treats retrieval as the place where reading starts, not the final context-selection step. A future Controller will search for an entry point, read the underlying document source, navigate pages or typed document relations when useful, and continue until an independent Evidence Checker decides that the accumulated evidence is sufficient.
 
@@ -34,18 +36,51 @@ See [Research positioning](docs/RESEARCH_POSITIONING.md) for a careful compariso
 
 ## Architecture and current status
 
-```text
-PDF
-  -> MinerUAdapter
-  -> SoftDocPipeline
-       Document / Page / Section / Element / Relation
-  -> Exact Lookup + BM25 + multilingual-E5 + weighted RRF
-  -> SearchSession + CandidatePreview
-  -> Reading-state contracts
-       ObservationStore / ActionTrace / ExplorationState
-       EvidenceCheckResult -> EvidenceMemory
-  -> Answerer contract
+```mermaid
+flowchart TD
+    subgraph OFFLINE[Offline document preparation]
+        PDF[PDF] --> PARSER[MinerU parser backend]
+        PARSER --> ADAPTER[MinerUAdapter<br/>raw parser conversion only]
+        ADAPTER --> PIPE[SoftDocPipeline<br/>deterministic document passes]
+        PIPE --> SD[SoftDoc<br/>Pages · Sections · Elements · Relations<br/>bbox · assets · provenance]
+        SD --> SU[SearchUnitBuilder]
+        SU --> IDX[BM25 + multilingual E5 indexes]
+    end
+
+    subgraph ONLINE[Online evidence-guided reading]
+        ROOT[Root question] --> PLAN[Optional conservative Planner]
+        PLAN --> TARGET[Current question and active evidence gap]
+        TARGET --> EXACT[Exact anchor lookup]
+        TARGET --> SEARCH[Hybrid retrieval]
+        IDX --> SEARCH
+        SEARCH --> SESSION[SearchSession<br/>resumable ranked candidates]
+        SESSION --> PREVIEW[CandidatePreview batches]
+        EXACT --> CTRL[Controller<br/>contract frozen; policy is next-stage work]
+        PREVIEW --> CTRL
+        CTRL --> READ[Read Element / Page / TableView]
+        CTRL --> NAV[Follow confirmed Relation<br/>or inspect candidate navigation hint]
+        CTRL --> INSPECT[Inspect visual source or region]
+        SD --> READ
+        SD --> NAV
+        SD --> INSPECT
+        READ --> READER[Text / Table / Visual Reader]
+        NAV --> READER
+        INSPECT --> READER
+        READER --> OBS[ObservationStore<br/>grounded observations + limitations]
+        OBS --> CHECK[Evidence Checker]
+        MEM[EvidenceMemory] --> CHECK
+        CHECK --> DELTA[Validated evidence delta]
+        DELTA --> MEM
+        MEM -->|incomplete: expose current gap| CTRL
+        MEM -->|ready| ANSWER[Answerer]
+        ANSWER --> OUTPUT[Answer + used evidence IDs<br/>program expands source citations]
+    end
+
+    SD -. navigation signal only .-> CTRL
+    SD -. Relation is never Evidence .-> CHECK
 ```
+
+The detailed diagram and boundary notes are in [Architecture](docs/ARCHITECTURE.md).
 
 Implemented and tested:
 
