@@ -21,17 +21,17 @@ from softdoc.reading_state import (
     ActionOutcome,
     ActionTrace,
     ActionTraceEntry,
+    CurrentTarget,
     EvidenceItem,
-    EvidenceGap,
     EvidenceMemory,
-    CurrentQuestionStatus,
     EvidenceStatus,
     ExplorationSourceHandle,
     ExplorationStateBuilder,
     ObservationLimitation,
     ObservationSourceRef,
     ObservationStore,
-    QuestionProgress,
+    QuestionState,
+    QuestionStatus,
     ReadRecord,
     ReaderKind,
     ReadingSourceType,
@@ -194,7 +194,7 @@ def _replay_row(row: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
             ActionTraceEntry(
                 step_index=0,
                 action_id=canonical_action_id,
-                current_question_id=(
+                question_id=(
                     row["request"].get("subquestion_id") or question_id
                 ),
                 action_name="READ_VISUAL",
@@ -202,11 +202,6 @@ def _replay_row(row: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
                 primary_target=primary_target,
                 outcome=outcome,
                 observation_ids=record.observation_ids,
-                result_summary=(
-                    f"Produced {len(observations)} Observation(s)."
-                    if observations
-                    else "Reader output could not be stored as an Observation."
-                ),
             )
         ],
     )
@@ -217,11 +212,12 @@ def _replay_row(row: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         reading_session_id=session_id,
         root_question_id=question_id,
         root_status=EvidenceStatus.INCOMPLETE,
-        question_progress=(
+        questions=(
             [
-                QuestionProgress(
+                QuestionState(
                     question_id=row["request"]["subquestion_id"],
-                    status=CurrentQuestionStatus.INCOMPLETE,
+                    text=row["problem"],
+                    status=QuestionStatus.INCOMPLETE,
                 )
             ]
             if row["request"].get("subquestion_id")
@@ -238,9 +234,9 @@ def _replay_row(row: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
             )
             for index, item in enumerate(observations)
         ],
-        active_gap=EvidenceGap(
+        current_target=CurrentTarget(
             question_id=row["request"].get("subquestion_id") or question_id,
-            description=(
+            gap_description=(
                 "Evidence sufficiency was not evaluated in this schema replay."
             ),
         ),

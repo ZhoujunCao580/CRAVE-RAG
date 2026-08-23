@@ -1,5 +1,17 @@
 """Soft document intermediate representation."""
 
+from softdoc.answering import (
+    ANSWERER_PROMPT_VERSION,
+    ANSWERER_SYSTEM_PROMPT,
+    AnswerEvidence,
+    AnswerInput,
+    AnswerInputBuilder,
+    AnswerQuestionNode,
+    AnswerResult,
+    answerer_user_prompt,
+    validate_answer_result,
+)
+
 from softdoc.floating_sections import (
     FloatingContentSectionResolver,
     SectionResolutionDecision,
@@ -130,6 +142,15 @@ from softdoc.reading_state_validation import (
 )
 
 __all__ = [
+    "ANSWERER_PROMPT_VERSION",
+    "ANSWERER_SYSTEM_PROMPT",
+    "AnswerEvidence",
+    "AnswerInput",
+    "AnswerInputBuilder",
+    "AnswerQuestionNode",
+    "AnswerResult",
+    "answerer_user_prompt",
+    "validate_answer_result",
     "BoundingBox",
     "Document",
     "Element",

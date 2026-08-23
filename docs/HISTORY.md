@@ -209,3 +209,30 @@ Checker delta时自动更新当前SubQuestion并保留旧状态；当current que
 `current_target`同时给出当前问题ID和证据缺口。Checker只评估当前目标并返回delta；程序负责
 依赖校验、原子应用以及按Planner稳定顺序选择下一项。Initial Plan耗尽而Root仍不充分时目标回到
 Root；Deferred Planner的新问题必须先由程序分配/验证ID、注册进DAG，之后才能激活。
+
+同日冻结`Evidence Checker v1` Prompt与contract。本地`qwen3:8b`合成评测仅用于验证结构化输出、
+Pydantic拦截和delta状态循环可以运行；模型质量缺陷不再通过逐题补Prompt处理，而是登记到TODO，
+留待服务器模型对照。清理三轮可重建的Checker临时报告、旧运行日志、pytest缓存和Python字节码；
+模型缓存、28份真实文档、SoftDoc与检索产物均保留。
+
+随后冻结`answerer-v0.1`。Answerer输入由ready状态的EvidenceMemory确定性物化，只包含Root
+Question、精简问题DAG以及`evidence_id/statement/supports_question_ids`；不把Observation文本、
+文档位置、检索、动作或Checker上下文交给模型。输出只保留`answer`和`used_evidence_ids`，引用位置
+由程序在模型返回后通过Evidence与ObservationStore展开。该阶段只冻结Schema、Builder、验证器和
+Prompt，不接真实Answerer模型。
+
+随后将Answerer Prompt更新为`answerer-v0.2`：增加回答前的Evidence一致性与问题
+覆盖检查，但不改变输入输出contract。使用同一组14个合成case和本地`qwen3:8b`
+复测仍为12/14；模型仍会在相互冲突的Evidence中擅自选值，并把数值上涨本身
+当作上涨原因。这两项保留为模型能力/指令遵循风险，不再为单个错例追加题型
+规则。
+
+经责任边界复核，Answerer Prompt更新为`answerer-v0.3`：删除Evidence冲突检测和仲裁
+要求，因为相互冲突的Evidence应由Checker拦截，不应进入`root_status=ready`的
+Answerer输入。Answerer仅保留“Evidence是否直接覆盖Root Question的每一部分”检查。
+
+2026-08-23冻结Controller v0设计边界。删除`ActionTrace/ExplorationState`中的自由文本
+`result_summary`，以`outcome + observation_ids`保留可追溯结果；失败细节、证据缺口和Checker
+评价分别只存在于`ReadRecord.limitations`、`EvidenceMemory.current_target`和本轮
+`EvidenceCheckResult`。同时明确confirmed Relation、candidate navigation hint和Evidence之间的
+安全边界：不确定关系只能触发调查，不能直接成为事实。

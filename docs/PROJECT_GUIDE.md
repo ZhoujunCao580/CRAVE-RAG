@@ -503,7 +503,7 @@ Table Reader读取整个`TableView`时，Observation source可以在`input_id`�
 
 Checker不是Controller可选动作。一次Read Action产生非空Observation后，Environment自动调用Checker；完全没有Observation时通常跳过Checker，把失败或limitation留在ReadRecord和ActionTrace中。Checker读取Root Question，并从完整EvidenceMemory的`current_target.question_id`和`questions`中确定本轮目标；不再另传一份可能冲突的current-question对象。它另外读取本轮Observation及同一Action的limitations，不读取完整探索历史、候选排名或Relation图。
 
-`EvidenceCheckResult`沿用触发它的`action_id`，不新增`evidence_check_id`。它是受验证的临时返回值，不是第四个canonical store。Checker不重写完整EvidenceMemory，只返回本轮delta、`current_target_status`、`root_status`、可选`remaining_gap_description`和简短assessment；程序在当前Memory的副本上应用delta、更新当前问题状态并选择下一目标，验证完整结果后才一次性提交。任一操作或引用无效时，canonical EvidenceMemory完全不变。
+`EvidenceCheckResult`沿用触发它的`action_id`，不新增`evidence_check_id`。它是受验证的临时返回值，不是第四个canonical store。Checker不重写完整EvidenceMemory，只返回本轮delta、`current_target_status`、`root_status`、可选`remaining_gap_description`和简短assessment；程序在当前Memory的副本上应用delta、更新当前问题状态并选择下一目标，验证完整结果后才一次性提交。任一操作或引用无效时，canonical EvidenceMemory完全不变。`remaining_gap_description`只描述**仍未完成的当前target**：`current_target_status=incomplete`时必填，`satisfied`时必须为`null`。Checker不预测下一问题，也不替下一问题写gap。
 
 #### Checker输入contract
 
@@ -596,7 +596,7 @@ Checker不读取完整ObservationStore、ExplorationState、SearchSession、候�
 
 `current_target_status`由未来的Checker模型依据`current_target`、完整EvidenceMemory、本轮Observations和limitations进行语义判断；当前阶段只实现严格数据契约，不假装用确定性程序判断问题是否已经回答。`apply_evidence_check_result()`只把它写回当前目标对应的`QuestionState.status`，不会修改其他问题。若目标就是Root，程序强制该状态与`root_status`一致。
 
-下一轮Controller不是只看delta。它读取提交后的**完整EvidenceMemory**（包括全部已注册问题和唯一`current_target`）、派生的`ExplorationState`以及上一Action的简短assessment；delta主要用于安全更新、审计“本轮改了什么”和减少Checker输出长度。下一轮Checker同样从提交后的完整EvidenceMemory开始，因此多条Evidence的联合判断不会丢失。
+下一轮Controller不是只看delta。它读取提交后的**完整EvidenceMemory**（包括全部已注册问题和唯一`current_target`）和派生的`ExplorationState`；紧接Checker调用的下一步还可以直接读取本轮`EvidenceCheckResult.observation_assessments`，但不把它们复制成长期summary。delta主要用于安全更新、审计“本轮改了什么”和减少Checker输出长度。下一轮Checker同样从提交后的完整EvidenceMemory开始，因此多条Evidence的联合判断不会丢失。
 
 ### EvidenceMemory
 
@@ -638,7 +638,7 @@ Checker不读取完整ObservationStore、ExplorationState、SearchSession、候�
 
 `root_status=ready`表示当前Evidence集合整体足以回答Root Question，不表示答案已经生成，也不要求某一条Evidence单独包含最终结论；跨Evidence联合推理与答案生成仍由Answerer完成。`questions`是InitialPlan及Deferred Planner节点的运行时物化，不是第二份计划数据库；列表顺序保留Planner稳定顺序。`supports_question_ids`记录Evidence直接支持哪个Root/SubQuestion。v0每轮只评估`current_target`，本轮新增/替换Evidence也只能支持该目标，不会顺便改变其他问题状态；跨问题Observation复用留待TODO中的Recall实验。
 
-依赖与切换由程序执行：目标问题只有在全部`depends_on`已`satisfied`时才可激活；当前目标满足后，程序按Planner原顺序选择第一个依赖就绪且未完成的问题。不能由Checker跳到任意问题。现有计划全部完成但Root仍`incomplete`时，目标回到Root；Deferred Planner若提出新证据需求，必须先由程序分配唯一ID、验证依赖/DAG/数量/深度并注册到`questions`，之后才能成为`current_target`。
+依赖与切换由程序执行：目标问题只有在全部`depends_on`已`satisfied`时才可激活；当前目标满足后，程序按Planner原顺序选择第一个依赖就绪且未完成的问题，并直接使用该问题的`text`作为初始`gap_description`。不能由Checker跳到任意问题。现有计划全部完成但Root仍`incomplete`时，目标回到Root，程序生成通用gap：`Determine what evidence is still missing to answer the Root Question: <root question text>`。该通用gap不猜测缺失事实，只表示进入Root级重新审查、直接阅读或Deferred Planning。Deferred Planner若提出新证据需求，必须先由程序分配唯一ID、验证依赖/DAG/数量/深度并注册到`questions`，之后才能成为`current_target`。
 
 ### 冻结的普通循环与结果语义
 
@@ -649,7 +649,7 @@ Controller选择Action
   -> 非空Observation：Checker只围绕current_target评估并返回delta
   -> 程序验证并原子应用delta
   -> current_target satisfied但Root incomplete：程序按DAG选择下一题；计划耗尽则回到Root等待直接阅读或Deferred Planning
-  -> current_target incomplete：Controller依据同一目标的gap、探索状态和简短assessment继续
+  -> current_target incomplete：Controller依据同一目标的gap、探索状态和本轮规范化结果继续
   -> Root ready：Answerer基于Evidence集合生成最终答案
 ```
 
@@ -705,7 +705,7 @@ Controller选择Action
       "action_name": "READ_ELEMENT",
       "target_ids": ["element:table:1"],
       "outcome": "degraded",
-      "result_summary": "Table text was readable but one label was unclear."
+      "observation_ids": ["observation:17:00"]
     }
   ]
 }
@@ -713,7 +713,34 @@ Controller选择Action
 
 `confirmed_relation_handles`表示SoftDoc当前接受、可供正常`FOLLOW_RELATION`使用的关系；`candidate_navigation_hints`只表示target值得调查，不能声称关系成立；`rejected`不暴露。Builder只暴露与`current_focus`直接相连的局部关系，不把整份Document的关系图塞进Controller状态。两类对象都不会自动执行。
 
-`active_search_session_ids`来自当前仍交给Controller使用的canonical `SearchSession`对象，只是引用，不复制ranking、cursor或候选内容。`recent_actions`来自`ActionTrace`最后若干步，必须保留`outcome`和`result_summary`；Read Action的summary可以包含最新简短Checker assessment，用于让Controller理解上一步的证据效果并避免重复无效动作，但不能包含Checker对下一工具的命令。
+`active_search_session_ids`来自当前仍交给Controller使用的canonical `SearchSession`对象，只是引用，不复制ranking、cursor或候选内容。`recent_actions`来自`ActionTrace`最后若干步，只保留动作、目标、`outcome`和产生的`observation_ids`。不再保存自由文本`result_summary`：读取失败细节已经在`ReadRecord.limitations`，当前证据缺口在`EvidenceMemory.current_target`，Checker判断在本轮`EvidenceCheckResult`。Controller处理刚完成的动作时直接读取这些规范化对象；历史快照只保留引用，避免把同一语义复制成另一份自然语言状态。
+
+### Controller v0 设计冻结（尚未实现策略）
+
+Controller的研究职责是：围绕当前`EvidenceMemory.current_target`选择下一次阅读行为，而不是解析PDF、读取像素、判断Evidence充分性或生成最终答案。每一步接收：Root Question、完整且已提交的`EvidenceMemory`、派生`ExplorationState`、当前显示的`CandidatePreview`批次，以及紧接上一动作产生的规范化`ReadRecord`和可选`EvidenceCheckResult`。它不接收重复的Observation历史摘要，也不接收自由文本`result_summary`。
+
+环境层先保留可执行primitive，最终训练时是否合并成更少的抽象动作由消融决定：
+
+- `SEARCH`：没有可用入口、当前gap发生实质变化，或旧候选池与当前目标不匹配时创建新的SearchSession；
+- `NEXT_CANDIDATES`：沿同一SearchSession查看下一批Preview，不重新搜索；
+- `READ_SOURCE`：读取Element、Page、TableView或已经确定的视觉输入；
+- `FOLLOW_RELATION`：只沿confirmed Relation读取另一端；
+- `OPEN_NAVIGATION_HINT`：调查candidate Relation的target，但不声称Relation成立；
+- `NEXT_PAGE` / `PREV_PAGE`：显式页面导航；
+- `INSPECT_REGION`：在已有页面或视觉资产上读取局部区域；
+- `STOP`：仅在Root ready或预算耗尽且明确报告证据不足时结束。
+
+`UPDATE_PLAN`在v0关闭；Deferred Planning是否有净收益留待TODO中的对照实验。一次导航动作不会自动伪装成读取：`FOLLOW_RELATION`、翻页或打开候选只改变可访问目标，获得Observation仍需一次明确`READ_SOURCE/INSPECT_REGION`。这一边界使“看到一条边”和“读到可用事实”保持分离。
+
+#### 解析噪声与不确定Relation的安全边界
+
+解析器输出不是Evidence，Relation也不是Evidence。系统分三层处理噪声：
+
+1. 确定性完整性：ID、bbox、资源路径、引用和Schema由程序验证；失败块降级但保留Provenance。
+2. 导航不确定性：confirmed Relation可正常导航；candidate只暴露为navigation hint；rejected不暴露。candidate不会自动改变Section、拼接内容或进入Evidence。
+3. 证据防火墙：Controller可以花一次动作调查candidate target；Reader产生Observation后，Checker仍须依据当前问题、已有Evidence和limitation决定是否采用。只有被Evidence引用的Observation才能影响最终回答。
+
+未来RL/SFT学习的是“在当前gap、预算和历史下，调查某个不确定线索是否值得”，而不是学习把candidate直接宣布为事实。要验证的指标包括candidate调查率、有效Observation率、Evidence净增益、误导率、额外动作成本及最终答案变化。
 
 ### 跨存储引用验证
 
@@ -734,6 +761,45 @@ Document、Page、Section、Element、Relation、SearchSession和视觉asset的�
 Reading v0只新增四类全局运行时ID：`reading_session_id`、`action_id`、`observation_id`和`evidence_id`；`root_question_id`沿用Root Question身份，Action的`question_id`引用Root或`EvidenceMemory.questions`中已注册的问题。它们均由程序按session与序号确定性生成，不接受模型随意生成的`O1/E1`作为全局ID。Deferred Planner只提出内容与依赖，程序负责分配/校验问题ID并注册。`input_id`仅是单个Action内部的`I1/I2/...`局部别名。v0已经删除独立`read_request_id`、`request_source_id`、`request_visual_id`和`evidence_check_id`，不长期兼容两套scheme。
 
 Observation Recall当前只记录在`TODO.md`，以后通过闭环实验决定是否实现。
+
+### Evidence Checker v1 冻结边界
+
+2026-08-22冻结`Evidence Checker v1`：canonical Prompt为
+`scripts/evaluate_checker_mock.py`中的`CHECKER_SYSTEM_PROMPT`，输入/输出Schema与delta原子应用
+以本章定义和`src/softdoc/reading_state.py`为准。本地`qwen3:8b`的mock evaluation只证明
+Prompt、Pydantic验证和状态循环能够执行，不作为Checker质量结论；已发现的漏写gap、协议性delta、
+信息补全、false-ready、旧Evidence联合判断和冲突修正问题统一进入`TODO.md`，留待服务器上的正式
+模型对照。冻结后不再针对单个合成错例扩充主Prompt；除非contract本身存在可复现错误，否则只允许
+修复验证器或运行时实现，不改变Checker语义。
+
+### Answerer v0 冻结边界
+
+`answerer-v0.3`只负责使用Checker已经接受的Evidence回答Root Question。正式Schema与Prompt位于
+`src/softdoc/answering.py`。程序只有在`EvidenceMemory.root_status=ready`且
+`current_target=null`时才能通过`AnswerInputBuilder`生成输入；Answerer不读取ObservationStore、
+文档位置、SearchSession、ExplorationState、ActionTrace、Relation、Reader limitation或Checker
+assessment。
+
+Answerer输入只包含：
+
+- Root Question原文；
+- 精简`question_graph`，每个节点只有`question_id/text/depends_on`；
+- 已接受Evidence的`evidence_id/statement/supports_question_ids`。
+
+`question_graph`只是组织提示，不是事实来源，Root Question始终是权威任务。Answerer可以组合Evidence
+并完成Root要求的确定性计算、比较或排序，但不能补充外部知识。模型输出严格收缩为：
+
+```json
+{
+  "answer": "...",
+  "used_evidence_ids": ["evidence:..."]
+}
+```
+
+模型不生成page、Element、Observation或citation ID。`validate_answer_result`验证所用Evidence真实
+存在；随后程序沿`evidence_id -> observation_ids -> ObservationStore sources`展开最终引用。文档位置
+因此仍被系统保存，但不占用Answerer上下文。v0不实现真实模型客户端、claim-level citation或答案
+质量评测。
 
 ## 11. 常用命令
 

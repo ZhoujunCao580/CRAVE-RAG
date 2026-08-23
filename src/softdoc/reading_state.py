@@ -634,16 +634,20 @@ class EvidenceCheckResult(SoftDocModel):
     def validate_result(self) -> Self:
         assessment_ids = [item.observation_id for item in self.observation_assessments]
         _unique_nonblank(assessment_ids, label="Checker assessment Observation IDs")
-        if self.root_status == EvidenceStatus.READY:
-            if self.remaining_gap_description is not None:
-                raise ValueError("A ready Checker result cannot retain a gap")
-        elif (
-            self.current_target_status == QuestionStatus.INCOMPLETE
-            and self.remaining_gap_description is None
-        ):
+        if self.current_target_status == QuestionStatus.INCOMPLETE:
+            if self.remaining_gap_description is None:
+                raise ValueError(
+                    "An incomplete current target requires a remaining gap description"
+                )
+        elif self.remaining_gap_description is not None:
             raise ValueError(
-                "An incomplete current target requires a remaining gap description"
+                "A satisfied current target must not describe another gap"
             )
+        if (
+            self.root_status == EvidenceStatus.READY
+            and self.current_target_status != QuestionStatus.SATISFIED
+        ):
+            raise ValueError("A ready Root requires a satisfied current target")
         return self
 
 
@@ -795,14 +799,12 @@ def apply_evidence_check_result(
                 gap_description=next_question.text,
             )
         else:
-            if result.remaining_gap_description is None:
-                raise ValueError(
-                    "When the plan is exhausted but Root is incomplete, Checker "
-                    "must describe the unresolved Root gap"
-                )
             next_target = CurrentTarget(
                 question_id=root_question_id,
-                gap_description=result.remaining_gap_description,
+                gap_description=(
+                    "Determine what evidence is still missing to answer the Root "
+                    f"Question: {checker_input.root_question.text}"
+                ),
             )
 
     next_memory = EvidenceMemory(
@@ -892,7 +894,6 @@ class ActionTraceEntry(SoftDocModel):
     query: str | None = Field(default=None, min_length=1)
     outcome: ActionOutcome
     observation_ids: list[str] = Field(default_factory=list)
-    result_summary: str | None = Field(default=None, min_length=1)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("target_ids", "observation_ids")
@@ -950,7 +951,12 @@ class RecentActionSummary(SoftDocModel):
     action_name: str = Field(min_length=1)
     target_ids: list[str] = Field(default_factory=list)
     outcome: ActionOutcome
-    result_summary: str | None = Field(default=None, min_length=1)
+    observation_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("target_ids", "observation_ids")
+    @classmethod
+    def validate_ids(cls, value: list[str]) -> list[str]:
+        return _unique_nonblank(value, label="Recent action IDs")
 
 
 class ExplorationState(SoftDocModel):
@@ -1102,7 +1108,7 @@ class ExplorationStateBuilder:
                 action_name=entry.action_name,
                 target_ids=list(entry.target_ids),
                 outcome=entry.outcome,
-                result_summary=entry.result_summary,
+                observation_ids=list(entry.observation_ids),
             )
             for entry in recent_entries
         ]

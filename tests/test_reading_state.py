@@ -257,12 +257,35 @@ def test_exhausted_plan_returns_to_root_for_deferred_planning_or_direct_reading(
             supports_question_ids=["Q2"],
         )]), current_target_status=QuestionStatus.SATISFIED,
         root_status=EvidenceStatus.INCOMPLETE,
-        remaining_gap_description="The cause of the change is still unknown.",
     )
     updated = apply_evidence_check_result(_checker_input(), result)
     assert updated.current_target == CurrentTarget(
-        question_id="root:1", gap_description="The cause of the change is still unknown."
+        question_id="root:1",
+        gap_description=(
+            "Determine what evidence is still missing to answer the Root Question: "
+            "How did revenue change from 2022 to 2023?"
+        ),
     )
+
+
+def test_checker_gap_is_present_only_for_an_incomplete_current_target():
+    with pytest.raises(ValueError, match="satisfied current target"):
+        EvidenceCheckResult(
+            action_id="action:read",
+            observation_assessments=[_assessment(used=False)],
+            current_target_status=QuestionStatus.SATISFIED,
+            root_status=EvidenceStatus.INCOMPLETE,
+            remaining_gap_description="The next question is still unresolved.",
+        )
+
+    with pytest.raises(ValueError, match="ready Root"):
+        EvidenceCheckResult(
+            action_id="action:read",
+            observation_assessments=[_assessment(used=False)],
+            current_target_status=QuestionStatus.INCOMPLETE,
+            root_status=EvidenceStatus.READY,
+            remaining_gap_description="A value is still missing.",
+        )
 
 
 def test_deferred_question_is_registered_only_after_plan_exhaustion():
@@ -340,8 +363,7 @@ def test_exploration_state_is_derived_and_exposes_only_local_relations():
             ActionTraceEntry(step_index=1, action_id="action:read", question_id="Q2",
                              action_name="READ_ELEMENT", target_ids=["element:source"],
                              primary_target=focus, outcome=ActionOutcome.SUCCEEDED,
-                             observation_ids=["obs:1"],
-                             result_summary="The observation narrowed the gap."),
+                             observation_ids=["obs:1"]),
         ],
     )
     state = ExplorationStateBuilder().build(
@@ -359,6 +381,9 @@ def test_exploration_state_is_derived_and_exposes_only_local_relations():
     assert [item.relation_id for item in state.confirmed_relation_handles] == ["relation:confirmed"]
     assert [item.relation_id for item in state.candidate_navigation_hints] == ["relation:candidate"]
     assert state.recent_actions[-1].question_id == "Q2"
+    assert state.recent_actions[-1].observation_ids == ["obs:1"]
+    assert "result_summary" not in trace.entries[-1].model_dump()
+    assert "result_summary" not in state.recent_actions[-1].model_dump()
 
 
 def test_action_trace_requires_contiguous_steps():
