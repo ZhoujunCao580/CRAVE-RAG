@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "soft-structured-document"
 version = "0.1.0"
-description = "TREVA: typed-relation, evidence-guided multimodal long-document reading"
+description = "CRAVE-RAG: controller-guided reading and action via evidence gaps"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [

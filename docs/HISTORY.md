@@ -236,6 +236,6 @@ Answerer输入。Answerer仅保留“Evidence是否直接覆盖Root Question的�
 评价分别只存在于`ReadRecord.limitations`、`EvidenceMemory.current_target`和本轮
 `EvidenceCheckResult`。同时明确confirmed Relation、candidate navigation hint和Evidence之间的
 安全边界：不确定关系只能触发调查，不能直接成为事实。
-## 2026-08-23：项目代号确定为 TREVA
+## 2026-08-23：项目公开名称确定为 CRAVE-RAG
 
-项目公开展示名称由“Soft-Structured Document Reading Agent”收敛为 **TREVA**（**Typed-Relation Evidence-guided Visual Agent**）。SoftDoc继续表示解析器无关的文档中间结构，Python包和CLI继续使用`softdoc`，避免品牌调整破坏稳定ID、导入路径与现有脚本。新增`ARCHITECTURE.md`，明确离线文档处理、在线阅读循环以及“导航线索不等于Observation，Observation不等于Evidence”的安全边界。该命名不改变任何SoftDoc语义规则、检索排序或运行时contract。
+项目公开展示名称确定为 **CRAVE-RAG**（**Controller-guided Reading and Action Via Evidence Gaps**）。SoftDoc继续表示解析器无关的文档中间结构，Python包和CLI继续使用`softdoc`，避免品牌调整破坏稳定ID、导入路径与现有脚本。`ARCHITECTURE.md`以一张简洁流程图展示Controller与Checker围绕Evidence gap协作的阅读循环。该命名不改变任何SoftDoc语义规则、检索排序或运行时contract。

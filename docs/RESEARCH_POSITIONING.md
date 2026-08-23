@@ -1,4 +1,4 @@
-# TREVA Research Positioning and Novelty Boundary
+# CRAVE-RAG Research Positioning and Novelty Boundary
 
 Updated: 2026-08-23
 
@@ -6,7 +6,7 @@ This note records what the project is trying to test and what it does **not** cl
 
 ## The proposed research question
 
-Can TREVA's reading Controller use parser-neutral multimodal document structure and uncertain, typed document-functional relations to fill explicit evidence gaps more efficiently than flat search, automatic graph expansion, or a single self-checking perception loop—without allowing parser/navigation errors to contaminate answer Evidence?
+Can CRAVE-RAG's reading Controller use parser-neutral multimodal document structure and uncertain, typed document-functional relations to fill explicit evidence gaps more efficiently than flat search, automatic graph expansion, or a single self-checking perception loop—without allowing parser/navigation errors to contaminate answer Evidence?
 
 The proposed loop is:
 

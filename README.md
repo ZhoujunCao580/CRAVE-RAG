@@ -1,185 +1,54 @@
-# TREVA
+# CRAVE-RAG: Controller-guided Reading and Action Via Evidence Gaps
 
-**Typed-Relation Evidence-guided Visual Agent for Multimodal Long-Document QA**
+> Start from a clue, follow useful structure, and stop only when the evidence is sufficient.
 
-TREVA is a research prototype for **evidence-driven, multimodal long-document reading**. Its parser-neutral intermediate representation is still called **SoftDoc**, and the stable Python package remains `softdoc`.
+CRAVE-RAG is a research prototype for question answering over long, visually rich PDFs. Its core is an **agentic reading Controller** that keeps working from the current evidence gap instead of treating retrieved items as a fixed final context. Retrieval only provides a place to begin reading.
 
-The project treats retrieval as the place where reading starts, not the final context-selection step. A future Controller will search for an entry point, read the underlying document source, navigate pages or typed document relations when useful, and continue until an independent Evidence Checker decides that the accumulated evidence is sufficient.
+The Controller maintains a current question and evidence gap, then chooses how to continue reading. Each reading move produces source-linked Observations. An independent Evidence Checker decides which observations become Evidence, whether the current gap has been closed, and what remains unresolved. The updated gap is returned to the Controller, which chooses another move. The loop ends only when the Evidence is sufficient.
 
-> 当前目标不是“把Top-k一次性交给模型”，而是让系统围绕问题逐步阅读：找到入口、实际读取、发现证据缺口、选择下一动作，并且只让经过检查的Observation进入Evidence。
+![CRAVE-RAG overview](docs/assets/crave-rag-overview.svg)
 
-## Research thesis
+## Core Design
 
-```text
-Question
-  -> optional conservative plan
-  -> find a reading entry
-  -> read an Element / Page / Region
-  -> produce grounded Observations
-  -> check and revise EvidenceMemory
-  -> navigate, inspect, search again, or stop
-  -> answer only from accepted Evidence
-```
+This loop gives the system four important properties:
 
-The current research hypotheses are:
+- **Active reading:** it can keep reading from a useful clue instead of repeatedly rebuilding a fixed final context.
+- **Structured navigation:** page structure and document relations become explicit reading opportunities rather than automatically expanded answer context.
+- **Independent evidence control:** the Controller explores, while the Checker separately decides whether an Observation deserves to enter Evidence.
+- **Traceable decisions:** every reading action, Observation, accepted Evidence item, and final citation remains connected to its source.
 
-1. **Soft document structure can support active reading without requiring a graph database.** PDFs are represented as typed Elements, Sections, layout metadata, and explicit Relations while retaining parser provenance.
-2. **Navigation signals and answer evidence should be different objects.** CandidatePreview, page position, and Relation handles only suggest where to read; they are not facts that may directly support an answer.
-3. **Parser uncertainty should remain visible.** Confirmed Relations are normal navigation handles, candidate Relations are investigation hints, and rejected Relations are hidden from the normal Controller view.
-4. **Reading should be question-conditioned and stateful.** The next action depends on the current evidence target, what has already been attempted, and the locally available document structure.
-5. **Evidence admission should be independent of navigation.** Readers emit grounded Observations; a Checker promotes, replaces, or removes Evidence through validated deltas; an Answerer only receives accepted Evidence.
-6. **Every evidence change should be auditable.** `action_id -> ReadRecord -> Observation -> Checker delta -> EvidenceItem` preserves the path from an environment action to the final answer support.
+## Soft Document Structure
 
-These are research claims to be tested, not claims that every component is novel or already superior. Human-like document navigation, graph traversal, iterative evidence gathering, and sufficiency checks all have close prior work. The intended contribution is the combination of **parser-neutral multimodal soft structure, typed functional relations with explicit uncertainty, and an evidence firewall around an active reading policy**.
-
-See [Research positioning](docs/RESEARCH_POSITIONING.md) for a careful comparison with Q-Guide, DocNavRAG, MAGE-RAG, G2-Reader, and GraphReader.
-
-## Architecture and current status
-
-```mermaid
-flowchart TD
-    subgraph OFFLINE[Offline document preparation]
-        PDF[PDF] --> PARSER[MinerU parser backend]
-        PARSER --> ADAPTER[MinerUAdapter<br/>raw parser conversion only]
-        ADAPTER --> PIPE[SoftDocPipeline<br/>deterministic document passes]
-        PIPE --> SD[SoftDoc<br/>Pages · Sections · Elements · Relations<br/>bbox · assets · provenance]
-        SD --> SU[SearchUnitBuilder]
-        SU --> IDX[BM25 + multilingual E5 indexes]
-    end
-
-    subgraph ONLINE[Online evidence-guided reading]
-        ROOT[Root question] --> PLAN[Optional conservative Planner]
-        PLAN --> TARGET[Current question and active evidence gap]
-        TARGET --> EXACT[Exact anchor lookup]
-        TARGET --> SEARCH[Hybrid retrieval]
-        IDX --> SEARCH
-        SEARCH --> SESSION[SearchSession<br/>resumable ranked candidates]
-        SESSION --> PREVIEW[CandidatePreview batches]
-        EXACT --> CTRL[Controller<br/>contract frozen; policy is next-stage work]
-        PREVIEW --> CTRL
-        CTRL --> READ[Read Element / Page / TableView]
-        CTRL --> NAV[Follow confirmed Relation<br/>or inspect candidate navigation hint]
-        CTRL --> INSPECT[Inspect visual source or region]
-        SD --> READ
-        SD --> NAV
-        SD --> INSPECT
-        READ --> READER[Text / Table / Visual Reader]
-        NAV --> READER
-        INSPECT --> READER
-        READER --> OBS[ObservationStore<br/>grounded observations + limitations]
-        OBS --> CHECK[Evidence Checker]
-        MEM[EvidenceMemory] --> CHECK
-        CHECK --> DELTA[Validated evidence delta]
-        DELTA --> MEM
-        MEM -->|incomplete: expose current gap| CTRL
-        MEM -->|ready| ANSWER[Answerer]
-        ANSWER --> OUTPUT[Answer + used evidence IDs<br/>program expands source citations]
-    end
-
-    SD -. navigation signal only .-> CTRL
-    SD -. Relation is never Evidence .-> CHECK
-```
-
-The detailed diagram and boundary notes are in [Architecture](docs/ARCHITECTURE.md).
-
-Implemented and tested:
-
-- parser-neutral Pydantic v2 SoftDoc models;
-- MinerU adapter, deterministic post-processing passes, provenance, assets, overlays, and validation;
-- typed relations including `caption_of`, `footnote_of`, `refers_to`, `continued_on`, section membership, and reading/page order;
-- Exact anchor lookup, SearchUnit construction, BM25, multilingual E5 dense retrieval, weighted RRF, resumable SearchSession, and deterministic CandidatePreview;
-- conservative Planner v0 contracts;
-- Visual Reader input/output contracts;
-- ObservationStore, ActionTrace, derived ExplorationState, EvidenceMemory, Checker delta validation/application, cross-store reference validation, and Answerer contracts.
-
-Not yet claimed as complete:
-
-- a trained or production Controller policy;
-- production Reader and Evidence Checker model quality;
-- deferred planning and Observation Recall;
-- SFT/RL training;
-- full-dataset end-to-end answer evaluation.
-
-The authoritative design is [PROJECT_GUIDE.md](docs/PROJECT_GUIDE.md). Open risks and planned comparisons are in [TODO.md](docs/TODO.md); major decisions are recorded in [HISTORY.md](docs/HISTORY.md).
-
-## Relation safety boundary
+PDFs are represented through a parser-neutral intermediate structure:
 
 ```text
-confirmed Relation
-  -> Controller may FOLLOW_RELATION
-
-candidate Relation
-  -> Controller may inspect its target as a navigation hypothesis
-  -> it does not establish that the relation is true
-
-Reader output
-  -> Observation only
-
-Checker-accepted Observation
-  -> Evidence
+Document
+|-- Pages
+|   `-- Heading / Paragraph / Table / Figure / Chart / Caption / ...
+|-- Sections
+`-- Relations
 ```
 
-RL is not expected to repair parser truth. Future policy training will learn whether investigating a noisy hint is worth its cost; deterministic validation and the Observation-to-Evidence boundary remain in force.
+The structure preserves page layout, element bounding boxes, reading order, visual assets, semantic hierarchy, provenance, and confirmed or candidate document relations. Relations guide navigation but never become Evidence by themselves.
 
-## Reproducible public timeline
+## Current Status
 
-The current Git history records these development checkpoints:
+The repository currently provides the SoftDoc representation, MinerU adaptation pipeline, deterministic document relations, spatial navigation, exact/sparse/dense retrieval, candidate previews, search sessions, and frozen contracts for planning, reading, evidence checking, and answering.
 
-- 2026-07-21: initial Soft Document Structure implementation;
-- 2026-07-30: unified pipeline and Milestone 1 freeze;
-- 2026-08-11: hybrid retrieval, SearchSession, and CandidatePreview freezes;
-- 2026-08-16: reading foundation freeze;
-- 2026-08-22: visual reading and evidence-state contracts.
+The next research stage is the Controller and end-to-end evaluation of whether evidence-gap-driven reading improves answer quality and reading efficiency.
 
-This timeline is evidence of the repository's development history. It is not, by itself, proof of scientific priority or novelty.
+## Quick Start
 
-## Environment
-
-Python 3.11 is the primary development version. The code uses `pathlib.Path`, requires no GPU for unit tests, and keeps model clients behind injectable interfaces.
-
-```powershell
-Set-Location "D:\claude_code_project\multimodal_pdf_rag"
-& "D:\Anaconda\shell\condabin\conda-hook.ps1"
+```bash
+conda env create -f environment.yml
 conda activate multimodal_pdf_rag
 python -m pip install -e .
 python -m pytest -q
 ```
 
-To recreate the environment:
-
-```powershell
-conda env create -f environment.yml
-conda activate multimodal_pdf_rag
-python -m pip install -e .
+```bash
+softdoc parse-mineru <MINERU_OUTPUT_DIR> --output <SOFTDOC_OUTPUT_DIR>
+softdoc validate <SOFTDOC_OUTPUT_DIR>
 ```
 
-CUDA-enabled PyTorch should be installed for the target machine separately. Unit tests do not download models or call external APIs.
-
-## Parse a PDF
-
-```powershell
-$env:HF_HOME = Join-Path $PWD "data\cache\huggingface"
-$env:MODELSCOPE_CACHE = Join-Path $PWD "data\cache\modelscope"
-$env:MINERU_TOOLS_CONFIG_JSON = Join-Path $PWD "data\cache\mineru.json"
-$env:MINERU_MODEL_SOURCE = "local"
-
-mineru -p INPUT.pdf -o MINERU_OUTPUT -b pipeline -m auto
-softdoc parse-mineru MINERU_OUTPUT --output SOFTDOC_OUTPUT
-softdoc validate SOFTDOC_OUTPUT
-```
-
-`MinerUAdapter` only converts parser output into a raw Document. Deterministic recovery, hierarchy, relation, and validation passes are orchestrated by `SoftDocPipeline`.
-
-## Development data
-
-The local development corpus is intentionally not part of the source release:
-
-```text
-data/processed/representative_28/
-  pdfs/       28 source PDFs
-  softdoc/    current SoftDoc outputs
-  retrieval/  retrieval results
-  reports/    compact experiment reports
-```
-
-Current source tag before the Controller contract update: `softdoc-v0.6-reading-state`.
+See [Project Guide](docs/PROJECT_GUIDE.md), [Architecture](docs/ARCHITECTURE.md), and [TODO](docs/TODO.md) for the current implementation boundary and open research questions.

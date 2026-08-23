@@ -1,8 +1,8 @@
-# TREVA：项目指南
+# CRAVE-RAG：项目指南
 
 更新日期：2026-08-23
 
-TREVA是 **Typed-Relation Evidence-guided Visual Agent** 的缩写；SoftDoc仍是解析器无关的文档中间表示，`softdoc`仍是稳定的Python包名和CLI名称。总流程图见[`ARCHITECTURE.md`](ARCHITECTURE.md)。
+CRAVE-RAG是 **Controller-guided Reading and Action Via Evidence Gaps** 的缩写；SoftDoc仍是解析器无关的文档中间表示，`softdoc`仍是稳定的Python包名和CLI名称。总流程图见[`ARCHITECTURE.md`](ARCHITECTURE.md)。
 
 这份文件是项目当前状态的唯一详细说明。README只保留安装和常用命令，历史决策见
 [`HISTORY.md`](HISTORY.md)。
