@@ -789,7 +789,7 @@ Observation Recall当前只记录在`TODO.md`，以后通过闭环实验决定�
 ### Evidence Checker v1 冻结边界
 
 2026-08-22冻结`Evidence Checker v1`：canonical Prompt为
-`scripts/evaluate_checker_mock.py`中的`CHECKER_SYSTEM_PROMPT`，输入/输出Schema与delta原子应用
+`src/softdoc/checking_prompt.py`中的`CHECKER_SYSTEM_PROMPT`，输入/输出Schema与delta原子应用
 以本章定义和`src/softdoc/reading_state.py`为准。本地`qwen3:8b`的mock evaluation只证明
 Prompt、Pydantic验证和状态循环能够执行，不作为Checker质量结论；已发现的漏写gap、协议性delta、
 信息补全、false-ready、旧Evidence联合判断和冲突修正问题统一进入`TODO.md`，留待服务器上的正式
@@ -839,6 +839,13 @@ softdoc validate OUTPUT_DIR
 python scripts/build_representative_dense_index.py --device cuda
 python scripts/evaluate_representative_retrieval.py --device cuda
 ```
+
+五个模型侧Prompt的统一清单、版本、来源与SHA-256由
+`src/softdoc/prompt_registry.py`提供。使用`softdoc prompts list/show/export`
+检查或导出；使用`scripts/evaluate_prompts.py`统一启动Planner、Checker、
+Answerer、Controller及Visual Reader的现有评测器。每次总评测都会保存
+`run_manifest.json`，记录精确Prompt版本与hash。SFT样本也必须绑定Prompt版本，
+版本不匹配时在加载阶段失败，防止用旧Prompt数据静默训练新策略。
 
 完整E5缓存被清理后第一次评测会重新编码；之后可复用
 `data/processed/representative_28/retrieval/embedding_cache/`。

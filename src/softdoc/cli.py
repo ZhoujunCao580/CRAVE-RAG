@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 from pathlib import Path
 from typing import Sequence
 
 from softdoc.adapters import MinerUAdapter
 from softdoc.pipeline import SoftDocPipeline
+from softdoc.prompt_registry import PromptComponent, get_prompt, prompt_manifest
 from softdoc.rule_audit import write_rule_coverage_reports
+from softdoc.server_readiness import check_server_readiness, readiness_install_hint
 from softdoc.serialization import load_document, write_document
 from softdoc.store import DocumentStore
 
@@ -24,6 +27,28 @@ def build_parser() -> argparse.ArgumentParser:
 
     validate = subparsers.add_parser("validate", help="Validate a serialized soft document")
     validate.add_argument("output_dir", type=Path)
+
+    prompts = subparsers.add_parser(
+        "prompts", help="List, inspect, or export frozen model prompts"
+    )
+    prompt_subparsers = prompts.add_subparsers(dest="prompt_command", required=True)
+    prompt_subparsers.add_parser("list", help="Print the prompt manifest")
+    prompt_show = prompt_subparsers.add_parser("show", help="Print one prompt")
+    prompt_show.add_argument("component", choices=[item.value for item in PromptComponent])
+    prompt_show.add_argument(
+        "--question",
+        help="Root question required when rendering the dynamic Planner prompt",
+    )
+    prompt_export = prompt_subparsers.add_parser(
+        "export", help="Export the complete prompt manifest and prompt text"
+    )
+    prompt_export.add_argument("--output", type=Path, required=True)
+
+    doctor = subparsers.add_parser(
+        "doctor", help="Check a fresh machine for runtime or training readiness"
+    )
+    doctor.add_argument("--profile", choices=("core", "eval", "train"), default="core")
+    doctor.add_argument("--json", action="store_true", dest="as_json")
     return parser
 
 
@@ -61,6 +86,61 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"{len(document.elements)} elements, {len(document.relations)} relations"
         )
         return 0
+    if args.command == "prompts":
+        if args.prompt_command == "list":
+            print(json.dumps(prompt_manifest(), indent=2, ensure_ascii=False))
+            return 0
+        if args.prompt_command == "show":
+            spec = get_prompt(args.component)
+            if spec.component == PromptComponent.PLANNER:
+                if not args.question:
+                    raise SystemExit("planner prompt requires --question")
+                print(spec.render(args.question))
+            else:
+                print(spec.render())
+            return 0
+        if args.prompt_command == "export":
+            args.output.mkdir(parents=True, exist_ok=True)
+            manifest = prompt_manifest()
+            for item in PromptComponent:
+                spec = get_prompt(item)
+                text = (
+                    spec.render("<ROOT_QUESTION>")
+                    if item == PromptComponent.PLANNER
+                    else spec.render()
+                )
+                (args.output / f"{item.value}__{spec.version}.txt").write_text(
+                    text + ("" if text.endswith("\n") else "\n"),
+                    encoding="utf-8",
+                )
+            (args.output / "manifest.json").write_text(
+                json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            print(f"Exported {len(manifest)} prompts to {args.output}")
+            return 0
+    if args.command == "doctor":
+        report = check_server_readiness(args.profile)
+        payload = report.model_dump()
+        if args.as_json:
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+        else:
+            print(f"Profile: {report.profile}")
+            print(f"Python: {report.python_version}")
+            print(f"Platform: {report.platform}")
+            for dependency in report.dependencies:
+                marker = "OK" if dependency.available else "MISSING"
+                suffix = f" {dependency.version}" if dependency.version else ""
+                print(f"[{marker}] {dependency.name}{suffix}")
+                if dependency.detail:
+                    print(f"  {dependency.detail}")
+            if report.cuda_available is not None:
+                print(f"CUDA: {report.cuda_available} {report.cuda_device or ''}".rstrip())
+            print(f"Ollama executable: {report.ollama_executable or 'not found'}")
+            print(f"Ready: {report.ready}")
+            if not report.ready:
+                print(f"Install hint: {readiness_install_hint(args.profile)}")
+        return 0 if report.ready else 1
     return 2
 
 

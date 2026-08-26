@@ -22,6 +22,12 @@ dense = [
     "torch>=2.2",
     "transformers>=4.40,<5",
 ]
+train = [
+    "accelerate>=0.30,<2",
+    "datasets>=2.18,<5",
+    "peft>=0.12,<1",
+    "bitsandbytes>=0.43,<1; platform_system == 'Linux'",
+]
 mineru = [
     "mineru[pipeline]==3.4.4",
     # MinerU 3.4.4 imports six in its pipeline OCR code but omits it from

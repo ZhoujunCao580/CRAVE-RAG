@@ -1,0 +1,1 @@
+{"example_id":"controller-example-001","component":"controller","prompt_version":"controller-policy-v0.3","input_text":"{\"root_status\":\"incomplete\",\"current_gap\":{\"question_id\":\"Q1\",\"description\":\"The 2023 revenue is unknown.\"},\"visible_search_view\":null}","target":{"action":"SEARCH","operation":"new","query":"2023 revenue"}}

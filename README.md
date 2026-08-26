@@ -66,4 +66,40 @@ python scripts/audit_reading_environment_v0.py --softdoc-root <SOFTDOC_ROOT>
 This replay checks interfaces and state transitions; it is not a model-quality
 benchmark.
 
+## Prompts and Evaluations
+
+All five model-facing prompts are discoverable through one versioned registry:
+
+```bash
+softdoc prompts list
+softdoc prompts show controller
+softdoc prompts show planner --question "How did revenue change?"
+softdoc prompts export --output .runlogs/prompts
+```
+
+The unified evaluation launcher records the exact prompt versions and hashes
+used by every run. Text-only evaluations require a running Ollama-compatible
+endpoint; the dry run is model-free.
+
+```bash
+python scripts/evaluate_prompts.py --dry-run
+python scripts/evaluate_prompts.py --component all_text --text-model qwen3:8b
+```
+
+## Fresh Linux GPU Server
+
+Start from an Ubuntu GPU image with a working NVIDIA driver, then clone this
+repository and run:
+
+```bash
+export CRAVE_PROFILE=train
+bash scripts/bootstrap_server.sh
+```
+
+This creates an isolated environment, installs runtime and LoRA/QLoRA
+dependencies, runs the test suite, exports the prompt manifest, and validates
+the training-data contract. Actual SFT additionally requires a model checkpoint
+and a Teacher JSONL dataset; neither large model weights nor research data are
+committed to Git. See [Server Setup](docs/SERVER_SETUP.md).
+
 See [Project Guide](docs/PROJECT_GUIDE.md), [Architecture](docs/ARCHITECTURE.md), and [TODO](docs/TODO.md) for the current implementation boundary and open research questions.

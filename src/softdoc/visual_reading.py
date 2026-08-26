@@ -23,6 +23,9 @@ NormalizedRegion = tuple[
 ]
 
 
+VISUAL_READER_PROMPT_VERSION = "visual-reader-v0.1"
+
+
 class VisualInput(BaseModel):
     """One image supplied to a Visual Reader request."""
 
