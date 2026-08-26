@@ -102,4 +102,4 @@ the training-data contract. Actual SFT additionally requires a model checkpoint
 and a Teacher JSONL dataset; neither large model weights nor research data are
 committed to Git. See [Server Setup](docs/SERVER_SETUP.md).
 
-See [Project Guide](docs/PROJECT_GUIDE.md), [Architecture](docs/ARCHITECTURE.md), and [TODO](docs/TODO.md) for the current implementation boundary and open research questions.
+See [Project Guide](docs/PROJECT_GUIDE.md), [Model Contracts](docs/MODEL_CONTRACTS.md), [Architecture](docs/ARCHITECTURE.md), and [TODO](docs/TODO.md) for the current implementation boundary, complete JSON interfaces, and open research questions.

@@ -1,100 +1,100 @@
 # TODO
 
-## Evidence Checker：服务器阶段验证
-
-- [ ] 在服务器上的正式模型重新评估 Checker v1；当前本地 `qwen3:8b` 只证明循环和 Schema 可以运行，不作为最终质量结论。
-- [ ] 验证 `incomplete` 时偶尔漏写 `remaining_gap_description`，并采用一次带明确 Pydantic 错误的定向重试，而不是继续加长主 Prompt。
-- [ ] 验证 `used_for_evidence=true` 但 `add/replace` 为空的协议错误，以及重复 Observation 应为未采用的边界。
-- [ ] 验证模型是否会把问题中的公司、年份、单位或条件擅自补入信息不足的 Observation（如 `Net income was 14`）。
-- [ ] 验证旧 Evidence 与新 Observation 的联合充分性、部分问题误判完成、Root 过早 `ready` 和明确冲突的 `replace` 能力。
-- [ ] 对比至少一个更强模型；分别报告 Schema 合法率、delta 应用率、false-ready、冲突修正和两轮循环成功率。
-
-只记录尚未完成、需要以后通过实验决定的事项。
+这里只保留尚未完成、必须通过真实实验决定的事项。已实现的契约与流程见
+[`MODEL_CONTRACTS.md`](MODEL_CONTRACTS.md) 和
+[`ARCHITECTURE.md`](ARCHITECTURE.md)，不在 TODO 重复记录。
 
 ## 1. PDF 与 SoftDoc 完整性
 
-- [ ] 在更完整的数据集上检查 MinerU 漏检、错类型、错误裁剪和跨页内容遗漏。
-- [ ] 复核当前 22 个上游 Table 类型误判候选；先统计对检索与回答的实际影响，再决定是否增加通用类型校验或更换解析后端。
-- [ ] 区分 MinerU 上游问题与 SoftDoc Adapter 丢失；优先修复通用问题，不按单份文档堆规则。
-- [ ] 验证当前 Pipeline、MinerU Hybrid 或视觉 fallback 是否值得加入正式流程。
-- [ ] 处理复合 Table 的内部图片缺失：`<image N>`不等于有效`img src`，且可能完全没有图片提示；暂不新增检测模块。
-- [ ] 跨页聚合表拆分目前只是 `representative-28` 上的暂定开发策略，不得默认推广到后续全部文档。应在完整数据集上比较“保留 MinerU 聚合表”和“按物理页拆分并生成 confirmed `continued_on`”对解析、检索、引用定位和回答的影响，再决定正式默认行为；在此之前，行归属、重复表头或跨页 `rowspan` 无法唯一验证时必须保留 MinerU 原结果，不得强拆。
+- [ ] 在完整数据集上区分 MinerU 上游漏检/错类型/错裁剪与 SoftDoc Adapter
+  丢失，优先修复通用问题，不按单份文档堆规则。
+- [ ] 复核 22 个上游 Table 类型误判候选，并测量它们对检索、阅读和回答的
+  真实影响，再决定是否需要通用类型校验或其他解析后端。
+- [ ] 审计复合 Table 内部图片：有效 `<img src>`、仅有 `<image N>` 占位、完全
+  无提示但视觉区域含图三类必须分开；暂不增加每表都调用 VLM 的检测模块。
+- [ ] 在更大样本上比较当前 Pipeline、MinerU Hybrid 和视觉 recovery；没有净
+  收益的 recovery/Normalizer 不保留。
+- [ ] 跨页聚合 Table 的拆分只是 representative-28 上的开发策略。完整数据集上
+  比较“保留 MinerU 聚合结果”和“按物理页拆分并生成 confirmed
+  `continued_on`”。行归属、重复表头或跨页 `rowspan` 无法唯一验证时不得强拆。
 
-## 2. Planner 对照
+## 2. Planner 策略
 
-- [ ] 在 Reader、Evidence State 和 Controller 接通后，同条件比较：
-  - No Planner；
-  - Initial Planner；
-  - Deferred Planner（阅读后根据真实 evidence gap 才允许更新计划）。
-- [ ] 比较答案质量、证据完整性、动作数、模型调用次数和运行时间。
+- [ ] 在完整 Reading Loop 上同条件比较 No Planner、Initial Planner 和 Deferred
+  Planner。
+- [ ] 同时报告答案质量、Evidence 完整性、动作/模型调用数、延迟和成本；只有
+  Deferred Planning 有稳定净收益才实现动态计划更新。
 
-## 3. 检索策略与批次超参
+## 3. 检索、候选批次与预算
 
-- [ ] 比较三种候选策略：
-  1. weighted RRF；
-  2. 固定配额混合，例如每批 `3 BM25 + 2 Dense`；
-  3. BM25-first，当前候选不能补齐证据时再启动 Dense。
-- [ ] 调整并验证：
-  - 每批预览数，如 `3 / 5 / 10`；
-  - BM25/Dense 配额，如 `3+2 / 2+3 / 1+4`；
-  - RRF 的 `k` 和 BM25/Dense 权重；
-  - 何时取下一批、何时切换检索器。
-- [ ] 不只看 Top-k recall，还要比较 Agent 找到充分证据所需的批次数、阅读数、延迟和成本。
-- [ ] Controller预算不要最终固定为“动作步数”；闭环可运行后，比较token、Reader/VLM调用、图像输入、检索延迟和实际费用，并据此定义可配置的资源成本预算。搜索翻批、文本读取和视觉读取不得默认视为等成本。
+- [ ] 比较 weighted RRF、固定配额混合（如 `3 BM25 + 2 Dense`）和 BM25-first
+  后按需 Dense 三种策略。
+- [ ] 调整每批 Preview 数（如 `3/5/10`）、BM25/Dense 配额、RRF 参数，以及何时
+  next/switch/new search。
+- [ ] 不只报告 Top-k recall；还报告找到充分 Evidence 所需批次、完整读取数、
+  VLM 调用、延迟和费用。
+- [ ] 将当前 action-count 占位预算替换为可配置资源成本。搜索翻批、文本读取、
+  整页视觉和局部视觉不能默认等成本。
 
-## 4. 是否需要专门 Reader
+## 4. Reader 与视觉动作
 
-- [ ] 先比较“Controller直接读取Element/TableView”和“专门Reader返回Observation”；只有后者明显改善大表、复杂视觉内容或成本时才实现Reader。
-- [ ] Visual Reader v0 暂时统一读取整页和 Figure、Chart 等非 Table 视觉元素；以后再用质量、延迟和成本实验决定是否拆分 Page/Element Reader，以及是否为 Figure/Chart 设置专门Reader。
-- [ ] 若实现Reader：Reader只报告本次读到的可靠Observation与limitations，不输出answer/conclusion；`continued_on`缺失、`candidate` Relation和文本/HTML读取失败后的视觉fallback，均交给Controller决策，不自动导航或调用VLM。
-- [ ] 用答案质量、证据完整性、动作数、视觉调用和成本决定是否保留Reader。
+- [ ] 用真实 QA 比较 Controller 直接消费结构化内容与专门 Reader 输出
+  Observation；只有后者改善质量或成本时才保留专门 Reader。
+- [ ] Visual Reader v0 暂时统一 Page/Figure/Chart；以后再以实验决定是否拆分
+  Page/Element 或 Figure/Chart Reader。
+- [ ] 默认单图读取；可拆成独立数值/事实的多图比较应分别读取并由 Answerer
+  汇总。只有视觉关系本身不可拆分时才联合多图读取。
+- [ ] `INSPECT_REGION`/zoom、结构化 Table Reader 和视觉 fallback 均等待真实
+  failure taxonomy 后再加入动作空间，不为假设场景提前扩 Schema。
+- [ ] 当 `continued_on` 未检测到、candidate Relation 可疑或结构化读取失败时，
+  由 Controller 决定相邻页、候选关系或视觉读取；Reader 不自动导航。
 
-### Controller 训练备忘（已定设计，不是待办）
+## 5. Relation 与规则审计
 
-- Controller主导选择Visual Reader输入。默认单图读取；能还原为独立事实的比较（如分别读取A、B数值）应分开读取，将事实写入Evidence，最后由Answerer比较。
-- 只有无法安全拆成独立事实的视觉比较（如波动、形状、对应关系）以及跨页连续判断，才在一次请求中联合提供多张图，由Reader输出引用多个`input_id`的关系型Observation。
-- 训练Controller时应学习“单图读取、补读另一图、联合视觉读取”三种决策；不要让Controller亲自解释图像或生成最终答案。
-Visual reading 默认把可独立事实拆开单独读取；事实级比较由 Evidence/Answerer 汇总。只有当前判断本身依赖多个视觉输入间的视觉关系时，Controller 才发起 multi-image joint reading。何时进行单图或多图读取属于未来 Controller policy 的一部分。
+- [ ] 在真实轨迹上逐类消融 `caption_of`、`footnote_of`、`refers_to`、Section、
+  page/reading adjacency 和 `continued_on`，测量 Evidence 增益、减少的搜索次数和
+  错误导航成本。
+- [ ] 审计仍偏激进的规则，优先检查
+  `parser_declared_function_target`、`bounded_nearest_compatible_element` 和
+  `profile_forced_sibling_level`；依据最终 QA 收益决定保留、降为 candidate 或删除。
+- [ ] confirmed Relation 与 candidate Relation 必须持续分开评估；candidate 只能
+  作为调查机会，不能因被探索而自动升级为事实。
 
-## 5. 激进规则审计
+## 6. Observation、Evidence Checker 与 Recall
 
-- [ ] 在更完整数据集和真实QA轨迹上审计当前激进但仍有通用价值的规则；优先检查 `parser_declared_function_target`、`bounded_nearest_compatible_element` 和 `profile_forced_sibling_level`，再评估其余标题、Section、页码及视觉Caption规则。比较关系准确率、Section变化和最终QA收益后再决定保留、降为candidate或删除。
+- [ ] 在服务器模型上重新评估 Checker。当前本地 `qwen3:8b` 只证明循环与 Schema
+  可执行，不是质量结论。
+- [ ] 报告 Schema 合法率、delta 应用率、false-ready、冲突处理、两轮循环成功率，
+  并至少对比一个更强模型。
+- [ ] 覆盖这些 failure cases：无 Observation 只有 limitation；部分有用；无关、
+  重复或范围不符；错误 Observation；新旧 Evidence 冲突；多 Evidence 联合才充分；
+  路线或预算耗尽但 Root 仍 incomplete。
+- [ ] `incomplete` 漏写 `remaining_gap_description` 或违反
+  `used_for_evidence`/delta 约束时，最多做一次携带明确 Pydantic 错误的定向重试，
+  不继续加长主 Prompt。
+- [ ] 评估 Observation Recall：当后续问题可能复用旧但未采纳 Observation 时，
+  比较重新读取与从 ObservationStore 召回再交 Checker；只有减少成本且不增加错误
+  才实现 Recall。
+- [ ] 评估一次 Observation 可支持多个问题造成的重复读取风险；v0 仍一次只评估
+  当前 target，不提前扩大 Checker 范围。
 
-## 6. Observation Recall
+## 7. Controller 策略与训练
 
-- [ ] Controller闭环可运行后，比较“只使用新Observation”和“`current_target`变化时从未采用的旧Observation中召回少量候选并重新交给Checker”；只有后者改善证据完整性或减少重复阅读时才保留Recall。
-- [ ] v0一次只评估当前问题；同一Observation若也能解决后续问题，可能发生重复读取。以后对比“后续问题重新读取”和“从ObservationStore召回并重新交给Checker”，用读取数、成本和错误率决定是否实现跨问题复用。
+- [ ] 用更强服务器模型验证 Controller 是否能拒绝“主题相关但不能填补当前字段”的
+  Preview，以及是否真正区分 confirmed/candidate Relation。
+- [ ] 建立 Teacher 轨迹并记录每一步的可接受动作、Evidence 净增益、成本和失败原因；
+  先做 prompted Teacher/SFT，再决定是否需要偏好训练或 RL。
+- [ ] 防止无意义循环：重复动作只有在 Evidence、gap、输入可读性或候选状态发生变化
+  后才允许；`STOP` 不得把 incomplete 改成 ready。
+- [ ] 比较只给当前 gap 与给完整精简 Evidence/近期反馈的策略，确认哪些状态字段确实
+  改善动作选择后再冻结训练输入。
 
-## 7. Answerer 服务器阶段验证
+## 8. Answerer 与最终引用
 
-- [ ] 当Evidence只能证明“数值发生了变化”，但Root Question追问“为什么变化”时，本地`qwen3:8b`可能把变化本身循环表述为原因。首要防线是Checker不得将这类Evidence判为`ready`；Answerer仅保留问题覆盖检查作为兜底。以后用更强模型测量“缺少原因证据”的拒答率，暂不继续为单个错例扩写Prompt。
-- [ ] 实现Citation Materializer：确定性展开`used_evidence_ids -> observation_ids -> ReadRecord.inputs`，输出用户可见的Document/Page/Element/Region引用；不得让Answerer编造位置或citation ID。
-
-## 8. Evidence Checker 闭环
-
-- [x] 收缩ID边界：v0以`action_id`串起一次Controller动作、对应`ReadRecord`、其Observation和可选Checker更新；删除独立`read_request_id/request_source_id/request_visual_id`。`EvidenceCheckResult`不新增全局`evidence_check_id`或第四个canonical store。多输入读取仅保留动作内局部`input_id`和稳定`source_id/visual_asset_id`。
-- [x] 收缩limitation：它只描述Reader本轮没有可靠读出的内容，不评价Observation是否对问题有用。删除分类`code`，保留简短`description`及受影响的动作内`input_id`；Checker评价仍单独存在。
-- [x] 实现最小`EvidenceCheckResult` delta：用`action_id`关联本轮，逐条返回`observation_id + used_for_evidence + assessment`、`add/replace/remove`、`current_target_status`、`root_status`及可选剩余gap。程序在Memory副本上应用、验证完整结果后原子提交；未提及的旧Evidence不会因模型漏抄而消失。
-- [x] 固定普通循环：一个Root Question共用唯一ObservationStore与EvidenceMemory；Controller/Checker每轮聚焦一个current question。Evidence用`supports_question_ids`保留目标归属；当前子问题满足但Root仍不充分时切换或细化问题，只有`root_status=ready`才交给Answerer。
-- [x] 持久化问题DAG运行状态：`EvidenceMemory.questions`保存全部已注册问题的文本、依赖和状态，`current_target`唯一表示当前问题与gap；Checker只更新当前项，程序按依赖和Planner稳定顺序选择下一项。ActionTrace只引用本步`question_id`，不再维护第二份current-question状态。
-
-### 情况清单与处理
-
-- [ ] **C1：没有Observation，只有读取失败或limitation。** 不调用Checker；在`ReadRecord/ActionTrace`保留结果，Controller看到失败后换候选、表示或读取范围，避免原样重试。
-- [ ] **C2：Observation正确且补齐当前gap。** 提升为Evidence并把`current_target_status`设为`satisfied`；程序选择下一个依赖就绪的问题，或在Root充分时设为`ready`。
-- [ ] **C3：Observation只有部分有用。** 原子Observation逐条评估，只提升可靠且相关的部分；`current_target`保持同一问题并描述仍缺的事实。
-- [ ] **C4：Observation正确但无关、重复、对象/时间/范围不符。** 不提升，当前target与gap保持不变；Controller从本轮`EvidenceCheckResult`读取assessment，自行决定换候选、下一批、重新SEARCH、导航或换表示；不把评价复制到ActionTrace。
-- [ ] **C5：Observation明显错误或受limitation影响，Checker能够识别。** 不提升，当前target与gap保持不变；错误读取仍留在append-only ObservationStore中供审计和防重复。
-- [ ] **C6：Observation与已有Evidence冲突。** 不静默覆盖；EvidenceMemory保留可追溯来源，并把当前gap改写为需要消解的冲突，Controller再选择独立来源或另一表示核验。
-- [ ] **C7：Observation看似合理但实际错误，当前没有冲突或额外信息。** 系统不能凭同一信息必然发现；依靠精确grounding、后续冲突、已有多表示的机会性交叉检查及答案关键事实的选择性复核，不默认全部读两遍。
-- [ ] **C8：Checker进行集合级联动。** 每轮读取完整但精简的EvidenceMemory，判断多条Evidence联合后是否充分、重复或冲突；不读取全部历史Observation，`ready`只表示证据集合足以回答，不表示答案已经生成。
-- [ ] **C9：候选、导航路线或动作预算耗尽但gap仍未解决。** 不得伪装成`ready`；在Reading Session/Answerer边界记录“证据不足而停止”，避免Controller无限循环。闭环后再决定是否扩展`EvidenceStatus`。
-- [ ] 闭环后做错误注入与反馈消融：注入错误数值、错误对象/范围、无关Observation、冲突和不可读结果；比较“只给status/gap”“给简短`EvidenceCheckResult`评价”“给自由文本长reason”在错误恢复率、false-ready率、重复动作、答案质量、动作数和成本上的差异。
-
-### 四项主要风险与预定处理
-
-- [ ] **R1：坏Observation被Checker错误提升为Evidence。** 保留Observation到精确source的grounding和Evidence到Observation的引用；使用原子Observation、同轮limitations、已有Evidence一致性检查和高风险事实的选择性复核；通过错误值、错误对象和错误范围注入测量错误恢复率。没有任何额外信息且错误内容自身完全合理时，不宣称系统能够必然识别。
-- [ ] **R2：Checker过早给出`ready`。** `ready`必须由完整Root Question与完整但精简的Evidence集合共同判断，所有答案要求均有来源支持且不存在未解决冲突；Answerer不得把无引用推断补成缺失事实；以false-ready率单独评估，并与最终答案正确率分开报告。
-- [ ] **R3：Controller重复无效动作。** 从canonical `ActionTrace`、`ReadRecord`和`SearchSession`派生已尝试source、实际查询、候选cursor、动作outcome及Observation引用；当前轮直接读取规范化`ReadRecord/EvidenceCheckResult`，不生成`result_summary`。对完全相同的动作、目标和查询建立循环保护，除非Evidence/gap或可用输入发生变化。
-- [ ] **R4：路线或预算耗尽但Evidence仍不充分。** 保持`EvidenceMemory.root_status=incomplete`，在Reading Session边界记录停止原因并允许Answerer明确拒答或报告证据不足；不得把“无法继续”改写为`ready`。闭环实验后再决定是否需要第三种`EvidenceStatus`，避免现在过早扩展schema。
-- [ ] Re-evaluate Controller v0 with the future server model. Measure whether it rejects candidates that match the topic but cannot answer the requested evidence field (for example, a date when the gap asks for a reason), and whether it keeps confirmed Relations separate from candidate Relations. Compare a stronger prompted model first; consider SFT/RL only if these errors persist in real trajectories. Do not add case-specific Prompt rules from synthetic failures.
+- [ ] 在更强模型上验证 Evidence 只证明“发生变化”但 Root 追问“为什么”时的拒答
+  行为；首要防线仍是 Checker 不应过早 `ready`。
+- [ ] 实现 Citation Materializer：确定性展开
+  `used_evidence_ids -> observation_ids -> ReadRecord.inputs -> SoftDoc source`，生成
+  Document/Page/Element/Region 引用；Answerer 不得自行编造位置。
+- [ ] 在完整数据集上进行端到端答案质量、Evidence 充分性、citation correctness、
+  动作效率和成本评估。
