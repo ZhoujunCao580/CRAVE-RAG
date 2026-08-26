@@ -4,7 +4,7 @@ from pydantic import ValidationError
 from softdoc.ids import action_id, evidence_id, observation_id, read_input_id
 from softdoc.models import Relation, RelationEvidence, RelationSource, RelationStatus, RelationType
 from softdoc.reading_state import (
-    ActionOutcome, ActionTrace, ActionTraceEntry, CurrentTarget,
+    ActionExecutionStatus, ActionTrace, ActionTraceEntry, CurrentTarget,
     EvidenceAddition, EvidenceCheckInput, EvidenceCheckResult, EvidenceItem,
     EvidenceMemory, EvidenceRemoval, EvidenceReplacement, EvidenceStatus,
     EvidenceUpdates, ExplorationSourceHandle, ExplorationStateBuilder,
@@ -359,10 +359,11 @@ def test_exploration_state_is_derived_and_exposes_only_local_relations():
         reading_session_id="reading:1", root_question_id="root:1", entries=[
             ActionTraceEntry(step_index=0, action_id="action:search", question_id="Q2",
                              action_name="SEARCH", query="2023 revenue",
-                             outcome=ActionOutcome.SUCCEEDED),
+                             execution_status=ActionExecutionStatus.SUCCEEDED),
             ActionTraceEntry(step_index=1, action_id="action:read", question_id="Q2",
                              action_name="READ_ELEMENT", target_ids=["element:source"],
-                             primary_target=focus, outcome=ActionOutcome.SUCCEEDED,
+                             primary_target=focus,
+                             execution_status=ActionExecutionStatus.SUCCEEDED,
                              observation_ids=["obs:1"]),
         ],
     )
@@ -392,6 +393,7 @@ def test_action_trace_requires_contiguous_steps():
             reading_session_id="reading:1", root_question_id="root:1",
             entries=[ActionTraceEntry(
                 step_index=1, action_id="action:1", question_id="root:1",
-                action_name="SEARCH", outcome=ActionOutcome.SUCCEEDED,
+                action_name="SEARCH",
+                execution_status=ActionExecutionStatus.SUCCEEDED,
             )],
         )

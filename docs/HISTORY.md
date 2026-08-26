@@ -239,3 +239,21 @@ Answerer输入。Answerer仅保留“Evidence是否直接覆盖Root Question的�
 ## 2026-08-23：项目公开名称确定为 CRAVE-RAG
 
 项目公开展示名称确定为 **CRAVE-RAG**（**Controller-guided Reading and Action Via Evidence Gaps**）。SoftDoc继续表示解析器无关的文档中间结构，Python包和CLI继续使用`softdoc`，避免品牌调整破坏稳定ID、导入路径与现有脚本。`ARCHITECTURE.md`以一张简洁流程图展示Controller与Checker围绕Evidence gap协作的阅读循环。该命名不改变任何SoftDoc语义规则、检索排序或运行时contract。
+
+## 2026-08-25：冻结Controller Prompt v0.1
+
+新增`src/softdoc/controller_prompt.py`作为唯一模型侧Prompt事实源，版本为`controller-policy-v0.1`。动作选择从固定优先级改为围绕当前gap综合比较可见候选、Relation、相邻页、SearchSession、最近失败和预算；既有Evidence只在当前gap或最近反馈明确要求解决冲突、不确定、grounding不完整或读取失败时复核。继续保持五类冻结动作，不增加`STOP`或`INSPECT_REGION`，具体Controller模型后端与质量评测仍未实现。
+# 2026-08-25 - Controller v0 local model probe
+
+Implemented an injectable Ollama Controller backend and a 15-case synthetic
+action-selection probe. The first run exposed a model-facing contract
+ambiguity: CandidatePreview exposed `element_id`, while the prompt referred
+only to a generic visible `source_id`. Controller Prompt v0.2 now explicitly
+maps CandidatePreview `element_id` and Exact Anchor `target_id` to
+`READ_SOURCE.source_ids`, while keeping `page_id` as location metadata.
+
+With local `qwen3:8b`, two blind passes (30 generations) produced 28/30
+contract-valid actions, 24/30 Teacher-reference matches, and 14/15 semantic
+two-pass stability. Remaining errors were concentrated in weak-candidate
+rejection and confusing a candidate Relation with a confirmed Relation. This
+is a Controller action-selection probe, not an end-to-end QA result.

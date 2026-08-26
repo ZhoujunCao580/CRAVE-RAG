@@ -18,7 +18,7 @@ from softdoc.ids import (
     stable_digest,
 )
 from softdoc.reading_state import (
-    ActionOutcome,
+    ActionExecutionStatus,
     ActionTrace,
     ActionTraceEntry,
     CurrentTarget,
@@ -162,12 +162,12 @@ def _replay_row(row: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
             )
         )
 
-    outcome = (
-        ActionOutcome.FAILED
+    execution_status = (
+        ActionExecutionStatus.FAILED
         if not observations
-        else ActionOutcome.DEGRADED
+        else ActionExecutionStatus.DEGRADED
         if limitations
-        else ActionOutcome.SUCCEEDED
+        else ActionExecutionStatus.SUCCEEDED
     )
     record = ReadRecord(
         action_id=canonical_action_id,
@@ -200,7 +200,7 @@ def _replay_row(row: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
                 action_name="READ_VISUAL",
                 target_ids=[item.source_id for item in inputs],
                 primary_target=primary_target,
-                outcome=outcome,
+                execution_status=execution_status,
                 observation_ids=record.observation_ids,
             )
         ],
@@ -267,7 +267,7 @@ def _replay_row(row: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         "probe_id": row["probe_id"],
         "category": row["category"],
         "schema_input_valid": validated is not None,
-        "outcome": outcome.value,
+        "execution_status": execution_status.value,
         "requested_source_count": len(inputs),
         "observation_count": len(observations),
         "limitation_count": len(limitations),
@@ -311,7 +311,9 @@ def audit(input_path: Path, report_path: Path, examples_path: Path) -> None:
         except Exception as exc:  # noqa: BLE001 - audit must report every row
             errors.append(f"{row['probe_id']}: {type(exc).__name__}: {exc}")
 
-    outcomes = Counter(item["outcome"] for item in summaries)
+    execution_statuses = Counter(
+        item["execution_status"] for item in summaries
+    )
     multi = [item for item in summaries if item["requested_source_count"] > 1]
     lines = [
         "# Reading State v0 × Visual Reader真实probe兼容性审计",
@@ -319,7 +321,7 @@ def audit(input_path: Path, report_path: Path, examples_path: Path) -> None:
         f"- 输入请求：{len(rows)}",
         f"- 成功构造三套State：{len(summaries)}/{len(rows)}",
         f"- Schema演练异常：{len(errors)}",
-        f"- Action outcome：{dict(outcomes)}",
+        f"- Action execution status：{dict(execution_statuses)}",
         f"- 保存Observation：{sum(item['observation_count'] for item in summaries)}",
         f"- 机械映射Evidence：{sum(item['evidence_count'] for item in summaries)}（仅测接口，不代表Checker确认）",
         f"- 多图请求：{len(multi)}；存在严格联合来源Observation：{sum(item['joint_grounded_observation'] for item in multi)}",

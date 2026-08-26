@@ -1,0 +1,959 @@
+{
+  "diagnostic_version": "controller-gold-5-v0.1",
+  "controller_input_version": "controller-input-v0.1",
+  "controller_action_version": "controller-action-v0.1",
+  "controller_prompt_version": "controller-policy-v0.2",
+  "scope": "Five fixed real-document trajectory diagnostics. Acceptable actions are next-step teacher labels; this file is not an accuracy estimate.",
+  "cases": [
+    {
+      "question_index": 14,
+      "question": "According to the chart on page 14 how much time was spent with family and friends in 2010?",
+      "answer": "21%",
+      "gold_pages": "[14]",
+      "diagnostic_focus": "Exact Anchor automatic page read",
+      "steps": [
+        {
+          "step_id": "Q14-exact-auto-read",
+          "stage": "environment",
+          "controller_input": null,
+          "acceptable_actions": [
+            {
+              "action": "AUTO_READ_EXACT",
+              "target_ids": [
+                "doc:0e94b4197b10096b1f4c699701570fbf:26022465:page:0013"
+              ]
+            }
+          ],
+          "expected_progress": "evidence",
+          "teacher_rationale": "A unique explicit Page 14 anchor bypasses Controller selection and the Environment reads the page directly.",
+          "observed_local_qwen3_8b_action": null,
+          "observed_result": "correct automatic route"
+        }
+      ]
+    },
+    {
+      "question_index": 230,
+      "question": "Who is the commanding officer in the first figure on the second page?",
+      "answer": "Capt. John W. Sanders",
+      "gold_pages": "[2]",
+      "diagnostic_focus": "Invalid page metadata handle and same-page capability gap",
+      "steps": [
+        {
+          "step_id": "Q230-initial-search-view",
+          "stage": "controller",
+          "controller_input": {
+            "reading_session_id": "reading:gold-230",
+            "root_question": {
+              "question_id": "root:230",
+              "text": "Who is the commanding officer in the first figure on the second page?"
+            },
+            "root_status": "incomplete",
+            "subquestions": [],
+            "evidence": [],
+            "current_gap": {
+              "question_id": "root:230",
+              "description": "Who is the commanding officer in the first figure on the second page?"
+            },
+            "reading_locations": [],
+            "recent_actions": [],
+            "confirmed_relations": [],
+            "candidate_relations": [],
+            "search_tabs": [
+              {
+                "search_session_id": "search-session:cfc99e8445eb",
+                "query": "Who is the commanding officer in the first figure on the second page?",
+                "has_more": true
+              }
+            ],
+            "visible_search_view": {
+              "search_session_id": "search-session:cfc99e8445eb",
+              "exact_anchor_matches": [],
+              "candidate_previews": [
+                {
+                  "element_id": "doc:0b85477387a9d0cc33fca0f4becaa0e5:d897e7f0:page:0001:element:0000:heading:main",
+                  "element_type": "heading",
+                  "page_id": "doc:0b85477387a9d0cc33fca0f4becaa0e5:d897e7f0:page:0001",
+                  "section_path": [],
+                  "matched_snippet": "NMRC Commanding Officer’s Message",
+                  "content_availability": "text_only"
+                },
+                {
+                  "element_id": "doc:0b85477387a9d0cc33fca0f4becaa0e5:d897e7f0:page:0001:element:0009:heading:main",
+                  "element_type": "heading",
+                  "page_id": "doc:0b85477387a9d0cc33fca0f4becaa0e5:d897e7f0:page:0001",
+                  "section_path": [],
+                  "matched_snippet": "NSMRL Commanding Officer’s Message",
+                  "content_availability": "text_only"
+                },
+                {
+                  "element_id": "doc:0b85477387a9d0cc33fca0f4becaa0e5:d897e7f0:page:0006:element:0008:paragraph:main",
+                  "element_type": "paragraph",
+                  "page_id": "doc:0b85477387a9d0cc33fca0f4becaa0e5:d897e7f0:page:0006",
+                  "section_path": [
+                    "NAMRU-3 Supports Medical Research Capacity Building in Liberia"
+                  ],
+                  "matched_snippet": "NAMRU-3 Supports Medical Research Capacity Building in Liberia\nFrom left: Lt. Cmdr. Jennifer Curry, Capt. Chris Martinez, Capt. Buhari Oyofo, Col. Vernon Graham, and Lt. Joseph Diclaro. The NAMRU-3 commanding officer, Capt. Oyofo, and his team pose with Col. Graham, officer in charge, and Capt. Martinez, SMO, of the U.",
+                  "content_availability": "text_only"
+                },
+                {
+                  "element_id": "doc:0b85477387a9d0cc33fca0f4becaa0e5:d897e7f0:page:0005:element:0012:paragraph:main",
+                  "element_type": "paragraph",
+                  "page_id": "doc:0b85477387a9d0cc33fca0f4becaa0e5:d897e7f0:page:0005",
+                  "section_path": [
+                    "Policy and Strategy with an Influenza/Infectious Disease Twist"
+                  ],
+                  "matched_snippet": "Policy and Strategy with an Influenza/Infectious Disease Twist\n(Continued from page 5) families in need,” said Chief Petty Officer Arvin Salas, a hospital corpsman with 21st Dental Company. “Every 300 that register, one gets called,” Salas said. “The more people we can help the better.”",
+                  "content_availability": "text_only"
+                },
+                {
+                  "element_id": "doc:0b85477387a9d0cc33fca0f4becaa0e5:d897e7f0:page:0011:element:0008:footnote:figure",
+                  "element_type": "paragraph",
+                  "page_id": "doc:0b85477387a9d0cc33fca0f4becaa0e5:d897e7f0:page:0011",
+                  "section_path": [
+                    "NMRC Hosts a Dining Out at U.S. Naval Academy October 17"
+                  ],
+                  "matched_snippet": "NMRC Hosts a Dining Out at U.S. Naval Academy October 17\nFrom left: Rear Adm. Bruce Doll, guest speaker; NMRC Commanding Officer and President of the Mess Capt. John Sanders and Dr. Leighann Sanders; NMRC Executive Officer Capt. Elizabeth Montcalm-Smith and Dr. Chris Smith.",
+                  "content_availability": "text_only"
+                }
+              ]
+            },
+            "remaining_action_budget": 6
+          },
+          "acceptable_actions": [
+            {
+              "action": "SEARCH",
+              "operation": "new",
+              "query": "NMRC commanding officer sends John Sanders"
+            }
+          ],
+          "expected_progress": "navigation",
+          "teacher_rationale": "The visible headings locate the right page but do not contain the name, and page_id is not a readable CandidatePreview handle.",
+          "observed_local_qwen3_8b_action": {
+            "action": "READ_SOURCE",
+            "source_ids": [
+              "doc:0b85477387a9d0cc33fca0f4becaa0e5:d897e7f0:page:0001"
+            ],
+            "local_problem": "Identify the commanding officer in the first figure on the second page."
+          },
+          "observed_result": "invalid action rejected; no progress"
+        }
+      ]
+    },
+    {
+      "question_index": 546,
+      "question": "When number of visible instances = 60, which category has the largest proportion of missed instances?",
+      "answer": "Person",
+      "gold_pages": "[25]",
+      "diagnostic_focus": "Reading a non-answering Caption as a relation gateway",
+      "steps": [
+        {
+          "step_id": "Q546-initial-search-view",
+          "stage": "controller",
+          "controller_input": {
+            "reading_session_id": "reading:gold-546",
+            "root_question": {
+              "question_id": "root:546",
+              "text": "When number of visible instances = 60, which category has the largest proportion of missed instances?"
+            },
+            "root_status": "incomplete",
+            "subquestions": [],
+            "evidence": [],
+            "current_gap": {
+              "question_id": "root:546",
+              "description": "When number of visible instances = 60, which category has the largest proportion of missed instances?"
+            },
+            "reading_locations": [],
+            "recent_actions": [],
+            "confirmed_relations": [],
+            "candidate_relations": [],
+            "search_tabs": [
+              {
+                "search_session_id": "search-session:10b311fbcff0",
+                "query": "When number of visible instances = 60, which category has the largest proportion of missed instances?",
+                "has_more": true
+              }
+            ],
+            "visible_search_view": {
+              "search_session_id": "search-session:10b311fbcff0",
+              "exact_anchor_matches": [],
+              "candidate_previews": [
+                {
+                  "element_id": "doc:2005.12872v3:8a6afad4:page:0024:element:0000:caption:chart",
+                  "element_type": "caption",
+                  "page_id": "doc:2005.12872v3:8a6afad4:page:0024",
+                  "section_path": [
+                    "A Appendix",
+                    "A.5 Additional results"
+                  ],
+                  "matched_snippet": "A Appendix\nA.5 Additional results\nFig. 12: Analysis of the number of instances of various classes missed by DETR depending on how many are present in the image. We report the mean and the standard deviation. As the number of instances gets close to 100, DETR starts saturating and misses more and more objects",
+                  "content_availability": "text_only"
+                },
+                {
+                  "element_id": "doc:2005.12872v3:8a6afad4:page:0023:element:0002:paragraph:main",
+                  "element_type": "paragraph",
+                  "page_id": "doc:2005.12872v3:8a6afad4:page:0023",
+                  "section_path": [
+                    "A Appendix",
+                    "A.5 Additional results"
+                  ],
+                  "matched_snippet": "A Appendix\nA.5 Additional results\nIncreasing the number of instances By design, DETR cannot predict more objects than it has query slots, i.e. 100 in our experiments. In this section, we analyze the behavior of DETR when approaching this limit. We select a canonical square image of a given class, repeat it on a 10 × 10",
+                  "content_availability": "text_only"
+                },
+                {
+                  "element_id": "doc:2005.12872v3:8a6afad4:page:0011:element:0001:caption:figure",
+                  "element_type": "caption",
+                  "page_id": "doc:2005.12872v3:8a6afad4:page:0011",
+                  "section_path": [
+                    "4 Experiments",
+                    "4.2 Ablations"
+                  ],
+                  "matched_snippet": "4 Experiments\n4.2 Ablations\nFig. 4: AP and\\mathrm { A P 5 0 }performance after each decoder layer. A single long schedule baseline model is evaluated. DETR does not need NMS by design, which is validated by this figure. NMS lowers\\mathrm { A P }in the final layers, removing TP predictions, but improves AP in the first ",
+                  "content_availability": "text_only"
+                },
+                {
+                  "element_id": "doc:2005.12872v3:8a6afad4:page:0013:element:0004:paragraph:main",
+                  "element_type": "paragraph",
+                  "page_id": "doc:2005.12872v3:8a6afad4:page:0013",
+                  "section_path": [
+                    "4 Experiments",
+                    "4.3 Analysis"
+                  ],
+                  "matched_snippet": "4 Experiments\n4.3 Analysis\nGeneralization to unseen numbers of instances. Some classes in COCO are not well represented with many instances of the same class in the same image. For example, there is no image with more than 13 girafes in the training set. We create a synthetic image<sup>3</sup> to verify the generalizat",
+                  "content_availability": "text_only"
+                },
+                {
+                  "element_id": "doc:2005.12872v3:8a6afad4:page:0009:element:0004:paragraph:main",
+                  "element_type": "paragraph",
+                  "page_id": "doc:2005.12872v3:8a6afad4:page:0009",
+                  "section_path": [
+                    "4 Experiments",
+                    "4.2 Ablations"
+                  ],
+                  "matched_snippet": "4 Experiments\n4.2 Ablations\nNumber of encoder layers. We evaluate the importance of global imagelevel self-attention by changing the number of encoder layers (Table 2). Without encoder layers, overall AP drops by 3.9 points, with a more significant drop of 6.0 AP on large objects. We hypothesize that, by using global s",
+                  "content_availability": "text_only"
+                }
+              ]
+            },
+            "remaining_action_budget": 6
+          },
+          "acceptable_actions": [
+            {
+              "action": "READ_SOURCE",
+              "source_ids": [
+                "doc:2005.12872v3:8a6afad4:page:0024:element:0000:caption:chart"
+              ],
+              "local_problem": "Locate the chart that shows missed-instance proportions at 60 visible instances."
+            }
+          ],
+          "expected_progress": "navigation",
+          "teacher_rationale": "The top Caption is the cheapest structural entrance; reading it can expose the confirmed caption_of relation to the chart.",
+          "observed_local_qwen3_8b_action": {
+            "action": "SEARCH",
+            "operation": "next",
+            "query": null,
+            "search_session_id": "search-session:10b311fbcff0"
+          },
+          "observed_result": "skipped gateway and moved to next batch"
+        },
+        {
+          "step_id": "Q546-after-next-batch",
+          "stage": "controller",
+          "controller_input": {
+            "reading_session_id": "reading:gold-546",
+            "root_question": {
+              "question_id": "root:546",
+              "text": "When number of visible instances = 60, which category has the largest proportion of missed instances?"
+            },
+            "root_status": "incomplete",
+            "subquestions": [],
+            "evidence": [],
+            "current_gap": {
+              "question_id": "root:546",
+              "description": "When number of visible instances = 60, which category has the largest proportion of missed instances?"
+            },
+            "reading_locations": [],
+            "recent_actions": [
+              {
+                "action_id": "action:546:search-next",
+                "question_id": "root:546",
+                "action_name": "SEARCH",
+                "target_ids": [
+                  "doc:2005.12872v3:8a6afad4:page:0023:element:0003:paragraph:main",
+                  "doc:2005.12872v3:8a6afad4:page:0015:element:902200:paragraph:text-layer-coverage",
+                  "doc:2005.12872v3:8a6afad4:page:0007:element:0003:paragraph:main",
+                  "doc:2005.12872v3:8a6afad4:page:0012:element:901900:paragraph:text-layer-coverage",
+                  "doc:2005.12872v3:8a6afad4:page:0017:element:0000:list:main"
+                ],
+                "execution_status": "succeeded",
+                "observation_ids": [],
+                "feedback": null
+              }
+            ],
+            "confirmed_relations": [],
+            "candidate_relations": [],
+            "search_tabs": [
+              {
+                "search_session_id": "search-session:10b311fbcff0",
+                "query": "When number of visible instances = 60, which category has the largest proportion of missed instances?",
+                "has_more": true
+              }
+            ],
+            "visible_search_view": {
+              "search_session_id": "search-session:10b311fbcff0",
+              "exact_anchor_matches": [],
+              "candidate_previews": [
+                {
+                  "element_id": "doc:2005.12872v3:8a6afad4:page:0023:element:0003:paragraph:main",
+                  "element_type": "paragraph",
+                  "page_id": "doc:2005.12872v3:8a6afad4:page:0023",
+                  "section_path": [
+                    "A Appendix",
+                    "A.5 Additional results"
+                  ],
+                  "matched_snippet": "A Appendix\nA.5 Additional results\nNote that this test is a test of generalization out-of-distribution by design, since there are very few example images with a lot of instances of a single class. It is dificult to disentangle, from the experiment, two types of out-of-domain generalization: the image itself vs the numbe",
+                  "content_availability": "text_only"
+                },
+                {
+                  "element_id": "doc:2005.12872v3:8a6afad4:page:0015:element:902200:paragraph:text-layer-coverage",
+                  "element_type": "paragraph",
+                  "page_id": "doc:2005.12872v3:8a6afad4:page:0015",
+                  "section_path": [
+                    "4 Experiments",
+                    "4.4 DETR for panoptic segmentation"
+                  ],
+                  "matched_snippet": "4 Experiments\n4.4 DETR for panoptic segmentation\nof the same stuff category in one, and filter the empty ones (less than 4 pixels).",
+                  "content_availability": "text_only"
+                },
+                {
+                  "element_id": "doc:2005.12872v3:8a6afad4:page:0007:element:0003:paragraph:main",
+                  "element_type": "paragraph",
+                  "page_id": "doc:2005.12872v3:8a6afad4:page:0007",
+                  "section_path": [
+                    "4 Experiments"
+                  ],
+                  "matched_snippet": "4 Experiments\nDataset. We perform experiments on COCO 2017 detection and panoptic segmentation datasets [24,18], containing 118k training images and 5k validation images. Each image is annotated with bounding boxes and panoptic segmentation. There are 7 instances per image on average, up to 63 instances in a single ima",
+                  "content_availability": "text_only"
+                },
+                {
+                  "element_id": "doc:2005.12872v3:8a6afad4:page:0012:element:901900:paragraph:text-layer-coverage",
+                  "element_type": "paragraph",
+                  "page_id": "doc:2005.12872v3:8a6afad4:page:0012",
+                  "section_path": [
+                    "4 Experiments",
+                    "4.2 Ablations"
+                  ],
+                  "matched_snippet": "4 Experiments\n4.2 Ablations\nGIoU loss, and observe that `1 gives poor results on its own, but when combined with",
+                  "content_availability": "text_only"
+                },
+                {
+                  "element_id": "doc:2005.12872v3:8a6afad4:page:0017:element:0000:list:main",
+                  "element_type": "list",
+                  "page_id": "doc:2005.12872v3:8a6afad4:page:0017",
+                  "section_path": [
+                    "References"
+                  ],
+                  "matched_snippet": "References\nAn imperative style, high-performance deep learning library. In: NeurIPS (2019)\n33. Pineda, L., Salvador, A., Drozdzal, M., Romero, A.: Elucidating image-to-set prediction: An analysis of models, losses and datasets. arXiv:1904.05709 (2019)\n34. Radford, A., Wu, J., Child, R., Luan, D., Amodei, D., Sutskever,",
+                  "content_availability": "text_only"
+                }
+              ]
+            },
+            "remaining_action_budget": 5
+          },
+          "acceptable_actions": [
+            {
+              "action": "SEARCH",
+              "operation": "new",
+              "query": "Figure 12 visible instances 60 missed category DETR"
+            }
+          ],
+          "expected_progress": "navigation",
+          "teacher_rationale": "The second batch has no answerable source; a targeted recovery search is preferable to reading broad lexical matches.",
+          "observed_local_qwen3_8b_action": {
+            "action": "READ_SOURCE",
+            "source_ids": [
+              "doc:2005.12872v3:8a6afad4:page:0007:element:0003:paragraph:main"
+            ],
+            "local_problem": "Find the number of visible instances and the category with the largest proportion of missed instances when visible instances = 60."
+          },
+          "observed_result": "read an unrelated paragraph; no progress"
+        }
+      ]
+    },
+    {
+      "question_index": 641,
+      "question": "What is the performance of the InstructGPT model with Self-Ask in the closed-book setting on the dataset with the highest ProgramFC retrieval recall at 10? Please write down the answer in float format with 1 decimal.",
+      "answer": "56.8",
+      "gold_pages": "[7, 8]",
+      "diagnostic_focus": "Evidence-gap narrowing followed by confirmed typed navigation",
+      "steps": [
+        {
+          "step_id": "Q641-initial-search-view",
+          "stage": "controller",
+          "controller_input": {
+            "reading_session_id": "reading:gold-641",
+            "root_question": {
+              "question_id": "root:641",
+              "text": "What is the performance of the InstructGPT model with Self-Ask in the closed-book setting on the dataset with the highest ProgramFC retrieval recall at 10? Please write down the answer in float format with 1 decimal."
+            },
+            "root_status": "incomplete",
+            "subquestions": [],
+            "evidence": [],
+            "current_gap": {
+              "question_id": "root:641",
+              "description": "What is the performance of the InstructGPT model with Self-Ask in the closed-book setting on the dataset with the highest ProgramFC retrieval recall at 10? Please write down the answer in float format with 1 decimal."
+            },
+            "reading_locations": [],
+            "recent_actions": [],
+            "confirmed_relations": [],
+            "candidate_relations": [],
+            "search_tabs": [
+              {
+                "search_session_id": "search-session:ba5be7794069",
+                "query": "What is the performance of the InstructGPT model with Self-Ask in the closed-book setting on the dataset with the highest ProgramFC retrieval recall at 10? Please write down the answer in float format with 1 decimal.",
+                "has_more": true
+              }
+            ],
+            "visible_search_view": {
+              "search_session_id": "search-session:ba5be7794069",
+              "exact_anchor_matches": [],
+              "candidate_previews": [
+                {
+                  "element_id": "doc:2023.acl-long.386:9064dd38:page:0003:element:0008:paragraph:main",
+                  "element_type": "paragraph",
+                  "page_id": "doc:2023.acl-long.386:9064dd38:page:0003",
+                  "section_path": [
+                    "3 PROGRAMFC",
+                    "3.4 Sub-Task Functions"
+                  ],
+                  "matched_snippet": "3 PROGRAMFC\n3.4 Sub-Task Functions\nQUESTION: This sub-task function is a questionanswering module that takes a questionQas the input argument and returns the answer A to the question. We use FLAN-T5 (Chung et al., 2022), an improved T5 model (Raffel et al., 2020) pretrained on more than 1.8K tasks with instruction tuni",
+                  "content_availability": "text_only"
+                },
+                {
+                  "element_id": "doc:2023.acl-long.386:9064dd38:page:0006:element:0007:paragraph:main",
+                  "element_type": "paragraph",
+                  "page_id": "doc:2023.acl-long.386:9064dd38:page:0006",
+                  "section_path": [
+                    "4 Experiments",
+                    "4.1 Main Results",
+                    "ProgramFC is more effective on deeper claims."
+                  ],
+                  "matched_snippet": "4 Experiments\n4.1 Main Results\nProgramFC is more effective on deeper claims.\nWe measure the recall of the gold paragraphs for the top-10 retrieved paragraphs (recall@10). For PROGRAMFC, we combine the retrieved paragraphs of all steps and we consider the top-10 results. We can see in Figure 5 that PROGRAMFC outperforms",
+                  "content_availability": "text_only"
+                },
+                {
+                  "element_id": "doc:2023.acl-long.386:9064dd38:page:0006:element:0003:caption:chart",
+                  "element_type": "caption",
+                  "page_id": "doc:2023.acl-long.386:9064dd38:page:0006",
+                  "section_path": [
+                    "4 Experiments",
+                    "4.3 Interpretability of Reasoning Programs"
+                  ],
+                  "matched_snippet": "4 Experiments\n4.3 Interpretability of Reasoning Programs\nFigure 5: Retrieval recall@10 for the one-step retrieval and the iterative retrieval in PROGRAMFC.",
+                  "content_availability": "text_only"
+                },
+                {
+                  "element_id": "doc:2023.acl-long.386:9064dd38:page:0007:element:0006:table:main",
+                  "element_type": "table",
+                  "page_id": "doc:2023.acl-long.386:9064dd38:page:0007",
+                  "section_path": [
+                    "4 Experiments",
+                    "4.3 Interpretability of Reasoning Programs"
+                  ],
+                  "matched_snippet": "4 Experiments\n4.3 Interpretability of Reasoning Programs\nModel\tHOVER FEVEROUS 2-hop 3-hop 4-hop\nInstructGPT\n- Direct\t56.51\t51.75 49.68\t60.13\n- ZS-CoT\t50.30\t52.30 51.58\t54.78\n- CoT\t57.20\t53.66 51.83\t61.05\n- Self-Ask\t51.54\t51.47 52.45\t56.82\nCodex\t55.57\t53.42 45.59\t57.85\nFLAN-T5\t48.27\t52.11 51.13\t55.16\nProgramFC\t54.27\t54.",
+                  "content_availability": "mixed"
+                },
+                {
+                  "element_id": "doc:2023.acl-long.386:9064dd38:page:0006:element:0005:paragraph:main",
+                  "element_type": "paragraph",
+                  "page_id": "doc:2023.acl-long.386:9064dd38:page:0006",
+                  "section_path": [
+                    "4 Experiments",
+                    "4.3 Interpretability of Reasoning Programs"
+                  ],
+                  "matched_snippet": "4 Experiments\n4.3 Interpretability of Reasoning Programs\nTo further understand how reasoning programs facilitate fact-checking, we compare the performance of PROGRAMFC with FLAN-T5 using different language model sizes: small, base, large, XL, and XXL. The results are shown in Figure 4 and indicate that program-guided r",
+                  "content_availability": "text_only"
+                }
+              ]
+            },
+            "remaining_action_budget": 6
+          },
+          "acceptable_actions": [
+            {
+              "action": "READ_SOURCE",
+              "source_ids": [
+                "doc:2023.acl-long.386:9064dd38:page:0007:element:0006:table:main"
+              ],
+              "local_problem": "Read the InstructGPT Self-Ask values for every dataset."
+            },
+            {
+              "action": "READ_SOURCE",
+              "source_ids": [
+                "doc:2023.acl-long.386:9064dd38:page:0006:element:0007:paragraph:main"
+              ],
+              "local_problem": "Find the source that identifies the highest ProgramFC recall@10 dataset."
+            },
+            {
+              "action": "READ_SOURCE",
+              "source_ids": [
+                "doc:2023.acl-long.386:9064dd38:page:0006:element:0003:caption:chart"
+              ],
+              "local_problem": "Locate the Figure 5 recall@10 chart."
+            }
+          ],
+          "expected_progress": "evidence_or_navigation",
+          "teacher_rationale": "The question requires both the Table 3 value and the Figure 5 winner; any of these three visible entry points can begin a valid route.",
+          "observed_local_qwen3_8b_action": {
+            "action": "READ_SOURCE",
+            "source_ids": [
+              "doc:2023.acl-long.386:9064dd38:page:0007:element:0006:table:main"
+            ],
+            "local_problem": "Find the performance of the InstructGPT model with Self-Ask in the closed-book setting on the dataset with the highest ProgramFC retrieval recall at 10."
+          },
+          "observed_result": "partial Evidence acquired from Table 3"
+        },
+        {
+          "step_id": "Q641-after-table-read",
+          "stage": "controller",
+          "controller_input": {
+            "reading_session_id": "reading:gold-641",
+            "root_question": {
+              "question_id": "root:641",
+              "text": "What is the performance of the InstructGPT model with Self-Ask in the closed-book setting on the dataset with the highest ProgramFC retrieval recall at 10? Please write down the answer in float format with 1 decimal."
+            },
+            "root_status": "incomplete",
+            "subquestions": [],
+            "evidence": [
+              {
+                "evidence_id": "evidence:q641:table3",
+                "statement": "Table 3 gives InstructGPT Self-Ask macro-F1 values: HOVER 2-hop 51.54, HOVER 3-hop 51.47, HOVER 4-hop 52.45, and FEVEROUS 56.82.",
+                "supports_question_ids": [
+                  "root:641"
+                ]
+              }
+            ],
+            "current_gap": {
+              "question_id": "root:641",
+              "description": "Identify which dataset has the highest ProgramFC retrieval recall at 10; the Self-Ask scores are already known."
+            },
+            "reading_locations": [
+              {
+                "source_id": "doc:2023.acl-long.386:9064dd38:page:0007:element:0006:table:main",
+                "source_type": "element",
+                "page_id": "doc:2023.acl-long.386:9064dd38:page:0007"
+              }
+            ],
+            "recent_actions": [
+              {
+                "action_id": "action:641:read-table",
+                "question_id": "root:641",
+                "action_name": "READ_SOURCE",
+                "target_ids": [
+                  "doc:2023.acl-long.386:9064dd38:page:0007:element:0006:table:main"
+                ],
+                "execution_status": "succeeded",
+                "observation_ids": [
+                  "observation:641:table3"
+                ],
+                "feedback": {
+                  "limitations": [],
+                  "observation_assessments": [
+                    {
+                      "observation_id": "observation:641:table3",
+                      "used_for_evidence": true,
+                      "assessment": "Useful Self-Ask values were obtained, but the dataset with the highest retrieval recall is still unknown."
+                    }
+                  ]
+                }
+              }
+            ],
+            "confirmed_relations": [],
+            "candidate_relations": [],
+            "search_tabs": [
+              {
+                "search_session_id": "search-session:ba5be7794069",
+                "query": "What is the performance of the InstructGPT model with Self-Ask in the closed-book setting on the dataset with the highest ProgramFC retrieval recall at 10? Please write down the answer in float format with 1 decimal.",
+                "has_more": true
+              }
+            ],
+            "visible_search_view": {
+              "search_session_id": "search-session:ba5be7794069",
+              "exact_anchor_matches": [],
+              "candidate_previews": [
+                {
+                  "element_id": "doc:2023.acl-long.386:9064dd38:page:0003:element:0008:paragraph:main",
+                  "element_type": "paragraph",
+                  "page_id": "doc:2023.acl-long.386:9064dd38:page:0003",
+                  "section_path": [
+                    "3 PROGRAMFC",
+                    "3.4 Sub-Task Functions"
+                  ],
+                  "matched_snippet": "3 PROGRAMFC\n3.4 Sub-Task Functions\nQUESTION: This sub-task function is a questionanswering module that takes a questionQas the input argument and returns the answer A to the question. We use FLAN-T5 (Chung et al., 2022), an improved T5 model (Raffel et al., 2020) pretrained on more than 1.8K tasks with instruction tuni",
+                  "content_availability": "text_only"
+                },
+                {
+                  "element_id": "doc:2023.acl-long.386:9064dd38:page:0006:element:0007:paragraph:main",
+                  "element_type": "paragraph",
+                  "page_id": "doc:2023.acl-long.386:9064dd38:page:0006",
+                  "section_path": [
+                    "4 Experiments",
+                    "4.1 Main Results",
+                    "ProgramFC is more effective on deeper claims."
+                  ],
+                  "matched_snippet": "4 Experiments\n4.1 Main Results\nProgramFC is more effective on deeper claims.\nWe measure the recall of the gold paragraphs for the top-10 retrieved paragraphs (recall@10). For PROGRAMFC, we combine the retrieved paragraphs of all steps and we consider the top-10 results. We can see in Figure 5 that PROGRAMFC outperforms",
+                  "content_availability": "text_only"
+                },
+                {
+                  "element_id": "doc:2023.acl-long.386:9064dd38:page:0006:element:0003:caption:chart",
+                  "element_type": "caption",
+                  "page_id": "doc:2023.acl-long.386:9064dd38:page:0006",
+                  "section_path": [
+                    "4 Experiments",
+                    "4.3 Interpretability of Reasoning Programs"
+                  ],
+                  "matched_snippet": "4 Experiments\n4.3 Interpretability of Reasoning Programs\nFigure 5: Retrieval recall@10 for the one-step retrieval and the iterative retrieval in PROGRAMFC.",
+                  "content_availability": "text_only"
+                },
+                {
+                  "element_id": "doc:2023.acl-long.386:9064dd38:page:0007:element:0006:table:main",
+                  "element_type": "table",
+                  "page_id": "doc:2023.acl-long.386:9064dd38:page:0007",
+                  "section_path": [
+                    "4 Experiments",
+                    "4.3 Interpretability of Reasoning Programs"
+                  ],
+                  "matched_snippet": "4 Experiments\n4.3 Interpretability of Reasoning Programs\nModel\tHOVER FEVEROUS 2-hop 3-hop 4-hop\nInstructGPT\n- Direct\t56.51\t51.75 49.68\t60.13\n- ZS-CoT\t50.30\t52.30 51.58\t54.78\n- CoT\t57.20\t53.66 51.83\t61.05\n- Self-Ask\t51.54\t51.47 52.45\t56.82\nCodex\t55.57\t53.42 45.59\t57.85\nFLAN-T5\t48.27\t52.11 51.13\t55.16\nProgramFC\t54.27\t54.",
+                  "content_availability": "mixed"
+                },
+                {
+                  "element_id": "doc:2023.acl-long.386:9064dd38:page:0006:element:0005:paragraph:main",
+                  "element_type": "paragraph",
+                  "page_id": "doc:2023.acl-long.386:9064dd38:page:0006",
+                  "section_path": [
+                    "4 Experiments",
+                    "4.3 Interpretability of Reasoning Programs"
+                  ],
+                  "matched_snippet": "4 Experiments\n4.3 Interpretability of Reasoning Programs\nTo further understand how reasoning programs facilitate fact-checking, we compare the performance of PROGRAMFC with FLAN-T5 using different language model sizes: small, base, large, XL, and XXL. The results are shown in Figure 4 and indicate that program-guided r",
+                  "content_availability": "text_only"
+                }
+              ]
+            },
+            "remaining_action_budget": 5
+          },
+          "acceptable_actions": [
+            {
+              "action": "READ_SOURCE",
+              "source_ids": [
+                "doc:2023.acl-long.386:9064dd38:page:0006:element:0007:paragraph:main"
+              ],
+              "local_problem": "Identify the dataset with the highest ProgramFC retrieval recall at 10."
+            },
+            {
+              "action": "READ_SOURCE",
+              "source_ids": [
+                "doc:2023.acl-long.386:9064dd38:page:0006:element:0003:caption:chart"
+              ],
+              "local_problem": "Locate the Figure 5 retrieval recall chart."
+            }
+          ],
+          "expected_progress": "navigation",
+          "teacher_rationale": "Only the highest-recall dataset remains unknown.",
+          "observed_local_qwen3_8b_action": {
+            "action": "READ_SOURCE",
+            "source_ids": [
+              "doc:2023.acl-long.386:9064dd38:page:0006:element:0007:paragraph:main"
+            ],
+            "local_problem": "Identify the dataset with the highest ProgramFC retrieval recall at 10."
+          },
+          "observed_result": "paragraph read exposed a confirmed refers_to relation"
+        },
+        {
+          "step_id": "Q641-after-paragraph-read",
+          "stage": "controller",
+          "controller_input": {
+            "reading_session_id": "reading:gold-641",
+            "root_question": {
+              "question_id": "root:641",
+              "text": "What is the performance of the InstructGPT model with Self-Ask in the closed-book setting on the dataset with the highest ProgramFC retrieval recall at 10? Please write down the answer in float format with 1 decimal."
+            },
+            "root_status": "incomplete",
+            "subquestions": [],
+            "evidence": [
+              {
+                "evidence_id": "evidence:q641:table3",
+                "statement": "Table 3 gives InstructGPT Self-Ask macro-F1 values: HOVER 2-hop 51.54, HOVER 3-hop 51.47, HOVER 4-hop 52.45, and FEVEROUS 56.82.",
+                "supports_question_ids": [
+                  "root:641"
+                ]
+              }
+            ],
+            "current_gap": {
+              "question_id": "root:641",
+              "description": "Identify which dataset has the highest ProgramFC retrieval recall at 10."
+            },
+            "reading_locations": [
+              {
+                "source_id": "doc:2023.acl-long.386:9064dd38:page:0006:element:0007:paragraph:main",
+                "source_type": "element",
+                "page_id": "doc:2023.acl-long.386:9064dd38:page:0006"
+              }
+            ],
+            "recent_actions": [],
+            "confirmed_relations": [
+              {
+                "relation_id": "rel:refers_to:77e9f2f6df3d",
+                "relation_type": "refers_to",
+                "source_id": "doc:2023.acl-long.386:9064dd38:page:0006:element:0007:paragraph:main",
+                "target_id": "doc:2023.acl-long.386:9064dd38:page:0006:element:0003:chart:main"
+              }
+            ],
+            "candidate_relations": [],
+            "search_tabs": [],
+            "visible_search_view": null,
+            "remaining_action_budget": 4
+          },
+          "acceptable_actions": [
+            {
+              "action": "FOLLOW_RELATION",
+              "relation_id": "rel:refers_to:77e9f2f6df3d",
+              "local_problem": "Identify the dataset with the highest ProgramFC retrieval recall at 10."
+            }
+          ],
+          "expected_progress": "evidence",
+          "teacher_rationale": "The confirmed refers_to relation is the direct route to Figure 5.",
+          "observed_local_qwen3_8b_action": {
+            "action": "FOLLOW_RELATION",
+            "relation_id": "rel:refers_to:77e9f2f6df3d",
+            "local_problem": "Identify the dataset with the highest ProgramFC retrieval recall at 10."
+          },
+          "observed_result": "correct confirmed Relation navigation"
+        }
+      ]
+    },
+    {
+      "question_index": 1007,
+      "question": "One40 can only be used for Apple Watch, is that true? Please directly answer 'yes' or 'no'.",
+      "answer": "Yes",
+      "gold_pages": "[11, 28]",
+      "diagnostic_focus": "Gold-page hit versus answerable Element and exclusivity evidence",
+      "steps": [
+        {
+          "step_id": "Q1007-initial-search-view",
+          "stage": "controller",
+          "controller_input": {
+            "reading_session_id": "reading:gold-1007",
+            "root_question": {
+              "question_id": "root:1007",
+              "text": "One40 can only be used for Apple Watch, is that true? Please directly answer 'yes' or 'no'."
+            },
+            "root_status": "incomplete",
+            "subquestions": [],
+            "evidence": [],
+            "current_gap": {
+              "question_id": "root:1007",
+              "description": "One40 can only be used for Apple Watch, is that true? Please directly answer 'yes' or 'no'."
+            },
+            "reading_locations": [],
+            "recent_actions": [],
+            "confirmed_relations": [],
+            "candidate_relations": [],
+            "search_tabs": [
+              {
+                "search_session_id": "search-session:588399206f95",
+                "query": "One40 can only be used for Apple Watch, is that true? Please directly answer 'yes' or 'no'.",
+                "has_more": true
+              }
+            ],
+            "visible_search_view": {
+              "search_session_id": "search-session:588399206f95",
+              "exact_anchor_matches": [],
+              "candidate_previews": [
+                {
+                  "element_id": "doc:2021-apple-catalog:a5ef0dd6:page:0039:element:0005:heading:main",
+                  "element_type": "heading",
+                  "page_id": "doc:2021-apple-catalog:a5ef0dd6:page:0039",
+                  "section_path": [
+                    "Solutions for 1st Generation Apple Pencil",
+                    "ALARM ONLY APPLE PENCIL SENSOR"
+                  ],
+                  "matched_snippet": "Solutions for 1st Generation Apple Pencil\nALARM ONLY APPLE PENCIL SENSOR",
+                  "content_availability": "text_only"
+                },
+                {
+                  "element_id": "doc:2021-apple-catalog:a5ef0dd6:page:0024:element:0008:paragraph:main",
+                  "element_type": "paragraph",
+                  "page_id": "doc:2021-apple-catalog:a5ef0dd6:page:0024",
+                  "section_path": [],
+                  "matched_snippet": "APPLE WATCH SOLUTIONS",
+                  "content_availability": "text_only"
+                },
+                {
+                  "element_id": "doc:2021-apple-catalog:a5ef0dd6:page:0025:element:0017:paragraph:main",
+                  "element_type": "paragraph",
+                  "page_id": "doc:2021-apple-catalog:a5ef0dd6:page:0025",
+                  "section_path": [],
+                  "matched_snippet": "/ Apple Watch Solutions",
+                  "content_availability": "text_only"
+                },
+                {
+                  "element_id": "doc:2021-apple-catalog:a5ef0dd6:page:0001:element:900300:paragraph:text-layer-coverage",
+                  "element_type": "paragraph",
+                  "page_id": "doc:2021-apple-catalog:a5ef0dd6:page:0001",
+                  "section_path": [
+                    "Contents"
+                  ],
+                  "matched_snippet": "Contents\nOneKEY ecosystem .................................................................................................................................... iv",
+                  "content_availability": "text_only"
+                },
+                {
+                  "element_id": "doc:2021-apple-catalog:a5ef0dd6:page:0026:element:0019:paragraph:main",
+                  "element_type": "paragraph",
+                  "page_id": "doc:2021-apple-catalog:a5ef0dd6:page:0026",
+                  "section_path": [],
+                  "matched_snippet": "/ Apple Watch Solutions",
+                  "content_availability": "text_only"
+                }
+              ]
+            },
+            "remaining_action_budget": 6
+          },
+          "acceptable_actions": [
+            {
+              "action": "SEARCH",
+              "operation": "next",
+              "search_session_id": "search-session:588399206f95"
+            },
+            {
+              "action": "SEARCH",
+              "operation": "new",
+              "query": "One40 compatibility Apple Watch iPhone iPad"
+            }
+          ],
+          "expected_progress": "navigation",
+          "teacher_rationale": "The first batch has no answerable One40 compatibility statement.",
+          "observed_local_qwen3_8b_action": {
+            "action": "SEARCH",
+            "operation": "next",
+            "query": null,
+            "search_session_id": "search-session:588399206f95"
+          },
+          "observed_result": "reasonable rejection; next batch exposed"
+        },
+        {
+          "step_id": "Q1007-after-next-batch",
+          "stage": "controller",
+          "controller_input": {
+            "reading_session_id": "reading:gold-1007",
+            "root_question": {
+              "question_id": "root:1007",
+              "text": "One40 can only be used for Apple Watch, is that true? Please directly answer 'yes' or 'no'."
+            },
+            "root_status": "incomplete",
+            "subquestions": [],
+            "evidence": [],
+            "current_gap": {
+              "question_id": "root:1007",
+              "description": "One40 can only be used for Apple Watch, is that true? Please directly answer 'yes' or 'no'."
+            },
+            "reading_locations": [],
+            "recent_actions": [
+              {
+                "action_id": "action:1007:search-next",
+                "question_id": "root:1007",
+                "action_name": "SEARCH",
+                "target_ids": [
+                  "doc:2021-apple-catalog:a5ef0dd6:page:0001:element:0003:paragraph:main",
+                  "doc:2021-apple-catalog:a5ef0dd6:page:0039:element:900000:paragraph:text-layer-coverage",
+                  "doc:2021-apple-catalog:a5ef0dd6:page:0027:element:0019:paragraph:main",
+                  "doc:2021-apple-catalog:a5ef0dd6:page:0028:element:0017:paragraph:main",
+                  "doc:2021-apple-catalog:a5ef0dd6:page:0001:element:900500:paragraph:text-layer-coverage"
+                ],
+                "execution_status": "succeeded",
+                "observation_ids": [],
+                "feedback": null
+              }
+            ],
+            "confirmed_relations": [],
+            "candidate_relations": [],
+            "search_tabs": [
+              {
+                "search_session_id": "search-session:588399206f95",
+                "query": "One40 can only be used for Apple Watch, is that true? Please directly answer 'yes' or 'no'.",
+                "has_more": true
+              }
+            ],
+            "visible_search_view": {
+              "search_session_id": "search-session:588399206f95",
+              "exact_anchor_matches": [],
+              "candidate_previews": [
+                {
+                  "element_id": "doc:2021-apple-catalog:a5ef0dd6:page:0001:element:0003:paragraph:main",
+                  "element_type": "paragraph",
+                  "page_id": "doc:2021-apple-catalog:a5ef0dd6:page:0001",
+                  "section_path": [],
+                  "matched_snippet": "©2019 InVue Security Products. No endorsement of InVue products has been made by Apple Product is sold pursuant to InVue’s warranty which can be found at invue.com/warranty.",
+                  "content_availability": "text_only"
+                },
+                {
+                  "element_id": "doc:2021-apple-catalog:a5ef0dd6:page:0039:element:900000:paragraph:text-layer-coverage",
+                  "element_type": "paragraph",
+                  "page_id": "doc:2021-apple-catalog:a5ef0dd6:page:0039",
+                  "section_path": [
+                    "Solutions for 1st Generation Apple Pencil",
+                    "ALARM ONLY APPLE PENCIL SENSOR"
+                  ],
+                  "matched_snippet": "Solutions for 1st Generation Apple Pencil\nALARM ONLY APPLE PENCIL SENSOR\n33",
+                  "content_availability": "text_only"
+                },
+                {
+                  "element_id": "doc:2021-apple-catalog:a5ef0dd6:page:0027:element:0019:paragraph:main",
+                  "element_type": "paragraph",
+                  "page_id": "doc:2021-apple-catalog:a5ef0dd6:page:0027",
+                  "section_path": [],
+                  "matched_snippet": "/ Apple Watch Solutions",
+                  "content_availability": "text_only"
+                },
+                {
+                  "element_id": "doc:2021-apple-catalog:a5ef0dd6:page:0028:element:0017:paragraph:main",
+                  "element_type": "paragraph",
+                  "page_id": "doc:2021-apple-catalog:a5ef0dd6:page:0028",
+                  "section_path": [],
+                  "matched_snippet": "/ Apple Watch Solutions",
+                  "content_availability": "text_only"
+                },
+                {
+                  "element_id": "doc:2021-apple-catalog:a5ef0dd6:page:0001:element:900500:paragraph:text-layer-coverage",
+                  "element_type": "paragraph",
+                  "page_id": "doc:2021-apple-catalog:a5ef0dd6:page:0001",
+                  "section_path": [
+                    "Contents"
+                  ],
+                  "matched_snippet": "Contents\niPhone & iPad Solutions...............................................................................................................................1",
+                  "content_availability": "text_only"
+                }
+              ]
+            },
+            "remaining_action_budget": 5
+          },
+          "acceptable_actions": [
+            {
+              "action": "SEARCH",
+              "operation": "new",
+              "query": "One40 compatibility Apple Watch iPhone iPad"
+            }
+          ],
+          "expected_progress": "navigation",
+          "teacher_rationale": "The visible Apple Watch section labels are on a Gold page but do not state One40 compatibility or exclusivity.",
+          "observed_local_qwen3_8b_action": {
+            "action": "READ_SOURCE",
+            "source_ids": [
+              "doc:2021-apple-catalog:a5ef0dd6:page:0027:element:0019:paragraph:main",
+              "doc:2021-apple-catalog:a5ef0dd6:page:0028:element:0017:paragraph:main"
+            ],
+            "local_problem": "Check if One40 is exclusively for Apple Watch"
+          },
+          "observed_result": "read weak headings; no Evidence progress"
+        }
+      ]
+    }
+  ]
+}

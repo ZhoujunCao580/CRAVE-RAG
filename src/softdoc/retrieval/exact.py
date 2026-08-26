@@ -75,6 +75,49 @@ _ANCHOR_PATTERNS: tuple[tuple[AnchorKind, re.Pattern[str]], ...] = (
     ),
 )
 
+_PAGE_MODE_PRINTED_THEN_PHYSICAL = "printed_then_physical"
+_PAGE_MODE_PHYSICAL_ORDER = "physical_document_order"
+
+_WORD_ORDINALS: dict[str, int] = {
+    "first": 1,
+    "second": 2,
+    "third": 3,
+    "fourth": 4,
+    "fifth": 5,
+    "sixth": 6,
+    "seventh": 7,
+    "eighth": 8,
+    "ninth": 9,
+    "tenth": 10,
+    "eleventh": 11,
+    "twelfth": 12,
+    "thirteenth": 13,
+    "fourteenth": 14,
+    "fifteenth": 15,
+    "sixteenth": 16,
+    "seventeenth": 17,
+    "eighteenth": 18,
+    "nineteenth": 19,
+    "twentieth": 20,
+}
+
+# Positional page expressions deliberately use physical document order.  They
+# are separate from ``Page N``, whose number normally denotes a printed label.
+_POSITIONAL_PAGE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(
+        r"(?<!\w)(?:the\s+)?(?P<label>"
+        + "|".join(_WORD_ORDINALS)
+        + r")\s+page\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?<!\w)(?:the\s+)?(?P<label>[1-9][0-9]*)(?:st|nd|rd|th)\s+page\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"(?<!\w)(?:the\s+)?(?P<label>last)\s+page\b", re.IGNORECASE),
+    re.compile(r"(?P<label>\u6700\u540e)\s*(?:\u4e00\s*)?\u9875"),
+)
+
 _EXAMPLE_CUE = re.compile(r"\b(?:for\s+example|e\.g\.)|例如|比如", re.IGNORECASE)
 _FORMAT_CONTEXT = re.compile(
     r"\b(?:answer|output|format|formatted|list)\b|答案|格式|输出",
@@ -90,6 +133,7 @@ class _AnchorMention:
     start: int
     end: int
     pattern_order: int
+    page_resolution_mode: str | None = None
 
 
 def is_complete_supported_anchor(text: str) -> bool:
@@ -133,10 +177,19 @@ class ExactAnchorLookup:
                     subquestion.subquestion_id,
                     mention.kind.value,
                     mention.normalized_label,
+                    mention.page_resolution_mode or "not_page",
                 )
             )
             handles = (
-                self._page_handles(mention.normalized_label, document, store)
+                self._page_handles(
+                    mention.normalized_label,
+                    document,
+                    store,
+                    resolution_mode=(
+                        mention.page_resolution_mode
+                        or _PAGE_MODE_PRINTED_THEN_PHYSICAL
+                    ),
+                )
                 if mention.kind == AnchorKind.PAGE
                 else self._label_handles(
                     mention.kind,
@@ -165,6 +218,7 @@ class ExactAnchorLookup:
                     data={
                         "anchor_kind": mention.kind.value,
                         "normalized_label": mention.normalized_label,
+                        "page_resolution_mode": mention.page_resolution_mode,
                         "match_count": len(handles),
                     },
                 )
@@ -196,21 +250,42 @@ class ExactAnchorLookup:
         normalized_label: str,
         document: Document,
         store: DocumentStore,
+        *,
+        resolution_mode: str,
     ) -> list[AnchorTargetHandle]:
-        page_number = int(normalized_label)
-        printed_pages = [
-            page
-            for page in document.pages
-            if normalized_label in page.page_label_aliases
-        ]
-        pages = sorted(
-            printed_pages
-            or [page for page in document.pages if page.page_number == page_number],
-            key=lambda page: (page.page_index, page.page_id),
-        )
-        resolution_method = (
-            "printed_page_label" if printed_pages else "physical_page_number"
-        )
+        if resolution_mode == _PAGE_MODE_PHYSICAL_ORDER:
+            if normalized_label == "last":
+                pages = sorted(
+                    document.pages,
+                    key=lambda page: (page.page_index, page.page_id),
+                )[-1:]
+                resolution_method = "physical_last_page"
+            else:
+                page_number = int(normalized_label)
+                pages = sorted(
+                    (
+                        page
+                        for page in document.pages
+                        if page.page_number == page_number
+                    ),
+                    key=lambda page: (page.page_index, page.page_id),
+                )
+                resolution_method = _PAGE_MODE_PHYSICAL_ORDER
+        else:
+            page_number = int(normalized_label)
+            printed_pages = [
+                page
+                for page in document.pages
+                if normalized_label in page.page_label_aliases
+            ]
+            pages = sorted(
+                printed_pages
+                or [page for page in document.pages if page.page_number == page_number],
+                key=lambda page: (page.page_index, page.page_id),
+            )
+            resolution_method = (
+                "printed_page_label" if printed_pages else "physical_page_number"
+            )
         return [
             AnchorTargetHandle(
                 target_id=store.get_page(page.page_id).page_id,
@@ -306,14 +381,59 @@ def _extract_mentions(
                     start=match.start(),
                     end=match.end(),
                     pattern_order=pattern_order,
+                    page_resolution_mode=(
+                        _PAGE_MODE_PRINTED_THEN_PHYSICAL
+                        if kind == AnchorKind.PAGE
+                        else None
+                    ),
+                )
+            )
+
+    positional_pattern_offset = len(_ANCHOR_PATTERNS)
+    for offset, pattern in enumerate(_POSITIONAL_PAGE_PATTERNS):
+        pattern_order = positional_pattern_offset + offset
+        for match in pattern.finditer(text):
+            normalized = _normalize_positional_page_label(match.group("label"))
+            if any(
+                start <= match.start() and match.end() <= end
+                for start, end in ignored_spans
+            ):
+                trace.append(
+                    ExactLookupTraceEntry(
+                        code="example_anchor_ignored",
+                        description=(
+                            "An Anchor inside an answer-format example was ignored."
+                        ),
+                        data={
+                            "anchor_text": match.group(0),
+                            "anchor_kind": AnchorKind.PAGE.value,
+                            "normalized_label": normalized,
+                            "source_span": [match.start(), match.end()],
+                        },
+                    )
+                )
+                continue
+            found.append(
+                _AnchorMention(
+                    anchor_text=match.group(0),
+                    kind=AnchorKind.PAGE,
+                    normalized_label=normalized,
+                    start=match.start(),
+                    end=match.end(),
+                    pattern_order=pattern_order,
+                    page_resolution_mode=_PAGE_MODE_PHYSICAL_ORDER,
                 )
             )
     found.sort(key=lambda item: (item.start, item.end, item.pattern_order))
 
     unique: list[_AnchorMention] = []
-    seen: set[tuple[AnchorKind, str]] = set()
+    seen: set[tuple[AnchorKind, str, str | None]] = set()
     for mention in found:
-        key = (mention.kind, mention.normalized_label)
+        key = (
+            mention.kind,
+            mention.normalized_label,
+            mention.page_resolution_mode,
+        )
         if key in seen:
             trace.append(
                 ExactLookupTraceEntry(
@@ -331,6 +451,15 @@ def _extract_mentions(
         seen.add(key)
         unique.append(mention)
     return unique, trace
+
+
+def _normalize_positional_page_label(raw_label: str) -> str:
+    folded = raw_label.casefold()
+    if folded == "last" or folded == "\u6700\u540e":
+        return "last"
+    if folded in _WORD_ORDINALS:
+        return str(_WORD_ORDINALS[folded])
+    return str(int(folded))
 
 
 def _answer_example_spans(text: str) -> list[tuple[int, int]]:

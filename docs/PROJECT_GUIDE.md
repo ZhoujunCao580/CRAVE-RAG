@@ -26,7 +26,7 @@ PDF
 
 已完成的是“找到值得开始阅读的位置”。尚未实现：
 
-- `READ_ELEMENT`、`READ_PAGE`、`INSPECT_REGION`、`FOLLOW_RELATION`的正式环境执行闭环；
+- Controller v0动作的正式环境执行闭环；
 - Evidence Checker实现与`EvidenceCheckResult`运行时更新；
 - 真实LLM生成SubQuestion、动态REFINE_PLAN、Reading Agent循环和答案生成。
 
@@ -130,6 +130,11 @@ Section/label而Dense覆盖正文时展示Dense片段，其余情况才按RRF贡
 无label、无文本的纯视觉对象不会伪造空SearchUnit，未来通过READ_PAGE、Relation或视觉
 阅读发现。
 
+上述是检索层保存的完整CandidatePreview，包含评测与调试所需的页码、来源、rank和score。
+Controller不直接接收这个完整对象；`src/softdoc/controller.py`定义的投影只保留最终顺序、
+`element_id/type`、`page_id`、section、snippet与content availability，并隐藏物理页码及
+BM25/Dense/RRF内部诊断字段。
+
 ### 3.4 SearchSession
 
 SearchSession保存完整候选顺序、Exact结果、候选catalog、已经展示/打开的普通候选、
@@ -167,17 +172,17 @@ data/processed/representative_28/
 原始MinerU中间目录、旧SoftDoc版本、旧embedding cache、视觉验收副本和一次性A/B产物已
 删除。需要时从`pdfs/`重新运行当前MinerU和Pipeline。模型缓存仍在`data/cache/`。
 
-## 6. Reader v1与INSPECT_REGION
+## 6. Reader v1与视觉局部读取边界
 
-下一阶段先做Reader，不直接做Agent：
+Reader执行层将支持：
 
 - `READ_ELEMENT(element_id)`：读取完整Element，返回文本/HTML/图片引用、bbox和confirmed
   Relation handles；
 - `READ_PAGE(page_id)`：读取页面概览、页面图引用和按reading order排列的Element handles；
-- `INSPECT_REGION(page_id, bbox)`：查看页面中的一个矩形区域，例如图表局部、表格单元格、
-  公式、图例或小字。它返回裁剪图引用、相交Element和已有OCR文本；Reader v1不因此自动
-  调VLM，也不把裁剪结果直接当Evidence；
 - `FOLLOW_RELATION(relation_id)`：沿confirmed关系打开另一端；candidate默认关闭。
+
+`INSPECT_REGION`不属于冻结的Controller v0动作。当前没有稳定的Region handle，不能让Controller
+猜测bbox；以后只有在Parser、Reader或Environment能够提供可验证Region时，才重新评估是否加入。
 
 三层必须分开：
 
@@ -598,7 +603,7 @@ Checker不读取完整ObservationStore、ExplorationState、SearchSession、候�
 
 `current_target_status`由未来的Checker模型依据`current_target`、完整EvidenceMemory、本轮Observations和limitations进行语义判断；当前阶段只实现严格数据契约，不假装用确定性程序判断问题是否已经回答。`apply_evidence_check_result()`只把它写回当前目标对应的`QuestionState.status`，不会修改其他问题。若目标就是Root，程序强制该状态与`root_status`一致。
 
-下一轮Controller不是只看delta。它读取提交后的**完整EvidenceMemory**（包括全部已注册问题和唯一`current_target`）和派生的`ExplorationState`；紧接Checker调用的下一步还可以直接读取本轮`EvidenceCheckResult.observation_assessments`，但不把它们复制成长期summary。delta主要用于安全更新、审计“本轮改了什么”和减少Checker输出长度。下一轮Checker同样从提交后的完整EvidenceMemory开始，因此多条Evidence的联合判断不会丢失。
+下一轮Controller不是只看delta。Environment按`ControllerInput`把提交后的完整Evidence状态投影为顶层`root_status/subquestions/evidence/current_gap`，并把非空Reader limitation与Checker assessment绑定到对应的`recent_actions[].feedback`。Controller不直接接收完整`EvidenceCheckResult`或旧`ExplorationState`。delta主要用于安全更新、审计“本轮改了什么”和减少Checker输出长度。下一轮Checker仍从提交后的完整canonical EvidenceMemory开始，因此多条Evidence的联合判断不会丢失。
 
 ### EvidenceMemory
 
@@ -661,11 +666,11 @@ Controller选择Action
 - 看似合理但实际错误、且没有冲突或额外信息的Observation不能被架构凭空识别；依靠精确grounding、后续冲突、机会性交叉表示及高风险事实的选择性复核恢复。
 - 候选、导航路线或动作预算耗尽时仍保持`incomplete`，由Reading Session记录证据不足而停止；不得伪装成`ready`或无限循环。
 
-### ExplorationState
+### ExplorationState（现有内部派生模型，不是ControllerInput）
 
-`ExplorationStateBuilder`从`ReadRecord + SearchSession + ActionTrace + Relation`生成快照。`attempted_source_ids`表示已经发生过读取尝试，不承诺读取成功；实际结果仍查看`ReadRecord.limitations`或`recent_actions.outcome`。`attempted_search_queries`保留实际规范化查询，不调用LLM生成summary。完整候选排序仍由`SearchSession`保存。
+`ExplorationStateBuilder`从`ReadRecord + SearchSession + ActionTrace + Relation`生成快照。`attempted_source_ids`表示已经发生过读取尝试，不承诺读取成功；实际执行状态查看内部`ActionTrace.execution_status`，读取局限查看`ReadRecord.limitations`。`attempted_search_queries`保留实际规范化查询，不调用LLM生成summary。完整候选排序仍由`SearchSession`保存。
 
-`current_focus`由最近一次`outcome=succeeded/degraded`且声明了`primary_target`的Action确定性派生；失败Action不改变focus。多图联合读取没有唯一主要目标时，Action可以不声明`primary_target`：若此前已有focus则保持原focus，否则为`null`，Builder不会擅自从I1/I2中挑选。
+`current_focus`由最近一次`execution_status=succeeded/degraded`且声明了`primary_target`的Action确定性派生；执行失败的Action不改变focus。多图联合读取没有唯一主要目标时，Action可以不声明`primary_target`：若此前已有focus则保持原focus，否则为`null`，Builder不会擅自从I1/I2中挑选。
 
 ```json
 {
@@ -706,7 +711,7 @@ Controller选择Action
       "question_id": "Q2",
       "action_name": "READ_ELEMENT",
       "target_ids": ["element:table:1"],
-      "outcome": "degraded",
+      "execution_status": "degraded",
       "observation_ids": ["observation:17:00"]
     }
   ]
@@ -715,24 +720,37 @@ Controller选择Action
 
 `confirmed_relation_handles`表示SoftDoc当前接受、可供正常`FOLLOW_RELATION`使用的关系；`candidate_navigation_hints`只表示target值得调查，不能声称关系成立；`rejected`不暴露。Builder只暴露与`current_focus`直接相连的局部关系，不把整份Document的关系图塞进Controller状态。两类对象都不会自动执行。
 
-`active_search_session_ids`来自当前仍交给Controller使用的canonical `SearchSession`对象，只是引用，不复制ranking、cursor或候选内容。`recent_actions`来自`ActionTrace`最后若干步，只保留动作、目标、`outcome`和产生的`observation_ids`。不再保存自由文本`result_summary`：读取失败细节已经在`ReadRecord.limitations`，当前证据缺口在`EvidenceMemory.current_target`，Checker判断在本轮`EvidenceCheckResult`。Controller处理刚完成的动作时直接读取这些规范化对象；历史快照只保留引用，避免把同一语义复制成另一份自然语言状态。
+`active_search_session_ids`等字段只描述尚未迁移的内部Builder输入，不再直接暴露给Controller。Environment把经过验证的非空Reader limitation、Checker assessment以紧凑`feedback`附到对应ActionTrace日志项，再投影为`recent_actions[].feedback`；这不是新的store，也不是LLM summary。完整`ReadRecord`和`EvidenceCheckResult`仍不复制。读取失败原因因此能跨一轮保留，但不会再产生独立`latest_feedback`或自由文本`result_summary`。
 
-### Controller v0 设计冻结（尚未实现策略）
+### Controller v0 输入、动作与Prompt冻结（策略后端尚未实现）
 
-Controller的研究职责是：围绕当前`EvidenceMemory.current_target`选择下一次阅读行为，而不是解析PDF、读取像素、判断Evidence充分性或生成最终答案。每一步接收：Root Question、完整且已提交的`EvidenceMemory`、派生`ExplorationState`、当前显示的`CandidatePreview`批次，以及紧接上一动作产生的规范化`ReadRecord`和可选`EvidenceCheckResult`。它不接收重复的Observation历史摘要，也不接收自由文本`result_summary`。
+Controller输入和动作现已与Planner、Reader、Checker和Answerer契约一样冻结为Pydantic模型，canonical定义位于`src/softdoc/controller.py`，版本分别为`controller-input-v0.1`和`controller-action-v0.1`。单独的Controller contract文档不再作为第二份事实源。`ExplorationState`只是现有内部派生模型，不能直接返回给Controller。
 
-环境层先保留可执行primitive，最终训练时是否合并成更少的抽象动作由消融决定：
+模型侧Prompt的canonical定义位于`src/softdoc/controller_prompt.py`，冻结版本为`controller-policy-v0.1`。Prompt要求Controller综合比较当前CandidatePreview、confirmed/candidate Relation、相邻页、既有SearchSession、最近失败与预算，不采用固定动作优先级；既有Evidence通常不重复获取，只有`current_gap`或最近反馈明确指出冲突、不确定、grounding不完整或读取失败时才允许复核。v0仍不增加`STOP`或`INSPECT_REGION`，也不实现具体模型后端。
 
-- `SEARCH`：没有可用入口、当前gap发生实质变化，或旧候选池与当前目标不匹配时创建新的SearchSession；
-- `NEXT_CANDIDATES`：沿同一SearchSession查看下一批Preview，不重新搜索；
-- `READ_SOURCE`：读取Element、Page、TableView或已经确定的视觉输入；
-- `FOLLOW_RELATION`：只沿confirmed Relation读取另一端；
-- `OPEN_NAVIGATION_HINT`：调查candidate Relation的target，但不声称Relation成立；
-- `NEXT_PAGE` / `PREV_PAGE`：显式页面导航；
-- `INSPECT_REGION`：在已有页面或视觉资产上读取局部区域；
-- `STOP`：仅在Root ready或预算耗尽且明确报告证据不足时结束。
+Controller的研究职责是：围绕当前Evidence gap选择下一次阅读行为，而不是解析PDF、读取像素、判断Evidence充分性或生成最终答案。每一步接收`ControllerInput`定义的扁平投影：Root Question、问题进度、已接受Evidence、当前gap、reading locations、局部Relation、recent actions及其可选feedback、紧凑的`search_tabs`、当前`visible_search_view`里的CandidatePreview，以及剩余动作预算。`recent_actions.execution_status`只表示Environment执行动作的状态，不表示Observation正确或对Evidence有用；后两者分别由Reader limitation和Checker assessment表达。Controller不直接接收完整`EvidenceMemory`、`ExplorationState`、`ReadRecord`、`EvidenceCheckResult`或Observation历史摘要。
 
-`UPDATE_PLAN`在v0关闭；Deferred Planning是否有净收益留待TODO中的对照实验。一次导航动作不会自动伪装成读取：`FOLLOW_RELATION`、翻页或打开候选只改变可访问目标，获得Observation仍需一次明确`READ_SOURCE/INSPECT_REGION`。这一边界使“看到一条边”和“读到可用事实”保持分离。
+`ControllerInput`强制以下关键不变量：
+
+- `root_status=ready`当且仅当`current_gap=null`；`root_status=incomplete`必须有`current_gap`；
+- `current_gap`必须指向Root或一个存在、未完成且依赖已满足的SubQuestion；
+- `visible_search_view.search_session_id`必须存在于`search_tabs`；
+- Exact Anchor目标不能在同一可见批次中再次作为普通CandidatePreview出现；
+- Evidence、Action、Relation、SearchSession和问题引用必须唯一且指向已知对象。
+
+冻结的Controller v0顶层动作只有五类：
+
+- `SEARCH(operation=new|next|switch)`：创建新SearchSession、查看同一Session下一批Preview，或切换回已有Session。它返回CandidatePreview，不强迫Controller从每一批读取对象，也不产生正式Observation；
+- `READ_SOURCE(source_ids, local_problem)`：从当前可见Preview、reading location或其他已暴露handle中选择一个或多个来源并完整读取；
+- `FOLLOW_RELATION(relation_id, local_problem)`：只接受当前可见的confirmed Relation，并在同一动作中读取target；
+- `EXPLORE_CANDIDATE_RELATION(relation_id, local_problem)`：读取当前可见candidate Relation的target，但不得借此确认Relation成立；
+- `READ_ADJACENT_PAGE(from_page_id, direction=next|previous, local_problem)`：在同一动作类型内读取前一页或后一页。`previous`主要用于恢复跨页表头、段落开头或缺失上下文，`next`主要用于寻找后续内容。
+
+新问题激活时，Environment先确定性运行Exact Anchor Lookup。唯一且可直接读取的Element/Page Anchor由Environment自动调用同一个Reader执行层，不要求Controller再次选择；无匹配或歧义时才准备普通检索入口。页引用采用两种明确语义：`Page N`/`第N页`优先解析印刷页码、没有匹配时回退到第N个物理页；`first/second/6th page`等序数表达及`last page`只按PDF物理文档顺序解析。若Exact自动读取后Checker仍判定当前gap未解决，Controller可以从已打开页执行`READ_ADJACENT_PAGE`恢复，而不是让Exact一次自动读取多个猜测页面。Exact自动读取属于环境路由，不是第六种Controller动作。Section Anchor只建立范围，不把整节默认完整读入。
+
+`SEARCH`与`READ_SOURCE`在v0保持分离：Controller可以拒绝当前整批Preview、请求下一批或切换Session；不要求每一批必定读取一个候选。CandidatePreview只是阅读入口，Reader产生的Observation才可交给Checker。`FOLLOW_RELATION`、`EXPLORE_CANDIDATE_RELATION`与`READ_ADJACENT_PAGE`因为target已经明确，在动作内部直接读取，但Relation或页面位置本身仍不是Evidence。
+
+`INSPECT_REGION`、`UPDATE_PLAN`、`CHECK_EVIDENCE`和`ANSWER`都不属于Controller v0动作：Region handle尚未建立，Deferred Planning仍关闭，Checker在读取产生Observation后由Environment调用，Root ready后由Environment调用Answerer。停止条件也由Root状态和资源预算管理，不要求Controller生成另一个`STOP`动作。资源预算当前仍是占位字段，未来按TODO改为token、Reader/VLM调用、图像输入、延迟和费用组成的成本预算，而不是简单动作步数。
 
 #### 解析噪声与不确定Relation的安全边界
 

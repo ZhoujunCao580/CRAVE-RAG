@@ -1,7 +1,7 @@
 import pytest
 
 from softdoc.reading_state import (
-    ActionOutcome,
+    ActionExecutionStatus,
     ActionTrace,
     ActionTraceEntry,
     EvidenceItem,
@@ -90,7 +90,7 @@ def _valid_bundle() -> tuple[ObservationStore, EvidenceMemory, ActionTrace]:
                 question_id="Q1",
                 action_name="READ_ELEMENT",
                 target_ids=["element:figure:1"],
-                outcome=ActionOutcome.SUCCEEDED,
+                execution_status=ActionExecutionStatus.SUCCEEDED,
                 observation_ids=["obs:1"],
             )
         ],
@@ -138,7 +138,7 @@ def test_validator_checks_action_ownership_and_question_identity():
                 action_id="action:other",
                 question_id="Q1",
                 action_name="READ_ELEMENT",
-                outcome=ActionOutcome.SUCCEEDED,
+                execution_status=ActionExecutionStatus.SUCCEEDED,
                 observation_ids=["obs:1"],
             )
         ],

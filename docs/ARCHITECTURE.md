@@ -23,6 +23,40 @@
 
 ## Implementation Boundary
 
-The repository implements and tests the SoftDoc foundation, MinerU adapter and deterministic passes, document relations, retrieval stack, resumable search sessions, candidate previews, and the contracts for planning, reading, evidence checking, and answering.
+The repository implements and tests the SoftDoc foundation, MinerU adapter and deterministic passes, document relations, retrieval stack, resumable search sessions, candidate previews, the contracts for planning, reading, evidence checking, and answering, and an injectable Reading Environment v0 that executes those contracts as one stateful loop.
 
 The production Controller policy, model-quality evaluation, deferred planning, Observation Recall, post-training, and full-dataset end-to-end answer evaluation remain research-stage work.
+
+## Executable Reading Loop
+
+`src/softdoc/reading_environment.py` now connects the frozen contracts without
+creating a second state model:
+
+```text
+activate current question
+  -> resolve a unique exact anchor when possible
+  -> otherwise let the Controller search or navigate
+  -> execute a read and append a ReadRecord/Observation
+  -> invoke the Checker when an Observation exists
+  -> atomically apply the Evidence delta
+  -> continue from the remaining gap, or invoke the Answerer when ready
+```
+
+The v0 boundary is intentionally strict:
+
+- a unique Page or Element exact anchor is read before ordinary search;
+- Search results and CandidatePreviews are never Evidence;
+- Reader limitations survive even when no Observation is produced;
+- confirmed relations may be followed from either visible endpoint without
+  changing their canonical SoftDoc direction;
+- candidate relations may be investigated but are not promoted to confirmed;
+- invalid Checker deltas leave canonical EvidenceMemory unchanged;
+- question advancement and Answerer invocation are program controlled;
+- cross-store references are validated after every action.
+
+`scripts/audit_reading_environment_v0.py` is a small real-SoftDoc replay audit.
+Its scripted Teacher decisions replace unfinished learned components only to
+test orchestration and state transitions; the report is not an Agent accuracy
+score. Known v0 boundaries remain: Section exact anchors do not yet trigger
+scoped reading, the resource budget is an action-count placeholder, and
+production model backends are not part of this milestone.

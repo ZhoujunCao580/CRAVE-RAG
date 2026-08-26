@@ -12,7 +12,7 @@ from collections.abc import Iterable
 
 from softdoc.models import Relation, RelationStatus
 from softdoc.reading_state import (
-    ActionOutcome,
+    ActionExecutionStatus,
     ActionTrace,
     EvidenceMemory,
     ExplorationState,
@@ -289,9 +289,9 @@ class ReadingStateReferenceValidator:
                 entry.primary_target.source_id
                 for entry in action_trace.entries
                 if entry.primary_target is not None
-                and entry.outcome in {
-                    ActionOutcome.SUCCEEDED,
-                    ActionOutcome.DEGRADED,
+                and entry.execution_status in {
+                    ActionExecutionStatus.SUCCEEDED,
+                    ActionExecutionStatus.DEGRADED,
                 }
             }
             if focus.source_id not in successful_focuses:

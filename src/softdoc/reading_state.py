@@ -831,7 +831,13 @@ def apply_evidence_check_result(
     return next_memory
 
 
-class ActionOutcome(str, Enum):
+class ActionExecutionStatus(str, Enum):
+    """Whether the Environment executed an action normally.
+
+    This is not an assessment of an Observation's factual correctness or
+    usefulness as Evidence.
+    """
+
     SUCCEEDED = "succeeded"
     DEGRADED = "degraded"
     FAILED = "failed"
@@ -883,7 +889,7 @@ class ExplorationSourceHandle(SoftDocModel):
 
 
 class ActionTraceEntry(SoftDocModel):
-    """Canonical outcome of one Controller-selected environment action."""
+    """Canonical record of one Controller-selected environment action."""
 
     step_index: int = Field(ge=0)
     action_id: str = Field(min_length=1)
@@ -892,7 +898,7 @@ class ActionTraceEntry(SoftDocModel):
     target_ids: list[str] = Field(default_factory=list)
     primary_target: ExplorationSourceHandle | None = None
     query: str | None = Field(default=None, min_length=1)
-    outcome: ActionOutcome
+    execution_status: ActionExecutionStatus
     observation_ids: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -950,7 +956,7 @@ class RecentActionSummary(SoftDocModel):
     question_id: str = Field(min_length=1)
     action_name: str = Field(min_length=1)
     target_ids: list[str] = Field(default_factory=list)
-    outcome: ActionOutcome
+    execution_status: ActionExecutionStatus
     observation_ids: list[str] = Field(default_factory=list)
 
     @field_validator("target_ids", "observation_ids")
@@ -1056,9 +1062,9 @@ class ExplorationStateBuilder:
                 entry.primary_target
                 for entry in reversed(action_trace.entries)
                 if entry.primary_target is not None
-                and entry.outcome in {
-                    ActionOutcome.SUCCEEDED,
-                    ActionOutcome.DEGRADED,
+                and entry.execution_status in {
+                    ActionExecutionStatus.SUCCEEDED,
+                    ActionExecutionStatus.DEGRADED,
                 }
             ),
             None,
@@ -1107,7 +1113,7 @@ class ExplorationStateBuilder:
                 question_id=entry.question_id,
                 action_name=entry.action_name,
                 target_ids=list(entry.target_ids),
-                outcome=entry.outcome,
+                execution_status=entry.execution_status,
                 observation_ids=list(entry.observation_ids),
             )
             for entry in recent_entries

@@ -256,6 +256,76 @@ def test_page_anchor_prefers_printed_label_over_physical_number(
     assert match.resolution_method == "printed_page_label"
 
 
+def test_word_ordinal_page_uses_physical_order_not_printed_label(
+    parsed_document,
+) -> None:
+    document = parsed_document.model_copy(deep=True)
+    physical_first = document.pages[0]
+    printed_page_one = document.pages[2]
+    printed_page_one.page_label_aliases = ["1"]
+    printed_page_one.display_page_label = "1"
+    printed_page_one.display_page_label_confidence = 0.95
+
+    result = _lookup(document, "Read the first page.")
+
+    match = result.exact_anchor_matches[0]
+    assert match.target_id == physical_first.page_id
+    assert match.target_id != printed_page_one.page_id
+    assert match.resolution_method == "physical_document_order"
+
+
+def test_numeric_and_word_ordinals_are_normalized_and_deduplicated(
+    parsed_document,
+) -> None:
+    physical_second = parsed_document.pages[1]
+
+    result = _lookup(parsed_document, "Compare the second page with the 2nd page.")
+
+    assert len(result.anchor_resolutions) == 1
+    assert len(result.exact_anchor_matches) == 1
+    assert result.exact_anchor_matches[0].target_id == physical_second.page_id
+    assert result.exact_anchor_matches[0].normalized_label == "2"
+    assert result.exact_anchor_matches[0].resolution_method == "physical_document_order"
+    assert sum(item.code == "duplicate_anchor_ignored" for item in result.trace) == 1
+
+
+def test_last_page_uses_final_physical_page(parsed_document) -> None:
+    physical_last = max(
+        parsed_document.pages,
+        key=lambda page: (page.page_index, page.page_id),
+    )
+
+    result = _lookup(parsed_document, "Inspect the last page.")
+
+    match = result.exact_anchor_matches[0]
+    assert match.target_id == physical_last.page_id
+    assert match.normalized_label == "last"
+    assert match.resolution_method == "physical_last_page"
+
+
+def test_printed_page_and_ordinal_page_remain_distinct_when_targets_differ(
+    parsed_document,
+) -> None:
+    document = parsed_document.model_copy(deep=True)
+    physical_first = document.pages[0]
+    printed_page_one = document.pages[2]
+    printed_page_one.page_label_aliases = ["1"]
+    printed_page_one.display_page_label = "1"
+    printed_page_one.display_page_label_confidence = 0.95
+
+    result = _lookup(document, "Compare Page 1 with the first page.")
+
+    assert len(result.anchor_resolutions) == 2
+    assert [match.target_id for match in result.exact_anchor_matches] == [
+        printed_page_one.page_id,
+        physical_first.page_id,
+    ]
+    assert [match.resolution_method for match in result.exact_anchor_matches] == [
+        "printed_page_label",
+        "physical_document_order",
+    ]
+
+
 def test_two_printed_labels_can_address_the_same_physical_page(
     parsed_document,
 ) -> None:

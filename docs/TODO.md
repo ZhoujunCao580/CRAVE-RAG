@@ -40,6 +40,7 @@
   - RRF 的 `k` 和 BM25/Dense 权重；
   - 何时取下一批、何时切换检索器。
 - [ ] 不只看 Top-k recall，还要比较 Agent 找到充分证据所需的批次数、阅读数、延迟和成本。
+- [ ] Controller预算不要最终固定为“动作步数”；闭环可运行后，比较token、Reader/VLM调用、图像输入、检索延迟和实际费用，并据此定义可配置的资源成本预算。搜索翻批、文本读取和视觉读取不得默认视为等成本。
 
 ## 4. 是否需要专门 Reader
 
@@ -95,3 +96,4 @@ Visual reading 默认把可独立事实拆开单独读取；事实级比较由 E
 - [ ] **R2：Checker过早给出`ready`。** `ready`必须由完整Root Question与完整但精简的Evidence集合共同判断，所有答案要求均有来源支持且不存在未解决冲突；Answerer不得把无引用推断补成缺失事实；以false-ready率单独评估，并与最终答案正确率分开报告。
 - [ ] **R3：Controller重复无效动作。** 从canonical `ActionTrace`、`ReadRecord`和`SearchSession`派生已尝试source、实际查询、候选cursor、动作outcome及Observation引用；当前轮直接读取规范化`ReadRecord/EvidenceCheckResult`，不生成`result_summary`。对完全相同的动作、目标和查询建立循环保护，除非Evidence/gap或可用输入发生变化。
 - [ ] **R4：路线或预算耗尽但Evidence仍不充分。** 保持`EvidenceMemory.root_status=incomplete`，在Reading Session边界记录停止原因并允许Answerer明确拒答或报告证据不足；不得把“无法继续”改写为`ready`。闭环实验后再决定是否需要第三种`EvidenceStatus`，避免现在过早扩展schema。
+- [ ] Re-evaluate Controller v0 with the future server model. Measure whether it rejects candidates that match the topic but cannot answer the requested evidence field (for example, a date when the gap asks for a reason), and whether it keeps confirmed Relations separate from candidate Relations. Compare a stronger prompted model first; consider SFT/RL only if these errors persist in real trajectories. Do not add case-specific Prompt rules from synthetic failures.
