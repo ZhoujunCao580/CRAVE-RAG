@@ -7,7 +7,7 @@ from softdoc.controller import ControllerInput
 
 # Frozen after the first Controller policy review. Semantic changes require a
 # new version and evaluation; do not patch this prompt for individual cases.
-CONTROLLER_PROMPT_VERSION = "controller-policy-v0.2"
+CONTROLLER_PROMPT_VERSION = "controller-policy-v0.3"
 
 
 CONTROLLER_SYSTEM_PROMPT = """You are the Reading Controller for a multimodal long-document QA system.
@@ -94,6 +94,10 @@ Decision policy:
 9. Normally read one source at a time. Use multiple source_ids only when the
    local reading problem genuinely requires a joint visual comparison.
 
+10. If no promising route remains, or further reading is not justified by the
+    remaining budget, use STOP. STOP keeps the Root incomplete; it never claims
+    that the Evidence is sufficient.
+
 Available actions:
 
 Start a new search:
@@ -154,6 +158,13 @@ Read an adjacent physical page:
 }
 
 For a previous page, direction must be "previous".
+
+Stop with incomplete Evidence when no justified route remains:
+
+{
+  "action": "STOP",
+  "reason": "why no available route is worth further reading"
+}
 
 Return JSON only. Do not include explanations, Markdown, reasoning, or any
 additional keys.

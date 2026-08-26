@@ -35,6 +35,7 @@ from softdoc.controller import (
     ControllerReadSourceAction,
     ControllerSearchAction,
     ControllerSearchOperation,
+    ControllerStopAction,
     validate_controller_action,
 )
 from softdoc.ids import (
@@ -97,7 +98,7 @@ from softdoc.store import DocumentStore
 from softdoc.table_view import TableMaterializer, TableView
 
 
-READING_ENVIRONMENT_VERSION = "reading-environment-v0.1"
+READING_ENVIRONMENT_VERSION = "reading-environment-v0.2"
 
 
 class ReaderObservationDraft(SoftDocModel):
@@ -160,6 +161,7 @@ class DenseSearchBackend(Protocol):
 
 class ReadingRunStatus(str, Enum):
     READY = "ready"
+    STOPPED_INCOMPLETE = "stopped_incomplete"
     BUDGET_EXHAUSTED = "budget_exhausted"
 
 
@@ -357,6 +359,7 @@ class ReadingEnvironment:
         self._diagnostics: list[EnvironmentDiagnostic] = []
         self._controller_inputs: list[ControllerInput] = []
         self._exact_results: list[ExactLookupResult] = []
+        self._stop_reason: str | None = None
 
     def run(
         self,
@@ -375,6 +378,7 @@ class ReadingEnvironment:
         self._diagnostics = []
         self._controller_inputs = []
         self._exact_results = []
+        self._stop_reason = None
         session_id = make_reading_session_id(root_question.question_id, run_key)
         memory = initialize_evidence_memory(
             reading_session_id=session_id,
@@ -393,6 +397,7 @@ class ReadingEnvironment:
 
         while (
             memory.root_status != EvidenceStatus.READY
+            and self._stop_reason is None
             and len(trace.entries) < self.config.action_budget
         ):
             target = memory.current_target
@@ -439,6 +444,8 @@ class ReadingEnvironment:
                 self.answerer.answer(answer_input),
             )
             status = ReadingRunStatus.READY
+        elif self._stop_reason is not None:
+            status = ReadingRunStatus.STOPPED_INCOMPLETE
         else:
             status = ReadingRunStatus.BUDGET_EXHAUSTED
             self._diagnostics.append(
@@ -599,6 +606,35 @@ class ReadingEnvironment:
     ) -> tuple[ObservationStore, EvidenceMemory, ActionTrace]:
         if isinstance(action, ControllerSearchAction):
             return observations, memory, self._execute_search(action, memory, trace)
+        if isinstance(action, ControllerStopAction):
+            self._stop_reason = action.reason
+            target = memory.current_target
+            assert target is not None
+            entry = ActionTraceEntry(
+                step_index=len(trace.entries),
+                action_id=make_action_id(trace.reading_session_id, len(trace.entries)),
+                question_id=target.question_id,
+                action_name=action.action.value,
+                execution_status=ActionExecutionStatus.SUCCEEDED,
+                metadata={"reason": action.reason},
+            )
+            self._diagnostics.append(
+                EnvironmentDiagnostic(
+                    code="controller_stopped_incomplete",
+                    description=action.reason,
+                    action_id=entry.action_id,
+                    question_id=target.question_id,
+                )
+            )
+            return (
+                observations,
+                memory,
+                ActionTrace(
+                    reading_session_id=trace.reading_session_id,
+                    root_question_id=trace.root_question_id,
+                    entries=[*trace.entries, entry],
+                ),
+            )
         if isinstance(action, ControllerReadSourceAction):
             return self._execute_read(
                 source_ids=action.source_ids,
@@ -947,7 +983,14 @@ class ReadingEnvironment:
                 representation=ReadRepresentation.PAGE_VISUAL,
                 document_id=self.document.document_id,
                 page_id=page.page_id,
-                visual_asset_id="visual:" + stable_digest(page.page_id, str(path)),
+                visual_asset_id=(
+                    "visual:"
+                    + stable_digest(
+                        self.document.document_id,
+                        page.page_id,
+                        "page_visual",
+                    )
+                ),
                 visual_asset_path=path,
             )
 
@@ -980,7 +1023,12 @@ class ReadingEnvironment:
                 page_id=element.page_id,
                 element_id=element.element_id,
                 visual_asset_id=(
-                    "visual:" + stable_digest(element.element_id, str(visual_path))
+                    "visual:"
+                    + stable_digest(
+                        self.document.document_id,
+                        element.element_id,
+                        "element_visual",
+                    )
                 ),
                 visual_asset_path=visual_path,
             )
@@ -1117,6 +1165,10 @@ class ReadingEnvironment:
             observation_store=observations,
             action_trace=trace,
             relations=self.document.relations,
+            readable_source_ids=[
+                *[page.page_id for page in self.document.pages],
+                *[element.element_id for element in self.document.elements],
+            ],
             search_sessions=self._sessions.values(),
             visible_search_batch=visible_batch,
             remaining_action_budget=(

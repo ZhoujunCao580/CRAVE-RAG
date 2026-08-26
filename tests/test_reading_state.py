@@ -176,6 +176,14 @@ def test_memory_rejects_unknown_cycle_and_blocked_current_target():
                 QuestionState(question_id="Q2", text="Find B.", depends_on=["Q1"]),
             ], current_target=CurrentTarget(question_id="Q2", gap_description="Find B."),
         )
+    with pytest.raises(ValidationError, match="every registered question"):
+        EvidenceMemory(
+            reading_session_id="reading:1",
+            root_question_id="root:1",
+            root_status=EvidenceStatus.READY,
+            questions=[QuestionState(question_id="Q1", text="Find A.")],
+            current_target=None,
+        )
 
 
 def test_checker_incomplete_result_keeps_same_target_and_refines_gap():
@@ -312,24 +320,28 @@ def test_deferred_question_is_registered_only_after_plan_exhaustion():
 def test_checker_delta_replace_remove_and_bad_references_are_atomic():
     memory = _memory().model_copy(update={"evidence": [
         *_memory().evidence,
-        EvidenceItem(evidence_id="evidence:bad", statement="An unreliable value.",
-                     observation_ids=["obs:bad"], supports_question_ids=["Q1"]),
+        EvidenceItem(evidence_id="evidence:q2", statement="An unreliable value.",
+                     observation_ids=["obs:q2"], supports_question_ids=["Q2"]),
+        EvidenceItem(evidence_id="evidence:q2-bad", statement="A duplicate value.",
+                     observation_ids=["obs:q2-bad"], supports_question_ids=["Q2"]),
     ]})
     result = EvidenceCheckResult(
         action_id="action:read", observation_assessments=[_assessment(used=True)],
         evidence_updates=EvidenceUpdates(
             replace=[EvidenceReplacement(
-                evidence_id="evidence:old", statement="Revenue in 2023 was 12 million.",
+                evidence_id="evidence:q2", statement="Revenue in 2023 was 12 million.",
                 observation_ids=["obs:1"], supports_question_ids=["Q2"],
             )],
-            remove=[EvidenceRemoval(evidence_id="evidence:bad", reason="Contradicted")],
+            remove=[EvidenceRemoval(evidence_id="evidence:q2-bad", reason="Contradicted")],
         ), current_target_status=QuestionStatus.INCOMPLETE,
         root_status=EvidenceStatus.INCOMPLETE,
         remaining_gap_description="The 2023 revenue is unknown.",
     )
     updated = apply_evidence_check_result(_checker_input(memory), result)
-    assert [item.evidence_id for item in updated.evidence] == ["evidence:old"]
-    assert len(memory.evidence) == 2
+    assert [item.evidence_id for item in updated.evidence] == [
+        "evidence:old", "evidence:q2"
+    ]
+    assert len(memory.evidence) == 3
     bad = result.model_copy(update={
         "evidence_updates": EvidenceUpdates(remove=[
             EvidenceRemoval(evidence_id="missing", reason="Bad ID")
@@ -337,7 +349,56 @@ def test_checker_delta_replace_remove_and_bad_references_are_atomic():
     })
     with pytest.raises(ValueError, match="missing Evidence"):
         apply_evidence_check_result(_checker_input(memory), bad)
-    assert len(memory.evidence) == 2
+    assert len(memory.evidence) == 3
+
+
+def test_checker_cannot_replace_or_remove_another_questions_evidence():
+    result = EvidenceCheckResult(
+        action_id="action:read",
+        observation_assessments=[_assessment(used=False)],
+        evidence_updates=EvidenceUpdates(
+            remove=[
+                EvidenceRemoval(
+                    evidence_id="evidence:old",
+                    reason="The current read disagrees.",
+                )
+            ]
+        ),
+        current_target_status=QuestionStatus.INCOMPLETE,
+        root_status=EvidenceStatus.INCOMPLETE,
+        remaining_gap_description="The 2023 revenue is still unknown.",
+    )
+    with pytest.raises(ValueError, match="owned by the current target Q2"):
+        apply_evidence_check_result(_checker_input(), result)
+
+
+def test_checker_cannot_mark_root_ready_with_an_unfinished_question():
+    memory = EvidenceMemory(
+        reading_session_id="reading:1",
+        root_question_id="root:1",
+        questions=[
+            QuestionState(question_id="Q1", text="Find A."),
+            QuestionState(question_id="Q2", text="Find B."),
+        ],
+        current_target=CurrentTarget(question_id="Q1", gap_description="Find A."),
+    )
+    result = EvidenceCheckResult(
+        action_id="action:read",
+        observation_assessments=[_assessment(used=True)],
+        evidence_updates=EvidenceUpdates(
+            add=[
+                EvidenceAddition(
+                    statement="A is 72%.",
+                    observation_ids=["obs:1"],
+                    supports_question_ids=["Q1"],
+                )
+            ]
+        ),
+        current_target_status=QuestionStatus.SATISFIED,
+        root_status=EvidenceStatus.READY,
+    )
+    with pytest.raises(ValueError, match="remain incomplete"):
+        apply_evidence_check_result(_checker_input(memory), result)
 
 
 def _relation(relation_id: str, status: RelationStatus, relation_type: RelationType,

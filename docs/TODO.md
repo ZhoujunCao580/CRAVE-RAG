@@ -68,6 +68,7 @@ Visual reading 默认把可独立事实拆开单独读取；事实级比较由 E
 ## 7. Answerer 服务器阶段验证
 
 - [ ] 当Evidence只能证明“数值发生了变化”，但Root Question追问“为什么变化”时，本地`qwen3:8b`可能把变化本身循环表述为原因。首要防线是Checker不得将这类Evidence判为`ready`；Answerer仅保留问题覆盖检查作为兜底。以后用更强模型测量“缺少原因证据”的拒答率，暂不继续为单个错例扩写Prompt。
+- [ ] 实现Citation Materializer：确定性展开`used_evidence_ids -> observation_ids -> ReadRecord.inputs`，输出用户可见的Document/Page/Element/Region引用；不得让Answerer编造位置或citation ID。
 
 ## 8. Evidence Checker 闭环
 

@@ -25,7 +25,7 @@
 
 The repository implements and tests the SoftDoc foundation, MinerU adapter and deterministic passes, document relations, retrieval stack, resumable search sessions, candidate previews, the contracts for planning, reading, evidence checking, and answering, and an injectable Reading Environment v0 that executes those contracts as one stateful loop.
 
-The production Controller policy, model-quality evaluation, deferred planning, Observation Recall, post-training, and full-dataset end-to-end answer evaluation remain research-stage work.
+Production model-backed Readers and policies, citation materialization, model-quality evaluation, deferred planning, Observation Recall, post-training, and full-dataset end-to-end answer evaluation remain research-stage work.
 
 ## Executable Reading Loop
 
@@ -52,6 +52,8 @@ The v0 boundary is intentionally strict:
 - candidate relations may be investigated but are not promoted to confirmed;
 - invalid Checker deltas leave canonical EvidenceMemory unchanged;
 - question advancement and Answerer invocation are program controlled;
+- the Controller may stop explicitly without changing incomplete Evidence to ready;
+- Relations whose other endpoint cannot be read by the current Environment are not exposed as actions;
 - cross-store references are validated after every action.
 
 `scripts/audit_reading_environment_v0.py` is a small real-SoftDoc replay audit.

@@ -430,6 +430,13 @@ class EvidenceMemory(SoftDocModel):
                     )
         if self.root_status == EvidenceStatus.READY and self.current_target is not None:
             raise ValueError("Ready EvidenceMemory cannot have a current_target")
+        if self.root_status == EvidenceStatus.READY and any(
+            question.status != QuestionStatus.SATISFIED
+            for question in self.questions
+        ):
+            raise ValueError(
+                "Ready EvidenceMemory requires every registered question to be satisfied"
+            )
         if self.root_status == EvidenceStatus.INCOMPLETE and self.current_target is None:
             raise ValueError("Incomplete EvidenceMemory requires one current_target")
         return self
@@ -691,6 +698,22 @@ def apply_evidence_check_result(
             + ", ".join(sorted(missing_targets))
         )
 
+    current_target = checker_input.evidence_memory.current_target
+    if current_target is None:
+        raise ValueError("Checker input requires an active current_target")
+    target_question_id = current_target.question_id
+    cross_target_updates = [
+        evidence_id
+        for evidence_id in sorted(targeted_ids)
+        if existing_by_id[evidence_id].supports_question_ids != [target_question_id]
+    ]
+    if cross_target_updates:
+        raise ValueError(
+            "Checker may replace or remove only Evidence owned by the current "
+            f"target {target_question_id}: "
+            + ", ".join(cross_target_updates)
+        )
+
     known_observation_ids = set(new_observation_ids)
     for item in existing_items:
         known_observation_ids.update(item.observation_ids)
@@ -743,10 +766,6 @@ def apply_evidence_check_result(
             )
         )
 
-    current_target = checker_input.evidence_memory.current_target
-    if current_target is None:
-        raise ValueError("Checker input requires an active current_target")
-    target_question_id = current_target.question_id
     for update in [
         *result.evidence_updates.add,
         *result.evidence_updates.replace,
@@ -777,6 +796,13 @@ def apply_evidence_check_result(
         )
 
     next_questions = [questions_by_id[item.question_id] for item in questions]
+    if result.root_status == EvidenceStatus.READY and any(
+        question.status != QuestionStatus.SATISFIED
+        for question in next_questions
+    ):
+        raise ValueError(
+            "Root cannot become ready while registered questions remain incomplete"
+        )
     next_target: CurrentTarget | None
     if result.root_status == EvidenceStatus.READY:
         next_target = None

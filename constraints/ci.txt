@@ -1,0 +1,6 @@
+# Reproducible CPU test environment. Update deliberately after local and CI tests.
+numpy==2.4.4
+pydantic==2.13.4
+Pillow==11.3.0
+pypdfium2==5.10.1
+pytest==8.4.2

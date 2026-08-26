@@ -1,6 +1,6 @@
 # CRAVE-RAG：项目指南
 
-更新日期：2026-08-23
+更新日期：2026-08-26
 
 CRAVE-RAG是 **Controller-guided Reading and Action Via Evidence Gaps** 的缩写；SoftDoc仍是解析器无关的文档中间表示，`softdoc`仍是稳定的Python包名和CLI名称。总流程图见[`ARCHITECTURE.md`](ARCHITECTURE.md)。
 
@@ -21,14 +21,17 @@ PDF
   -> SearchSession
   -> 分批CandidatePreview
   -> Initial Planner：Question -> SubQuestion DAG（本地Ollama + Qwen3 4B）
-  -> Visual Reader v0接口与Reading State v0数据模型
+  -> Reader / Checker / Answerer可注入接口
+  -> ReadingEnvironment v0状态闭环
+  -> Controller动作执行、Evidence delta应用与Answerer调用
 ```
 
-已完成的是“找到值得开始阅读的位置”。尚未实现：
+当前已经完成可执行、可重放的v0阅读闭环，而不只是“找到值得开始阅读的位置”。尚未实现：
 
-- Controller v0动作的正式环境执行闭环；
-- Evidence Checker实现与`EvidenceCheckResult`运行时更新；
-- 真实LLM生成SubQuestion、动态REFINE_PLAN、Reading Agent循环和答案生成。
+- 经过正式质量评测的生产级Controller、Reader、Checker和Answerer模型后端；
+- 动态REFINE_PLAN、Observation Recall与后训练策略；
+- Evidence到最终用户可见Document/Page/Element/Region引用的Citation Materializer；
+- 全数据集端到端答案质量、阅读成本和动作净收益评测。
 
 `ObservationStore`、`EvidenceMemory`、`ActionTrace`、`ExplorationState`以及Reader/Checker边界已经冻结为本指南第9—10节的v0契约。代码已统一到`action_id + input_id + observation_id + evidence_id`边界；Reader limitation只保留自由文本描述与受影响的动作内输入。
 
@@ -724,33 +727,34 @@ Controller选择Action
 
 ### Controller v0 输入、动作与Prompt冻结（策略后端尚未实现）
 
-Controller输入和动作现已与Planner、Reader、Checker和Answerer契约一样冻结为Pydantic模型，canonical定义位于`src/softdoc/controller.py`，版本分别为`controller-input-v0.1`和`controller-action-v0.1`。单独的Controller contract文档不再作为第二份事实源。`ExplorationState`只是现有内部派生模型，不能直接返回给Controller。
+Controller输入和动作现已与Planner、Reader、Checker和Answerer契约一样冻结为Pydantic模型，canonical定义位于`src/softdoc/controller.py`，版本分别为`controller-input-v0.1`和`controller-action-v0.2`。单独的Controller contract文档不再作为第二份事实源。`ExplorationState`只是现有内部派生模型，不能直接返回给Controller。
 
-模型侧Prompt的canonical定义位于`src/softdoc/controller_prompt.py`，冻结版本为`controller-policy-v0.1`。Prompt要求Controller综合比较当前CandidatePreview、confirmed/candidate Relation、相邻页、既有SearchSession、最近失败与预算，不采用固定动作优先级；既有Evidence通常不重复获取，只有`current_gap`或最近反馈明确指出冲突、不确定、grounding不完整或读取失败时才允许复核。v0仍不增加`STOP`或`INSPECT_REGION`，也不实现具体模型后端。
+模型侧Prompt的canonical定义位于`src/softdoc/controller_prompt.py`，冻结版本为`controller-policy-v0.3`。Prompt要求Controller综合比较当前CandidatePreview、confirmed/candidate Relation、相邻页、既有SearchSession、最近失败与预算，不采用固定动作优先级；既有Evidence通常不重复获取，只有`current_gap`或最近反馈明确指出冲突、不确定、grounding不完整或读取失败时才允许复核。v0支持`STOP`以明确保留证据不足的结果，但仍不增加`INSPECT_REGION`，也不实现具体生产模型后端。
 
 Controller的研究职责是：围绕当前Evidence gap选择下一次阅读行为，而不是解析PDF、读取像素、判断Evidence充分性或生成最终答案。每一步接收`ControllerInput`定义的扁平投影：Root Question、问题进度、已接受Evidence、当前gap、reading locations、局部Relation、recent actions及其可选feedback、紧凑的`search_tabs`、当前`visible_search_view`里的CandidatePreview，以及剩余动作预算。`recent_actions.execution_status`只表示Environment执行动作的状态，不表示Observation正确或对Evidence有用；后两者分别由Reader limitation和Checker assessment表达。Controller不直接接收完整`EvidenceMemory`、`ExplorationState`、`ReadRecord`、`EvidenceCheckResult`或Observation历史摘要。
 
 `ControllerInput`强制以下关键不变量：
 
-- `root_status=ready`当且仅当`current_gap=null`；`root_status=incomplete`必须有`current_gap`；
+- `root_status=ready`要求`current_gap=null`且所有已注册SubQuestion均为`satisfied`；`root_status=incomplete`必须有`current_gap`；
 - `current_gap`必须指向Root或一个存在、未完成且依赖已满足的SubQuestion；
 - `visible_search_view.search_session_id`必须存在于`search_tabs`；
 - Exact Anchor目标不能在同一可见批次中再次作为普通CandidatePreview出现；
 - Evidence、Action、Relation、SearchSession和问题引用必须唯一且指向已知对象。
 
-冻结的Controller v0顶层动作只有五类：
+冻结的Controller v0顶层动作共有六类：
 
 - `SEARCH(operation=new|next|switch)`：创建新SearchSession、查看同一Session下一批Preview，或切换回已有Session。它返回CandidatePreview，不强迫Controller从每一批读取对象，也不产生正式Observation；
 - `READ_SOURCE(source_ids, local_problem)`：从当前可见Preview、reading location或其他已暴露handle中选择一个或多个来源并完整读取；
 - `FOLLOW_RELATION(relation_id, local_problem)`：只接受当前可见的confirmed Relation，并在同一动作中读取target；
 - `EXPLORE_CANDIDATE_RELATION(relation_id, local_problem)`：读取当前可见candidate Relation的target，但不得借此确认Relation成立；
 - `READ_ADJACENT_PAGE(from_page_id, direction=next|previous, local_problem)`：在同一动作类型内读取前一页或后一页。`previous`主要用于恢复跨页表头、段落开头或缺失上下文，`next`主要用于寻找后续内容。
+- `STOP(reason)`：当前没有值得继续投入预算的路线时，以`stopped_incomplete`结束；它不改变Evidence，也不把证据不足伪装成`ready`。
 
-新问题激活时，Environment先确定性运行Exact Anchor Lookup。唯一且可直接读取的Element/Page Anchor由Environment自动调用同一个Reader执行层，不要求Controller再次选择；无匹配或歧义时才准备普通检索入口。页引用采用两种明确语义：`Page N`/`第N页`优先解析印刷页码、没有匹配时回退到第N个物理页；`first/second/6th page`等序数表达及`last page`只按PDF物理文档顺序解析。若Exact自动读取后Checker仍判定当前gap未解决，Controller可以从已打开页执行`READ_ADJACENT_PAGE`恢复，而不是让Exact一次自动读取多个猜测页面。Exact自动读取属于环境路由，不是第六种Controller动作。Section Anchor只建立范围，不把整节默认完整读入。
+新问题激活时，Environment先确定性运行Exact Anchor Lookup。唯一且可直接读取的Element/Page Anchor由Environment自动调用同一个Reader执行层，不要求Controller再次选择；无匹配或歧义时才准备普通检索入口。页引用采用两种明确语义：`Page N`/`第N页`优先解析印刷页码、没有匹配时回退到第N个物理页；`first/second/6th page`等序数表达及`last page`只按PDF物理文档顺序解析。若Exact自动读取后Checker仍判定当前gap未解决，Controller可以从已打开页执行`READ_ADJACENT_PAGE`恢复，而不是让Exact一次自动读取多个猜测页面。Exact自动读取属于环境路由，不是Controller动作。Section Anchor目前只解析并记录诊断，尚未形成可执行的scoped-read范围，也不会把整节默认读入。
 
 `SEARCH`与`READ_SOURCE`在v0保持分离：Controller可以拒绝当前整批Preview、请求下一批或切换Session；不要求每一批必定读取一个候选。CandidatePreview只是阅读入口，Reader产生的Observation才可交给Checker。`FOLLOW_RELATION`、`EXPLORE_CANDIDATE_RELATION`与`READ_ADJACENT_PAGE`因为target已经明确，在动作内部直接读取，但Relation或页面位置本身仍不是Evidence。
 
-`INSPECT_REGION`、`UPDATE_PLAN`、`CHECK_EVIDENCE`和`ANSWER`都不属于Controller v0动作：Region handle尚未建立，Deferred Planning仍关闭，Checker在读取产生Observation后由Environment调用，Root ready后由Environment调用Answerer。停止条件也由Root状态和资源预算管理，不要求Controller生成另一个`STOP`动作。资源预算当前仍是占位字段，未来按TODO改为token、Reader/VLM调用、图像输入、延迟和费用组成的成本预算，而不是简单动作步数。
+`INSPECT_REGION`、`UPDATE_PLAN`、`CHECK_EVIDENCE`和`ANSWER`都不属于Controller v0动作：Region handle尚未建立，Deferred Planning仍关闭，Checker在读取产生Observation后由Environment调用，Root ready后由Environment调用Answerer。Controller可用`STOP`明确结束一条证据不足且不值得继续探索的路线；预算耗尽则由Environment返回`budget_exhausted`。资源预算当前仍是占位字段，未来按TODO改为token、Reader/VLM调用、图像输入、延迟和费用组成的成本预算，而不是简单动作步数。
 
 #### 解析噪声与不确定Relation的安全边界
 
@@ -817,8 +821,9 @@ Answerer输入只包含：
 ```
 
 模型不生成page、Element、Observation或citation ID。`validate_answer_result`验证所用Evidence真实
-存在；随后程序沿`evidence_id -> observation_ids -> ObservationStore sources`展开最终引用。文档位置
-因此仍被系统保存，但不占用Answerer上下文。v0不实现真实模型客户端、claim-level citation或答案
+存在；系统已经保留`evidence_id -> observation_ids -> ObservationStore sources`所需的完整引用链，
+但把它物化成最终用户可见页码、Element或区域引用的Citation Materializer尚未实现。文档位置
+因此仍被保存，但不占用Answerer上下文。v0不实现真实生产模型客户端、claim-level citation或答案
 质量评测。
 
 ## 11. 常用命令

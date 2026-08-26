@@ -33,7 +33,7 @@ from softdoc.retrieval.models import AnchorTargetType, SearchBatch, SearchSessio
 
 
 CONTROLLER_INPUT_VERSION = "controller-input-v0.1"
-CONTROLLER_ACTION_VERSION = "controller-action-v0.1"
+CONTROLLER_ACTION_VERSION = "controller-action-v0.2"
 
 
 def _unique_nonblank(values: list[str], *, label: str) -> list[str]:
@@ -232,6 +232,16 @@ class ControllerInput(SoftDocModel):
         if self.root_status == EvidenceStatus.READY:
             if self.current_gap is not None:
                 raise ValueError("A ready Root must not have a current_gap")
+            unfinished = [
+                item.question_id
+                for item in self.subquestions
+                if item.status != QuestionStatus.SATISFIED
+            ]
+            if unfinished:
+                raise ValueError(
+                    "A ready Root requires every SubQuestion to be satisfied: "
+                    + ", ".join(unfinished)
+                )
         elif self.current_gap is None:
             raise ValueError("An incomplete Root requires a current_gap")
 
@@ -336,6 +346,7 @@ class ControllerActionName(str, Enum):
     FOLLOW_RELATION = "FOLLOW_RELATION"
     EXPLORE_CANDIDATE_RELATION = "EXPLORE_CANDIDATE_RELATION"
     READ_ADJACENT_PAGE = "READ_ADJACENT_PAGE"
+    STOP = "STOP"
 
 
 class ControllerSearchOperation(str, Enum):
@@ -404,12 +415,20 @@ class ControllerReadAdjacentPageAction(SoftDocModel):
     local_problem: str = Field(min_length=1)
 
 
+class ControllerStopAction(SoftDocModel):
+    """Stop with incomplete Evidence when no justified route remains."""
+
+    action: Literal[ControllerActionName.STOP]
+    reason: str = Field(min_length=1)
+
+
 ControllerAction: TypeAlias = Annotated[
     ControllerSearchAction
     | ControllerReadSourceAction
     | ControllerFollowRelationAction
     | ControllerExploreCandidateRelationAction
-    | ControllerReadAdjacentPageAction,
+    | ControllerReadAdjacentPageAction
+    | ControllerStopAction,
     Field(discriminator="action"),
 ]
 
@@ -433,6 +452,7 @@ class ControllerInputBuilder:
         observation_store: ObservationStore,
         action_trace: ActionTrace,
         relations: Iterable[Any] = (),
+        readable_source_ids: Iterable[str] | None = None,
         search_sessions: Iterable[SearchSession] = (),
         visible_search_batch: SearchBatch | None = None,
         remaining_action_budget: int,
@@ -450,6 +470,9 @@ class ControllerInputBuilder:
             raise ValueError("Controller stores must belong to one reading session")
 
         sessions = list(search_sessions)
+        readable_ids = (
+            set(readable_source_ids) if readable_source_ids is not None else None
+        )
         sessions_by_id = {item.search_session_id: item for item in sessions}
         if len(sessions_by_id) != len(sessions):
             raise ValueError("Controller SearchSession IDs must be unique")
@@ -506,6 +529,13 @@ class ControllerInputBuilder:
         if focus is not None:
             for relation in relations:
                 if focus.source_id not in {relation.source_id, relation.target_id}:
+                    continue
+                other_endpoint = (
+                    relation.target_id
+                    if relation.source_id == focus.source_id
+                    else relation.source_id
+                )
+                if readable_ids is not None and other_endpoint not in readable_ids:
                     continue
                 if relation.status.value == "confirmed":
                     confirmed.append(
@@ -657,6 +687,9 @@ def validate_controller_action(
                 raise ValueError("SEARCH next requires a SearchSession with has_more")
         return action
 
+    if isinstance(action, ControllerStopAction):
+        return action
+
     if isinstance(action, ControllerReadSourceAction):
         visible_sources = {item.source_id for item in controller_input.reading_locations}
         if controller_input.visible_search_view is not None:
@@ -694,6 +727,7 @@ def validate_controller_action(
             )
         return action
 
+    assert isinstance(action, ControllerReadAdjacentPageAction)
     visible_page_ids = {item.page_id for item in controller_input.reading_locations}
     if action.from_page_id not in visible_page_ids:
         raise ValueError(

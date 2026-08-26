@@ -21,6 +21,7 @@ from softdoc.controller import (
     ControllerSearchAction,
     ControllerSearchOperation,
     ControllerSearchTab,
+    ControllerStopAction,
     ControllerSubQuestion,
     ControllerVisibleSearchView,
     validate_controller_action,
@@ -114,7 +115,7 @@ def _input(**changes: object) -> ControllerInput:
 def test_controller_input_version_and_round_trip() -> None:
     value = _input()
     assert CONTROLLER_INPUT_VERSION == "controller-input-v0.1"
-    assert CONTROLLER_ACTION_VERSION == "controller-action-v0.1"
+    assert CONTROLLER_ACTION_VERSION == "controller-action-v0.2"
     restored = ControllerInput.model_validate_json(value.model_dump_json())
     assert restored == value
     assert restored.recent_actions[0].execution_status == "succeeded"
@@ -124,8 +125,26 @@ def test_ready_root_requires_null_gap() -> None:
     with pytest.raises(ValidationError, match="ready Root must not have"):
         _input(root_status=EvidenceStatus.READY)
 
-    value = _input(root_status=EvidenceStatus.READY, current_gap=None)
+    value = _input(
+        root_status=EvidenceStatus.READY,
+        current_gap=None,
+        subquestions=[
+            ControllerSubQuestion(
+                question_id="Q1",
+                text="What was 2022 revenue?",
+                status=QuestionStatus.SATISFIED,
+            ),
+            ControllerSubQuestion(
+                question_id="Q2",
+                text="What was 2023 revenue?",
+                status=QuestionStatus.SATISFIED,
+            ),
+        ],
+    )
     assert value.current_gap is None
+
+    with pytest.raises(ValidationError, match="every SubQuestion"):
+        _input(root_status=EvidenceStatus.READY, current_gap=None)
 
 
 def test_incomplete_root_requires_gap() -> None:
@@ -156,6 +175,7 @@ def test_frozen_action_names_exclude_deferred_region_and_plan_actions() -> None:
         "FOLLOW_RELATION",
         "EXPLORE_CANDIDATE_RELATION",
         "READ_ADJACENT_PAGE",
+        "STOP",
     }
 
 
@@ -309,6 +329,17 @@ def test_read_adjacent_page_uses_one_action_with_a_direction() -> None:
             },
             _input(),
         )
+
+
+def test_stop_keeps_incomplete_state_without_requiring_a_handle() -> None:
+    action = validate_controller_action(
+        {
+            "action": "STOP",
+            "reason": "No visible route is likely to resolve the gap.",
+        },
+        _input(),
+    )
+    assert isinstance(action, ControllerStopAction)
 
 
 def test_unfrozen_action_names_are_rejected() -> None:

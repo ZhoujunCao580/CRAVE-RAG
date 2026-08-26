@@ -7,12 +7,13 @@ name = "soft-structured-document"
 version = "0.1.0"
 description = "CRAVE-RAG: controller-guided reading and action via evidence gaps"
 readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "numpy>=1.26,<3",
     "pydantic>=2.5,<3",
     "Pillow>=9,<12",
-    "pypdfium2>=4.30,<5",
+    "pypdfium2>=4.30,<6",
 ]
 
 [project.optional-dependencies]

@@ -11,16 +11,17 @@ from softdoc.reading_state import EvidenceStatus, RootQuestion
 
 
 def test_controller_prompt_is_frozen_to_current_action_contract() -> None:
-    assert CONTROLLER_PROMPT_VERSION == "controller-policy-v0.2"
+    assert CONTROLLER_PROMPT_VERSION == "controller-policy-v0.3"
     for action_name in (
         "SEARCH",
         "READ_SOURCE",
         "FOLLOW_RELATION",
         "EXPLORE_CANDIDATE_RELATION",
         "READ_ADJACENT_PAGE",
+        "STOP",
     ):
         assert action_name in CONTROLLER_SYSTEM_PROMPT
-    assert '"action": "STOP"' not in CONTROLLER_SYSTEM_PROMPT
+    assert '"action": "STOP"' in CONTROLLER_SYSTEM_PROMPT
     assert "INSPECT_REGION" not in CONTROLLER_SYSTEM_PROMPT
 
 

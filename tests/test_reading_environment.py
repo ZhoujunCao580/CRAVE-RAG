@@ -682,3 +682,141 @@ def test_validated_initial_plan_maps_into_runtime_question_order(tmp_path: Path)
         for item in result.evidence_memory.questions
     )
     assert result.answer is not None
+
+
+def test_controller_can_stop_cleanly_with_incomplete_evidence(tmp_path: Path) -> None:
+    document = _document(tmp_path, page_element_specs=[[]])
+    controller = QueueController(
+        [
+            {
+                "action": "STOP",
+                "reason": "No visible source is likely to resolve the current gap.",
+            }
+        ]
+    )
+    result = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=controller,
+        reader=DeterministicContentReader(),
+        checker=PredicateChecker(lambda _text: False),
+        answerer=EvidenceAnswerer(),
+    ).run(
+        root_question=RootQuestion(
+            question_id="root:stop",
+            text="What unavailable fact is reported?",
+        )
+    )
+
+    assert result.status == ReadingRunStatus.STOPPED_INCOMPLETE
+    assert result.evidence_memory.root_status == EvidenceStatus.INCOMPLETE
+    assert result.answer is None
+    assert result.action_trace.entries[-1].action_name == "STOP"
+    assert result.diagnostics[-1].code == "controller_stopped_incomplete"
+
+
+def test_controller_hides_relations_with_unreadable_other_endpoint(
+    tmp_path: Path,
+) -> None:
+    relation = _relation(
+        "rel:document-endpoint",
+        "figure:1",
+        "doc:environment-test",
+        RelationType.BELONGS_TO_SECTION,
+        RelationStatus.CONFIRMED,
+    )
+    document = _document(
+        tmp_path,
+        page_element_specs=[
+            [
+                {
+                    "element_id": "figure:1",
+                    "element_type": ElementType.FIGURE,
+                    "reference_label": "Figure 1",
+                    "visual": True,
+                }
+            ]
+        ],
+        relations=[relation],
+    )
+    controller = QueueController(
+        [
+            {
+                "action": "STOP",
+                "reason": "The remaining relation endpoint cannot be read.",
+            }
+        ]
+    )
+    result = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=controller,
+        reader=DeterministicContentReader(),
+        checker=PredicateChecker(lambda _text: False),
+        answerer=EvidenceAnswerer(),
+    ).run(
+        root_question=RootQuestion(
+            question_id="root:relation-filter",
+            text="What does Figure 1 show?",
+        )
+    )
+
+    assert result.status == ReadingRunStatus.STOPPED_INCOMPLETE
+    assert controller.inputs[0].confirmed_relations == []
+
+
+def test_visual_asset_ids_do_not_depend_on_absolute_asset_root(
+    tmp_path: Path,
+) -> None:
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+    first_document = _document(
+        first_root,
+        page_element_specs=[
+            [
+                {
+                    "element_id": "figure:1",
+                    "element_type": ElementType.FIGURE,
+                    "visual": True,
+                }
+            ]
+        ],
+    )
+    second_document = _document(
+        second_root,
+        page_element_specs=[
+            [
+                {
+                    "element_id": "figure:1",
+                    "element_type": ElementType.FIGURE,
+                    "visual": True,
+                }
+            ]
+        ],
+    )
+
+    first_environment = ReadingEnvironment(
+        first_document,
+        asset_root=first_root,
+        controller=RejectingController(),
+        reader=DeterministicContentReader(),
+        checker=PredicateChecker(lambda _text: False),
+        answerer=EvidenceAnswerer(),
+    )
+    second_environment = ReadingEnvironment(
+        second_document,
+        asset_root=second_root,
+        controller=RejectingController(),
+        reader=DeterministicContentReader(),
+        checker=PredicateChecker(lambda _text: False),
+        answerer=EvidenceAnswerer(),
+    )
+
+    assert first_environment._read_input("page:1", 0).visual_asset_id == (
+        second_environment._read_input("page:1", 0).visual_asset_id
+    )
+    assert first_environment._read_input("figure:1", 0).visual_asset_id == (
+        second_environment._read_input("figure:1", 0).visual_asset_id
+    )
