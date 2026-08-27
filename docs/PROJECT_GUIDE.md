@@ -32,12 +32,16 @@ The guiding principle is:
   `STOP`.
 - Evidence-only Answerer contract and prompt.
 - An injectable Reading Environment that exercises the complete state loop.
+- Ollama-backed Visual Reader, Checker, and Answerer adapters plus an auditable
+  end-to-end model runner; text and structured tables use the deterministic
+  Reader before any visual fallback.
 - Unified prompt registry, evaluation launcher, Linux bootstrap, and generic
   LoRA/QLoRA SFT entrypoint.
 
 ## Not yet claimed as complete
 
-- Production Text/Table/Page/Visual Reader backends.
+- Production-quality Reader evaluation and server-native model adapters beyond
+  the current Ollama v0 backend.
 - A trained Controller policy or a production Teacher trajectory corpus.
 - Deferred planning and Observation Recall.
 - Citation materialization in final user-facing output.
@@ -62,6 +66,8 @@ src/softdoc/
   controller.py             Controller input and action contracts
   controller_prompt.py      Controller prompt
   reading_environment.py    executable reading-loop orchestration
+  model_backends.py         Ollama Reader/Checker/Answerer adapters
+  model_runner.py           Planner-to-Answerer runner and audit artifacts
   answering.py              Answerer contract and prompt
   prompt_registry.py        single prompt discovery/version entrypoint
 ```
@@ -113,6 +119,32 @@ softdoc doctor --profile core
 Real model evaluations write ignored artifacts under `.runlogs/`. Generated
 corpora, PDFs, model weights, and caches are intentionally excluded from Git.
 See [Server Setup](SERVER_SETUP.md) before moving to a GPU machine.
+
+## End-to-end model run
+
+```bash
+softdoc run-model <SOFTDOC_OUTPUT_DIR> \
+  --question "<ROOT_QUESTION>" \
+  --output .runlogs/<RUN_NAME> \
+  --text-model qwen3:8b \
+  --visual-model qwen3-vl:4b
+```
+
+The output packet contains:
+
+```text
+run_manifest.json
+planner.json
+controller_calls.jsonl
+reader_calls.jsonl
+checker_calls.jsonl
+answerer_calls.jsonl
+reading_run.json
+```
+
+The JSONL rows preserve the validated input and output of each executed module
+call. `reading_run.json` is the canonical end state, including SearchSessions,
+Observations, Evidence, actions, diagnostics, and the optional final answer.
 
 ## Change discipline
 

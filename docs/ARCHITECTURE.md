@@ -23,9 +23,9 @@
 
 ## Implementation Boundary
 
-The repository implements and tests the SoftDoc foundation, MinerU adapter and deterministic passes, document relations, retrieval stack, resumable search sessions, candidate previews, the contracts for planning, reading, evidence checking, and answering, and an injectable Reading Environment v0 that executes those contracts as one stateful loop.
+The repository implements and tests the SoftDoc foundation, MinerU adapter and deterministic passes, document relations, retrieval stack, resumable search sessions, candidate previews, the contracts for planning, reading, evidence checking, and answering, an injectable Reading Environment v0, and an Ollama-backed runner that executes those contracts as one stateful loop.
 
-Production model-backed Readers and policies, citation materialization, model-quality evaluation, deferred planning, Observation Recall, post-training, and full-dataset end-to-end answer evaluation remain research-stage work.
+Production-quality model policies, citation materialization, model-quality evaluation, deferred planning, Observation Recall, post-training, and full-dataset end-to-end answer evaluation remain research-stage work.
 
 ## Executable Reading Loop
 
@@ -60,5 +60,6 @@ The v0 boundary is intentionally strict:
 Its scripted Teacher decisions replace unfinished learned components only to
 test orchestration and state transitions; the report is not an Agent accuracy
 score. Known v0 boundaries remain: Section exact anchors do not yet trigger
-scoped reading, the resource budget is an action-count placeholder, and
-production model backends are not part of this milestone.
+scoped reading, the resource budget is an action-count placeholder, and the
+current Ollama model backends have not yet been accepted as production-quality
+policies.

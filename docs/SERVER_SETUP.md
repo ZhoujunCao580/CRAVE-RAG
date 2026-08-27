@@ -61,6 +61,23 @@ python scripts/evaluate_prompts.py \
 
 All outputs go under `.runlogs/` by default and include a prompt manifest.
 
+Run the complete loop after copying or generating a serialized SoftDoc:
+
+```bash
+softdoc run-model /workspace/data/softdoc/example \
+  --question "What evidence supports the reported conclusion?" \
+  --output /workspace/runs/example \
+  --text-model qwen3:8b \
+  --visual-model qwen3-vl:4b \
+  --dense \
+  --dense-device cuda \
+  --embedding-cache /workspace/cache/e5
+```
+
+The default transport is Ollama-compatible HTTP. The core runner itself uses
+injectable backend protocols, so a later vLLM or hosted-API adapter does not
+require changing the reading state machine.
+
 ## 4. Teacher data and SFT
 
 Teacher records use UTF-8 JSONL. Each row binds one model component to the

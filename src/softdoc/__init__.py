@@ -202,6 +202,24 @@ from softdoc.reading_environment import (
     ReadingRunResult,
     ReadingRunStatus,
 )
+from softdoc.model_backends import (
+    ModelBackedReader,
+    ModelCallRecord,
+    OllamaAnswererBackend,
+    OllamaEvidenceCheckerBackend,
+    OllamaModelConfig,
+    OllamaModelError,
+    OllamaStructuredClient,
+    OllamaVisualReaderBackend,
+    UrllibOllamaModelTransport,
+)
+from softdoc.model_runner import (
+    MODEL_PIPELINE_VERSION,
+    ModelBackedRunner,
+    ModelPipelineRun,
+    StageCallRecord,
+    write_model_pipeline_run,
+)
 
 __all__ = [
     "ANSWERER_PROMPT_VERSION",
@@ -370,4 +388,18 @@ __all__ = [
     "ReadingEnvironmentConfig",
     "ReadingRunResult",
     "ReadingRunStatus",
+    "ModelBackedReader",
+    "ModelCallRecord",
+    "OllamaAnswererBackend",
+    "OllamaEvidenceCheckerBackend",
+    "OllamaModelConfig",
+    "OllamaModelError",
+    "OllamaStructuredClient",
+    "OllamaVisualReaderBackend",
+    "UrllibOllamaModelTransport",
+    "MODEL_PIPELINE_VERSION",
+    "ModelBackedRunner",
+    "ModelPipelineRun",
+    "StageCallRecord",
+    "write_model_pipeline_run",
 ]

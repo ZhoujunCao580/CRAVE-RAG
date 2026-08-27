@@ -35,9 +35,9 @@ The structure preserves page layout, element bounding boxes, reading order, visu
 
 ## Current Status
 
-The repository currently provides the SoftDoc representation, MinerU adaptation pipeline, deterministic document relations, spatial navigation, exact/sparse/dense retrieval, candidate previews, search sessions, frozen contracts for planning, reading, evidence checking, and answering, and an executable stateful reading loop with explicit incomplete termination.
+The repository currently provides the SoftDoc representation, MinerU adaptation pipeline, deterministic document relations, spatial navigation, exact/sparse/dense retrieval, candidate previews, search sessions, frozen contracts for planning, reading, evidence checking, and answering, an executable stateful reading loop, and an Ollama-backed end-to-end runner with explicit incomplete termination.
 
-The next research stage is integrating production model-backed Readers and policies, materializing final source citations, and evaluating whether evidence-gap-driven reading improves answer quality and reading efficiency.
+The next research stage is evaluating and improving the model-backed policies, materializing final source citations, and testing whether evidence-gap-driven reading improves answer quality and reading efficiency.
 
 ## Quick Start
 
@@ -65,6 +65,22 @@ python scripts/audit_reading_environment_v0.py --softdoc-root <SOFTDOC_ROOT>
 
 This replay checks interfaces and state transitions; it is not a model-quality
 benchmark.
+
+With the required Ollama text and visual models available, run the complete
+model-backed loop on one serialized SoftDoc:
+
+```bash
+softdoc run-model <SOFTDOC_OUTPUT_DIR> \
+  --question "What evidence explains the reported change?" \
+  --output .runlogs/example \
+  --text-model qwen3:8b \
+  --visual-model qwen3-vl:4b
+```
+
+Add `--dense` to combine BM25 with multilingual-E5 Dense retrieval. Dense
+dependencies are optional, so the default command remains lightweight and uses
+Exact Anchor lookup plus BM25. Every run writes separate Planner, Controller,
+Reader, Checker, and Answerer records alongside the complete reading state.
 
 ## Prompts and Evaluations
 
