@@ -19,6 +19,8 @@ from softdoc.planning.planner import InitialPlanner, PlannerOutputError
 from softdoc.planning.prompt import (
     INITIAL_PLANNER_PROMPT_VERSION,
     build_initial_planner_prompt,
+    build_initial_planner_system_prompt,
+    build_initial_planner_user_prompt,
 )
 
 __all__ = [
@@ -37,4 +39,6 @@ __all__ = [
     "OllamaPlannerConfig",
     "OllamaPlannerError",
     "build_initial_planner_prompt",
+    "build_initial_planner_system_prompt",
+    "build_initial_planner_user_prompt",
 ]

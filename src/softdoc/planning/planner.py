@@ -14,7 +14,8 @@ from softdoc.planning.models import (
 )
 from softdoc.planning.prompt import (
     INITIAL_PLANNER_PROMPT_VERSION,
-    build_initial_planner_prompt,
+    build_initial_planner_system_prompt,
+    build_initial_planner_user_prompt,
 )
 
 
@@ -38,18 +39,21 @@ class InitialPlanner:
         if not stripped_question:
             raise ValueError("The Planner question must not be blank")
 
-        initial_prompt = build_initial_planner_prompt(
-            stripped_question,
+        system_prompt = build_initial_planner_system_prompt(
             max_subquestions=self._config.max_subquestions,
             max_depth=self._config.max_depth,
         )
-        prompt = initial_prompt
+        initial_user_prompt = build_initial_planner_user_prompt(stripped_question)
+        user_prompt = initial_user_prompt
         warnings: list[PlannerWarning] = []
         draft: PlannerDraft | None = None
         response = None
         last_error: PlannerOutputError | None = None
         for attempt in range(1, self._config.max_validation_attempts + 1):
-            response = self._backend.generate(prompt)
+            response = self._backend.generate(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+            )
             try:
                 draft = self._validate_response(response.content, stripped_question)
                 break
@@ -63,8 +67,8 @@ class InitialPlanner:
                         description=f"Attempt {attempt} was rejected: {exc}",
                     )
                 )
-                prompt = self._build_correction_prompt(
-                    initial_prompt,
+                user_prompt = self._build_correction_prompt(
+                    initial_user_prompt,
                     response.content,
                     str(exc),
                 )
@@ -109,12 +113,12 @@ class InitialPlanner:
 
     @staticmethod
     def _build_correction_prompt(
-        initial_prompt: str,
+        initial_user_prompt: str,
         rejected_content: str,
         error_message: str,
     ) -> str:
         return (
-            initial_prompt
+            initial_user_prompt
             + "\n\nYour previous response was rejected by the deterministic validator.\n"
             + f"Validation error: {error_message}\n"
             + "Correct the error and return the complete strict JSON object again.\n"
@@ -140,7 +144,8 @@ class InitialPlanner:
             cached_depth[subquestion_id] = value
             return value
 
-        actual_depth = max(depth(item) for item in by_id)
+        # The Root is the only node in a valid empty plan.
+        actual_depth = max((depth(item) for item in by_id), default=1)
         if actual_depth > self._config.max_depth:
             raise PlannerOutputError(
                 "Planner output exceeds the configured DAG depth: "

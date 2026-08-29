@@ -43,10 +43,15 @@ class PlannedSubQuestion(SoftDocModel):
 
 
 class PlannerDraft(SoftDocModel):
-    """Strict model-facing output before runtime trace is attached."""
+    """Strict model-facing output before runtime trace is attached.
+
+    An empty ``subquestions`` list is a valid plan without decomposition: the
+    original question itself becomes the first reading target.  The field remains
+    required so a missing plan is not confused with an intentional empty plan.
+    """
 
     original_question: str = Field(min_length=1)
-    subquestions: list[PlannedSubQuestion] = Field(min_length=1)
+    subquestions: list[PlannedSubQuestion]
 
     @field_validator("original_question")
     @classmethod
@@ -142,9 +147,11 @@ class PlannerConfig(SoftDocModel):
     """Runtime limits for the initial SubQuestion DAG.
 
     ``max_depth`` counts the original question as the implicit root at depth 1.
-    An independent SubQuestion is therefore at depth 2.
+    An empty plan therefore has depth 1, while an independent SubQuestion
+    is at depth 2.  Setting ``max_subquestions=0`` or ``max_depth=1`` forces a
+    empty plan and is useful for controlled ablations.
     """
 
-    max_subquestions: int = Field(default=6, ge=1)
-    max_depth: int = Field(default=4, ge=2)
+    max_subquestions: int = Field(default=6, ge=0)
+    max_depth: int = Field(default=4, ge=1)
     max_validation_attempts: int = Field(default=2, ge=1, le=3)

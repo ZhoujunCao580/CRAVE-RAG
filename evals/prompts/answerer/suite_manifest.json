@@ -1,0 +1,19 @@
+{
+  "suite_id": "answerer-dev-suite-v1",
+  "case_set_version": "answerer-cases-v1",
+  "prompt_version_under_test": "answerer-v0.7",
+  "case_count": 24,
+  "model_input_file": "model_inputs/answerer_cases_v1.jsonl",
+  "review_gold_file": "review_only/answerer_gold_v1.jsonl",
+  "split_counts": {
+    "contract_regression": 14,
+    "controlled_boundary": 9,
+    "defensive_boundary": 1
+  },
+  "evaluation_status": {
+    "all_questions_are_english": true,
+    "synthetic_cases_are_diagnostic_not_real_performance": true,
+    "real_checker_accepted_packets_still_required": true,
+    "new_unseen_real_holdout_required_before_promotion": true
+  }
+}

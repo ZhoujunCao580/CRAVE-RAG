@@ -1,0 +1,214 @@
+{
+  "$defs": {
+    "EvidenceAddition": {
+      "additionalProperties": false,
+      "description": "New Evidence content; the program assigns its stable evidence_id.",
+      "properties": {
+        "statement": {
+          "minLength": 1,
+          "title": "Statement",
+          "type": "string"
+        },
+        "observation_ids": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Observation Ids",
+          "type": "array"
+        },
+        "supports_question_ids": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Supports Question Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "statement",
+        "observation_ids",
+        "supports_question_ids"
+      ],
+      "title": "EvidenceAddition",
+      "type": "object"
+    },
+    "EvidenceRemoval": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence_id": {
+          "minLength": 1,
+          "title": "Evidence Id",
+          "type": "string"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "evidence_id",
+        "reason"
+      ],
+      "title": "EvidenceRemoval",
+      "type": "object"
+    },
+    "EvidenceReplacement": {
+      "additionalProperties": false,
+      "description": "Complete replacement content for one existing Evidence item.",
+      "properties": {
+        "statement": {
+          "minLength": 1,
+          "title": "Statement",
+          "type": "string"
+        },
+        "observation_ids": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Observation Ids",
+          "type": "array"
+        },
+        "supports_question_ids": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Supports Question Ids",
+          "type": "array"
+        },
+        "evidence_id": {
+          "minLength": 1,
+          "title": "Evidence Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "statement",
+        "observation_ids",
+        "supports_question_ids",
+        "evidence_id"
+      ],
+      "title": "EvidenceReplacement",
+      "type": "object"
+    },
+    "EvidenceStatus": {
+      "enum": [
+        "incomplete",
+        "ready"
+      ],
+      "title": "EvidenceStatus",
+      "type": "string"
+    },
+    "EvidenceUpdates": {
+      "additionalProperties": false,
+      "properties": {
+        "add": {
+          "items": {
+            "$ref": "#/$defs/EvidenceAddition"
+          },
+          "title": "Add",
+          "type": "array"
+        },
+        "replace": {
+          "items": {
+            "$ref": "#/$defs/EvidenceReplacement"
+          },
+          "title": "Replace",
+          "type": "array"
+        },
+        "remove": {
+          "items": {
+            "$ref": "#/$defs/EvidenceRemoval"
+          },
+          "title": "Remove",
+          "type": "array"
+        }
+      },
+      "title": "EvidenceUpdates",
+      "type": "object"
+    },
+    "ObservationAssessment": {
+      "additionalProperties": false,
+      "properties": {
+        "observation_id": {
+          "minLength": 1,
+          "title": "Observation Id",
+          "type": "string"
+        },
+        "used_for_evidence": {
+          "title": "Used For Evidence",
+          "type": "boolean"
+        },
+        "assessment": {
+          "minLength": 1,
+          "title": "Assessment",
+          "type": "string"
+        }
+      },
+      "required": [
+        "observation_id",
+        "used_for_evidence",
+        "assessment"
+      ],
+      "title": "ObservationAssessment",
+      "type": "object"
+    },
+    "QuestionStatus": {
+      "enum": [
+        "incomplete",
+        "satisfied"
+      ],
+      "title": "QuestionStatus",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Validated Checker delta; this is not another canonical store.",
+  "properties": {
+    "action_id": {
+      "minLength": 1,
+      "title": "Action Id",
+      "type": "string"
+    },
+    "observation_assessments": {
+      "items": {
+        "$ref": "#/$defs/ObservationAssessment"
+      },
+      "title": "Observation Assessments",
+      "type": "array"
+    },
+    "evidence_updates": {
+      "$ref": "#/$defs/EvidenceUpdates"
+    },
+    "current_target_status": {
+      "$ref": "#/$defs/QuestionStatus"
+    },
+    "root_status": {
+      "$ref": "#/$defs/EvidenceStatus"
+    },
+    "remaining_gap_description": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Remaining Gap Description"
+    }
+  },
+  "required": [
+    "action_id",
+    "current_target_status",
+    "root_status"
+  ],
+  "title": "EvidenceCheckResult",
+  "type": "object"
+}

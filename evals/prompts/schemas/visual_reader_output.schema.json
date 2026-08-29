@@ -1,0 +1,132 @@
+{
+  "$defs": {
+    "ObservationRegion": {
+      "additionalProperties": false,
+      "description": "Optional localization of an observation within one supplied image.",
+      "properties": {
+        "input_id": {
+          "minLength": 1,
+          "pattern": "^I[1-9][0-9]*$",
+          "title": "Input Id",
+          "type": "string"
+        },
+        "bbox": {
+          "anyOf": [
+            {
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "maximum": 1.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "maximum": 1.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "maximum": 1.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "maximum": 1.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bbox"
+        }
+      },
+      "required": [
+        "input_id"
+      ],
+      "title": "ObservationRegion",
+      "type": "object"
+    },
+    "VisualLimitation": {
+      "additionalProperties": false,
+      "description": "A specific reason why the requested observation is incomplete.",
+      "properties": {
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "input_ids": {
+          "items": {
+            "minLength": 1,
+            "pattern": "^I[1-9][0-9]*$",
+            "type": "string"
+          },
+          "title": "Input Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "description"
+      ],
+      "title": "VisualLimitation",
+      "type": "object"
+    },
+    "VisualObservation": {
+      "additionalProperties": false,
+      "description": "One concrete fact visibly supported by one or more supplied images.",
+      "properties": {
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/ObservationRegion"
+          },
+          "minItems": 1,
+          "title": "Sources",
+          "type": "array"
+        }
+      },
+      "required": [
+        "text",
+        "sources"
+      ],
+      "title": "VisualObservation",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Pure observation output; answers and navigation actions are forbidden.",
+  "properties": {
+    "observations": {
+      "items": {
+        "$ref": "#/$defs/VisualObservation"
+      },
+      "maxItems": 16,
+      "title": "Observations",
+      "type": "array"
+    },
+    "limitations": {
+      "items": {
+        "$ref": "#/$defs/VisualLimitation"
+      },
+      "title": "Limitations",
+      "type": "array"
+    }
+  },
+  "required": [
+    "observations",
+    "limitations"
+  ],
+  "title": "VisualReadResult",
+  "type": "object"
+}

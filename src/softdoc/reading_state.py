@@ -558,11 +558,15 @@ class EvidenceCheckInput(SoftDocModel):
     action_id: str = Field(min_length=1)
     root_question: RootQuestion
     evidence_memory: EvidenceMemory
-    observations: list[StoredObservation] = Field(min_length=1)
+    observations: list[StoredObservation] = Field(default_factory=list)
     limitations: list[ObservationLimitation] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_context(self) -> Self:
+        if not self.observations and not self.limitations:
+            raise ValueError(
+                "Checker input requires at least one Observation or limitation"
+            )
         if self.evidence_memory.root_question_id != self.root_question.question_id:
             raise ValueError("Checker Root question must match EvidenceMemory")
         observation_ids = [item.observation_id for item in self.observations]
@@ -631,7 +635,7 @@ class EvidenceCheckResult(SoftDocModel):
     """Validated Checker delta; this is not another canonical store."""
 
     action_id: str = Field(min_length=1)
-    observation_assessments: list[ObservationAssessment] = Field(min_length=1)
+    observation_assessments: list[ObservationAssessment] = Field(default_factory=list)
     evidence_updates: EvidenceUpdates = Field(default_factory=EvidenceUpdates)
     current_target_status: QuestionStatus
     root_status: EvidenceStatus

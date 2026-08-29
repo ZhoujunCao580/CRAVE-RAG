@@ -76,6 +76,33 @@ def test_builder_materializes_only_question_graph_and_evidence_statements():
     assert "root_status" not in dumped
 
 
+def test_builder_accepts_root_direct_evidence_with_an_empty_question_graph():
+    root = RootQuestion(question_id="root:direct", text="What is Figure 3 titled?")
+    memory = EvidenceMemory(
+        reading_session_id="reading:direct",
+        root_question_id=root.question_id,
+        root_status=EvidenceStatus.READY,
+        questions=[],
+        evidence=[
+            EvidenceItem(
+                evidence_id="evidence:direct",
+                statement="Figure 3 is titled System Architecture.",
+                observation_ids=["observation:direct"],
+                supports_question_ids=[root.question_id],
+            )
+        ],
+        current_target=None,
+    )
+
+    answer_input = AnswerInputBuilder().build(
+        root_question=root,
+        evidence_memory=memory,
+    )
+
+    assert answer_input.question_graph == []
+    assert answer_input.evidence[0].supports_question_ids == [root.question_id]
+
+
 def test_builder_rejects_incomplete_memory():
     memory = _ready_memory().model_copy(
         update={
@@ -125,14 +152,18 @@ def test_answer_result_accepts_multiple_calculation_inputs():
 
 
 def test_answerer_prompt_freezes_minimal_boundary():
-    assert ANSWERER_PROMPT_VERSION == "answerer-v0.3"
+    assert ANSWERER_PROMPT_VERSION == "answerer-v0.7"
     assert "question_graph only describes" in ANSWERER_SYSTEM_PROMPT
     assert "Use only the supplied Evidence statements" in ANSWERER_SYSTEM_PROMPT
     assert "directly supports every part" in ANSWERER_SYSTEM_PROMPT
     assert "mutually consistent" not in ANSWERER_SYSTEM_PROMPT
-    assert "conflicting" not in ANSWERER_SYSTEM_PROMPT
+    assert "missing or conflicting" in ANSWERER_SYSTEM_PROMPT
+    assert "does not by itself establish its cause" in ANSWERER_SYSTEM_PROMPT
     assert "Do not create citations or source locations" in ANSWERER_SYSTEM_PROMPT
     assert "including inputs to any calculation" in ANSWERER_SYSTEM_PROMPT
+    assert "every compared alternative needed to establish the result" in (
+        ANSWERER_SYSTEM_PROMPT
+    )
 
     prompt = answerer_user_prompt(_answer_input())
     output_shape = prompt.split("Return exactly this JSON shape:", 1)[1]

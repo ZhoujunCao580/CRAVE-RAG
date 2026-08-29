@@ -33,6 +33,7 @@ from softdoc.controller import (
     ControllerReadAdjacentPageAction,
     ControllerReadSourceAction,
     ControllerReadingLocation,
+    ControllerRelationEndpointPreview,
     ControllerRecentAction,
     ControllerSearchAction,
     ControllerSearchOperation,
@@ -40,6 +41,7 @@ from softdoc.controller import (
     ControllerStopAction,
     ControllerSubQuestion,
     ControllerVisibleSearchView,
+    build_controller_relation_endpoint_preview,
     validate_controller_action,
 )
 from softdoc.controller_prompt import (
@@ -256,6 +258,7 @@ __all__ = [
     "ControllerReadAdjacentPageAction",
     "ControllerReadSourceAction",
     "ControllerReadingLocation",
+    "ControllerRelationEndpointPreview",
     "ControllerRecentAction",
     "ControllerSearchAction",
     "ControllerSearchOperation",
@@ -263,6 +266,7 @@ __all__ = [
     "ControllerStopAction",
     "ControllerSubQuestion",
     "ControllerVisibleSearchView",
+    "build_controller_relation_endpoint_preview",
     "OllamaControllerBackend",
     "OllamaControllerConfig",
     "OllamaControllerError",

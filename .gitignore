@@ -21,6 +21,7 @@ htmlcov/
 data/raw/
 data/cache/
 data/processed/
+data/evaluation/
 models/
 *.safetensors
 *.pt

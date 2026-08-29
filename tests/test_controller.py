@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -17,6 +19,7 @@ from softdoc.controller import (
     ControllerReadAdjacentPageAction,
     ControllerReadSourceAction,
     ControllerReadingLocation,
+    ControllerRelationEndpointPreview,
     ControllerRecentAction,
     ControllerSearchAction,
     ControllerSearchOperation,
@@ -24,9 +27,17 @@ from softdoc.controller import (
     ControllerStopAction,
     ControllerSubQuestion,
     ControllerVisibleSearchView,
+    build_controller_relation_endpoint_preview,
     validate_controller_action,
 )
-from softdoc.models import ContentAvailability, ElementType, RelationType
+from softdoc.models import (
+    ContentAvailability,
+    Element,
+    ElementType,
+    Page,
+    Provenance,
+    RelationType,
+)
 from softdoc.reading_state import (
     ActionExecutionStatus,
     EvidenceStatus,
@@ -112,13 +123,108 @@ def _input(**changes: object) -> ControllerInput:
     return ControllerInput.model_validate(data)
 
 
+def _endpoint(
+    source_id: str,
+    *,
+    element_type: ElementType,
+    text: str,
+    page_id: str = "page:relation",
+    availability: ContentAvailability = ContentAvailability.TEXT_ONLY,
+) -> ControllerRelationEndpointPreview:
+    return ControllerRelationEndpointPreview(
+        source_id=source_id,
+        source_type=ReadingSourceType.ELEMENT,
+        page_id=page_id,
+        element_type=element_type,
+        label_or_snippet=text,
+        content_availability=availability,
+    )
+
+
 def test_controller_input_version_and_round_trip() -> None:
     value = _input()
-    assert CONTROLLER_INPUT_VERSION == "controller-input-v0.1"
+    assert CONTROLLER_INPUT_VERSION == "controller-input-v0.3"
     assert CONTROLLER_ACTION_VERSION == "controller-action-v0.2"
     restored = ControllerInput.model_validate_json(value.model_dump_json())
     assert restored == value
     assert restored.recent_actions[0].execution_status == "succeeded"
+
+
+def test_relation_endpoint_preview_is_deterministic_and_uses_table_content() -> None:
+    table = Element(
+        element_id="element:table:2",
+        document_id="doc:1",
+        page_id="page:2",
+        page_number=2,
+        element_type=ElementType.TABLE,
+        reading_order=3,
+        section_path=["Financial Results"],
+        reference_label="Table 2",
+        html=(
+            "<table><tr><th>Year</th><th>Revenue</th></tr>"
+            "<tr><td>2023</td><td>12 million</td></tr></table>"
+        ),
+        provenance=Provenance(
+            provenance_id="prov:table:2",
+            adapter="test",
+            source_path=Path("fixture.json"),
+            source_locator="table:2",
+        ),
+    )
+
+    first = build_controller_relation_endpoint_preview(table)
+    second = build_controller_relation_endpoint_preview(table)
+
+    assert first == second
+    assert first.source_id == table.element_id
+    assert first.element_type == ElementType.TABLE
+    assert first.section_path == ["Financial Results"]
+    assert first.label_or_snippet == "Table 2 — Year Revenue 2023 12 million"
+    assert len(first.label_or_snippet) <= 240
+
+
+def test_page_relation_endpoint_preview_keeps_page_handle_opaque() -> None:
+    page = Page(
+        page_id="page:opaque",
+        document_id="doc:1",
+        page_index=17,
+        page_number=18,
+        width=612,
+        height=792,
+        display_page_label="12",
+        page_label_aliases=["12"],
+        provenance=Provenance(
+            provenance_id="prov:page:opaque",
+            adapter="test",
+            source_path=Path("fixture.json"),
+            source_locator="page:18",
+        ),
+    )
+
+    preview = build_controller_relation_endpoint_preview(page)
+
+    assert preview.source_id == "page:opaque"
+    assert preview.page_id == "page:opaque"
+    assert preview.label_or_snippet == ""
+    assert preview.element_type is None
+    assert preview.content_availability is None
+
+
+def test_relation_view_requires_preview_of_the_opposite_endpoint() -> None:
+    with pytest.raises(ValidationError, match="opposite Relation endpoint"):
+        ControllerConfirmedRelation(
+            relation_id="relation:bad-preview",
+            relation_type=RelationType.CAPTION_OF,
+            source_id="element:caption:1",
+            target_id="element:figure:1",
+            current_endpoint_id="element:caption:1",
+            related_source_preview=_endpoint(
+                "element:another-figure",
+                element_type=ElementType.FIGURE,
+                text="Wrong endpoint",
+                availability=ContentAvailability.VISUAL_ONLY,
+            ),
+        )
 
 
 def test_ready_root_requires_null_gap() -> None:
@@ -150,6 +256,28 @@ def test_ready_root_requires_null_gap() -> None:
 def test_incomplete_root_requires_gap() -> None:
     with pytest.raises(ValidationError, match="incomplete Root requires"):
         _input(current_gap=None)
+
+
+def test_root_direct_controller_input_accepts_empty_subquestions_and_root_evidence() -> None:
+    value = _input(
+        subquestions=[],
+        evidence=[
+            ControllerEvidence(
+                evidence_id="evidence:root",
+                statement="Figure 3 is titled System Architecture.",
+                supports_question_ids=["root:1"],
+            )
+        ],
+        current_gap=ControllerGap(
+            question_id="root:1",
+            description="Verify the complete title of Figure 3.",
+        ),
+        recent_actions=[],
+    )
+
+    assert value.subquestions == []
+    assert value.current_gap.question_id == value.root_question.question_id
+    assert value.evidence[0].supports_question_ids == ["root:1"]
 
 
 def test_visible_search_view_must_reference_tab() -> None:
@@ -264,6 +392,13 @@ def test_confirmed_and_candidate_relations_use_different_actions() -> None:
                 relation_type=RelationType.CAPTION_OF,
                 source_id="element:caption:1",
                 target_id="element:figure:1",
+                current_endpoint_id="element:caption:1",
+                related_source_preview=_endpoint(
+                    "element:figure:1",
+                    element_type=ElementType.FIGURE,
+                    text="Figure 1. Low-light accuracy comparison.",
+                    availability=ContentAvailability.VISUAL_ONLY,
+                ),
             )
         ],
         candidate_relations=[
@@ -272,6 +407,13 @@ def test_confirmed_and_candidate_relations_use_different_actions() -> None:
                 relation_type=RelationType.CONTINUED_ON,
                 source_id="element:table:1",
                 target_id="element:table:2",
+                current_endpoint_id="element:table:1",
+                related_source_preview=_endpoint(
+                    "element:table:2",
+                    element_type=ElementType.TABLE,
+                    text="Continuation containing the final totals.",
+                    availability=ContentAvailability.STRUCTURED,
+                ),
                 confidence=0.8,
             )
         ],

@@ -1,0 +1,18 @@
+{
+  "suite_id": "visual-reader-dev-suite-v1",
+  "case_set_version": "visual-reader-cases-v1",
+  "prompt_version_under_test": "visual-reader-v0.4",
+  "case_count": 35,
+  "model_input_file": "model_inputs/visual_reader_cases_v1.jsonl",
+  "review_gold_file": "review_only/visual_reader_gold_v1.jsonl",
+  "split_counts": {
+    "real_dev_regression": 25,
+    "controlled_boundary": 10
+  },
+  "controlled_asset_directory": "assets/controlled",
+  "evaluation_status": {
+    "existing_25_have_prior_model_exposure": true,
+    "controlled_10_are_diagnostic_not_real_performance": true,
+    "new_unseen_real_holdout_required_before_promotion": true
+  }
+}

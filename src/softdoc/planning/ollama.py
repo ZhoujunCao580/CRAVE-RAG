@@ -93,10 +93,18 @@ class OllamaPlannerBackend:
     def backend_name(self) -> str:
         return "ollama"
 
-    def generate(self, prompt: str) -> PlannerBackendResponse:
+    def generate(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> PlannerBackendResponse:
         payload: dict[str, Any] = {
             "model": self._config.model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
             "stream": False,
             "think": self._config.think,
             "format": PlannerDraft.model_json_schema(),

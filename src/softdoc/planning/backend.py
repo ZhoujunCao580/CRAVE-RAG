@@ -13,4 +13,9 @@ class PlannerBackend(Protocol):
     @property
     def backend_name(self) -> str: ...
 
-    def generate(self, prompt: str) -> PlannerBackendResponse: ...
+    def generate(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> PlannerBackendResponse: ...

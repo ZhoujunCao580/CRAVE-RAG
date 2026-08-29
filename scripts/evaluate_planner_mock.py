@@ -27,6 +27,7 @@ class PlannerCase:
     max_nodes: int
     required_terms: tuple[str, ...] = ()
     require_dependency: bool = False
+    empty_plan: bool = False
 
 
 def cases() -> list[PlannerCase]:
@@ -35,9 +36,10 @@ def cases() -> list[PlannerCase]:
             "P01",
             "simple_fact",
             "What is the title of Figure 3?",
-            1,
-            1,
+            0,
+            0,
             ("figure 3", "title"),
+            empty_plan=True,
         ),
         PlannerCase(
             "P02",
@@ -68,17 +70,19 @@ def cases() -> list[PlannerCase]:
             "P05",
             "conservative_ambiguous",
             "Which approach is best in these situations, and why?",
-            1,
-            1,
+            0,
+            0,
             ("best",),
+            empty_plan=True,
         ),
         PlannerCase(
             "P06",
             "single_local_comparison",
             "According to Table 2, which method has the highest F1 score?",
-            1,
-            1,
+            0,
+            0,
             ("table 2", "highest", "f1"),
+            empty_plan=True,
         ),
     ]
 
@@ -90,7 +94,13 @@ def judge(case: PlannerCase, plan: Any) -> tuple[bool, list[str]]:
         problems.append(
             f"expected {case.min_nodes}..{case.max_nodes} nodes, got {count}"
         )
-    combined = " ".join(item.text.casefold() for item in plan.subquestions)
+    # An empty plan intentionally has no SubQuestion text. In that case,
+    # scope preservation is checked against the verbatim original question.
+    combined = (
+        plan.original_question.casefold()
+        if case.empty_plan
+        else " ".join(item.text.casefold() for item in plan.subquestions)
+    )
     for term in case.required_terms:
         if term.casefold() not in combined:
             problems.append(f"missing required scope term: {term}")
@@ -198,4 +208,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

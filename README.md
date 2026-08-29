@@ -37,7 +37,11 @@ The structure preserves page layout, element bounding boxes, reading order, visu
 
 The repository currently provides the SoftDoc representation, MinerU adaptation pipeline, deterministic document relations, spatial navigation, exact/sparse/dense retrieval, candidate previews, search sessions, frozen contracts for planning, reading, evidence checking, and answering, an executable stateful reading loop, and an Ollama-backed end-to-end runner with explicit incomplete termination.
 
-The next research stage is evaluating and improving the model-backed policies, materializing final source citations, and testing whether evidence-gap-driven reading improves answer quality and reading efficiency.
+The immediate research stage is prompt development on a small fixed case set,
+freezing TeacherTrajectory v0, and generating validated local Teacher traces
+before Controller SFT. Production policy evaluation, final source citation
+materialization, and full answer-quality and reading-efficiency experiments
+follow after that foundation is stable.
 
 ## Quick Start
 
@@ -84,7 +88,9 @@ Reader, Checker, and Answerer records alongside the complete reading state.
 
 ## Prompts and Evaluations
 
-All five model-facing prompts are discoverable through one versioned registry:
+Editable, versioned prompt text lives together under
+[`src/softdoc/prompts/`](src/softdoc/prompts/README.md). The registry remains
+the runtime discovery and hashing interface for all five model-facing prompts:
 
 ```bash
 softdoc prompts list

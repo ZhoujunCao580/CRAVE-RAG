@@ -1,0 +1,28 @@
+{
+  "suite_id": "controller-dev-suite-v1",
+  "case_set_version": "controller-cases-v1",
+  "prompt_version_under_test": "controller-policy-v0.7",
+  "case_count": 28,
+  "model_input_file": "model_inputs/controller_cases_v1.jsonl",
+  "review_gold_file": "review_only/controller_gold_v1.jsonl",
+  "split_counts": {
+    "contract_regression": 15,
+    "controlled_boundary": 5,
+    "historical_real_regression": 8
+  },
+  "excluded_inventory": [
+    {
+      "source": "tests/fixtures/controller_gold_5_diagnostics_v0.json",
+      "case": "Q14-exact-auto-read",
+      "reason": "Environment AUTO_READ_EXACT step; no ControllerInput"
+    }
+  ],
+  "design_notes": {
+    "stop_case_included": true,
+    "stop_case_condition": "Budget remains, but distinct searches are exhausted and no justified route remains.",
+    "zero_budget_case_included": false,
+    "zero_budget_reason": "Budget exhaustion terminates in the Environment and is not a Controller decision.",
+    "historical_real_cases_already_exposed_to_models": true,
+    "new_unseen_real_holdout_required_before_promotion": true
+  }
+}

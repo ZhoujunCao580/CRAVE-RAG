@@ -1,0 +1,20 @@
+{
+  "suite_id": "planner-dev-suite-v1",
+  "case_set_version": "planner-cases-v1",
+  "prompt_version_under_test": "planner-v0.20",
+  "case_count": 49,
+  "model_input_file": "model_inputs/planner_cases_v1.jsonl",
+  "review_gold_file": "review_only/planner_gold_v1.jsonl",
+  "historical_split_counts": {
+    "contract_regression": 8,
+    "synthetic_boundary": 14,
+    "real_supplemental_regression": 6,
+    "real_dev": 14,
+    "real_holdout": 7
+  },
+  "evaluation_status": {
+    "all_49_cases_have_already_been_exposed_to_a_model": true,
+    "historical_real_holdout_is_no_longer_unseen": true,
+    "new_unseen_holdout_required_before_promotion": true
+  }
+}

@@ -12,6 +12,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from softdoc.prompts import load_prompt_text
+
 
 NormalizedCoordinate = Annotated[float, Field(ge=0.0, le=1.0)]
 InputId = Annotated[str, Field(min_length=1, pattern=r"^I[1-9][0-9]*$")]
@@ -23,7 +25,7 @@ NormalizedRegion = tuple[
 ]
 
 
-VISUAL_READER_PROMPT_VERSION = "visual-reader-v0.1"
+VISUAL_READER_PROMPT_VERSION = "visual-reader-v0.4"
 
 
 class VisualInput(BaseModel):
@@ -150,80 +152,18 @@ def validate_visual_read_result(
     return result
 
 
-VISUAL_READER_SYSTEM_PROMPT = """You are a visual reader for long PDF documents.
-
-You receive:
-- one local reading problem;
-- one or more document images;
-- metadata identifying each image as I1, I2, and so on.
-
-The images are provided in the same order as visual_inputs.
-
-Your responsibility is to inspect the supplied images and record the concrete,
-reliable visual observations needed for the local reading problem.
-
-The local problem tells you what to inspect. It does not ask you to produce an
-answer field or a separate final response. Return observations and limitations
-only, even when the observations directly resolve the local problem. Express
-relevant visible facts only as Observation.text; do not restate them as an answer.
-
-Rules:
-
-1. Use only information visibly supported by the supplied images.
-
-2. If multiple images are supplied, use them jointly when the local problem
-   requires a visual relationship across those images. Do not ignore any supplied
-   image that is relevant to the local problem. Do not request additional images
-   yourself.
-
-3. Record each concrete fact as an Observation. Keep independently useful facts
-   separate. Use the smallest non-duplicative set of Observations needed for the
-   local problem, and never repeat an equivalent Observation.
-
-4. Every Observation must list the input sources that support it. If an
-   Observation compares, links, aligns, or
-   claims continuity or correspondence between multiple images, express that
-   relationship as one Observation whose sources include every image needed
-   to establish it. Do not
-   split one multi-image relationship into separate single-image Observations.
-   Do not require an irrelevant supplied image to appear in an Observation.
-
-5. A bbox is optional. If used, it must be an approximate normalized box
-   [x1, y1, x2, y2] relative to the corresponding supplied image, with values
-   between 0 and 1. Use null when reliable localization is not possible.
-
-6. If information needed by the local problem is too small, blurred, cropped,
-   occluded, missing, or otherwise unreadable, do not guess. Preserve any facts
-   that can still be observed reliably and describe the remaining uncertainty
-   in limitations.
-
-   Every limitation must contain a description and the local input_ids it
-   concerns. Do not return a bare string in the limitations list.
-
-7. Do not invent unreadable text, hidden content, missing values, or details
-   from images that were not supplied.
-
-8. Do not output answer, conclusion, supported_by_observation_ids, Evidence
-   sufficiency, navigation advice, Relation status, or Controller actions.
-
-9. The top-level JSON object must contain exactly these keys:
-   observations and limitations. Do not generate action IDs, Observation IDs,
-   Evidence IDs, or global source IDs; the program assigns them.
-
-10. Return valid JSON only, without Markdown or additional commentary.
-
-11. Return at most 16 Observations.
-"""
+VISUAL_READER_SYSTEM_PROMPT = load_prompt_text("visual_reader_v0_4.txt")
 
 
 def visual_reader_user_prompt(request: VisualReadRequest) -> str:
     """Render the deterministic user prompt for one read request."""
 
-    request_json = request.model_dump_json(indent=2)
+    request_json = request.model_dump_json(
+        indent=2,
+        exclude={"visual_inputs": {"__all__": {"bbox"}}},
+    )
     example_ids = [item.input_id for item in request.visual_inputs]
-    example_regions = [
-        {"input_id": input_id, "bbox": None} for input_id in example_ids
-    ]
+    example_regions = [{"input_id": input_id} for input_id in example_ids]
     output_shape = json.dumps(
         {
             "observations": [

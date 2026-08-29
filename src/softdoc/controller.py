@@ -15,7 +15,9 @@ from pydantic import Field, TypeAdapter, field_validator, model_validator
 
 from softdoc.models import (
     ContentAvailability,
+    Element,
     ElementType,
+    Page,
     RelationType,
     SoftDocModel,
 )
@@ -30,10 +32,13 @@ from softdoc.reading_state import (
     RootQuestion,
 )
 from softdoc.retrieval.models import AnchorTargetType, SearchBatch, SearchSession
+from softdoc.retrieval.units import html_to_text
 
 
-CONTROLLER_INPUT_VERSION = "controller-input-v0.1"
+CONTROLLER_INPUT_VERSION = "controller-input-v0.3"
 CONTROLLER_ACTION_VERSION = "controller-action-v0.2"
+
+_RELATION_ENDPOINT_PREVIEW_LIMIT = 240
 
 
 def _unique_nonblank(values: list[str], *, label: str) -> list[str]:
@@ -123,11 +128,63 @@ class ControllerRecentAction(SoftDocModel):
         return _unique_nonblank(value, label=label)
 
 
+class ControllerRelationEndpointPreview(SoftDocModel):
+    """Deterministic endpoint context used only to choose a reading route."""
+
+    source_id: str = Field(min_length=1)
+    source_type: ReadingSourceType
+    page_id: str = Field(min_length=1)
+    element_type: ElementType | None = None
+    section_path: list[str] = Field(default_factory=list)
+    label_or_snippet: str = Field(max_length=_RELATION_ENDPOINT_PREVIEW_LIMIT)
+    content_availability: ContentAvailability | None = None
+
+    @field_validator("section_path")
+    @classmethod
+    def validate_section_path(cls, value: list[str]) -> list[str]:
+        if any(not component.strip() for component in value):
+            raise ValueError("Relation endpoint section path must not contain blanks")
+        return value
+
+    @model_validator(mode="after")
+    def validate_source_shape(self) -> Self:
+        if self.source_type == ReadingSourceType.ELEMENT:
+            if self.element_type is None or self.content_availability is None:
+                raise ValueError(
+                    "Element endpoint previews require element type and content availability"
+                )
+        elif self.element_type is not None or self.content_availability is not None:
+            raise ValueError(
+                "Page endpoint previews must not contain Element-only fields"
+            )
+        return self
+
+
 class ControllerConfirmedRelation(SoftDocModel):
     relation_id: str = Field(min_length=1)
     relation_type: RelationType
     source_id: str = Field(min_length=1)
     target_id: str = Field(min_length=1)
+    current_endpoint_id: str = Field(min_length=1)
+    related_source_preview: ControllerRelationEndpointPreview
+
+    @model_validator(mode="after")
+    def validate_endpoint_orientation(self) -> Self:
+        endpoints = {self.source_id, self.target_id}
+        if len(endpoints) != 2:
+            raise ValueError("Controller Relation endpoints must be distinct")
+        if self.current_endpoint_id not in endpoints:
+            raise ValueError("current_endpoint_id must be a Relation endpoint")
+        expected_other = (
+            self.target_id
+            if self.current_endpoint_id == self.source_id
+            else self.source_id
+        )
+        if self.related_source_preview.source_id != expected_other:
+            raise ValueError(
+                "related_source_preview must describe the opposite Relation endpoint"
+            )
+        return self
 
 
 class ControllerCandidateRelation(ControllerConfirmedRelation):
@@ -452,6 +509,7 @@ class ControllerInputBuilder:
         observation_store: ObservationStore,
         action_trace: ActionTrace,
         relations: Iterable[Any] = (),
+        relation_sources: Iterable[Element | Page] = (),
         readable_source_ids: Iterable[str] | None = None,
         search_sessions: Iterable[SearchSession] = (),
         visible_search_batch: SearchBatch | None = None,
@@ -470,6 +528,13 @@ class ControllerInputBuilder:
             raise ValueError("Controller stores must belong to one reading session")
 
         sessions = list(search_sessions)
+        source_items = list(relation_sources)
+        sources_by_id = {
+            _relation_source_id(item): item
+            for item in source_items
+        }
+        if len(sources_by_id) != len(source_items):
+            raise ValueError("Controller relation source IDs must be unique")
         readable_ids = (
             set(readable_source_ids) if readable_source_ids is not None else None
         )
@@ -530,13 +595,19 @@ class ControllerInputBuilder:
             for relation in relations:
                 if focus.source_id not in {relation.source_id, relation.target_id}:
                     continue
-                other_endpoint = (
+                related_source_preview = (
                     relation.target_id
                     if relation.source_id == focus.source_id
                     else relation.source_id
                 )
-                if readable_ids is not None and other_endpoint not in readable_ids:
+                if readable_ids is not None and related_source_preview not in readable_ids:
                     continue
+                endpoint_source = sources_by_id.get(related_source_preview)
+                if endpoint_source is None:
+                    continue
+                endpoint_preview = build_controller_relation_endpoint_preview(
+                    endpoint_source
+                )
                 if relation.status.value == "confirmed":
                     confirmed.append(
                         ControllerConfirmedRelation(
@@ -544,6 +615,8 @@ class ControllerInputBuilder:
                             relation_type=relation.relation_type,
                             source_id=relation.source_id,
                             target_id=relation.target_id,
+                            current_endpoint_id=focus.source_id,
+                            related_source_preview=endpoint_preview,
                         )
                     )
                 elif relation.status.value == "candidate":
@@ -553,6 +626,8 @@ class ControllerInputBuilder:
                             relation_type=relation.relation_type,
                             source_id=relation.source_id,
                             target_id=relation.target_id,
+                            current_endpoint_id=focus.source_id,
+                            related_source_preview=endpoint_preview,
                             confidence=relation.confidence,
                         )
                     )
@@ -665,6 +740,59 @@ def _session_query(session: SearchSession, action_trace: ActionTrace) -> str:
     raise ValueError(
         f"SearchSession {session.search_session_id} has no query in ActionTrace"
     )
+
+
+def _relation_source_id(source: Element | Page) -> str:
+    return source.element_id if isinstance(source, Element) else source.page_id
+
+
+def build_controller_relation_endpoint_preview(
+    source: Element | Page,
+) -> ControllerRelationEndpointPreview:
+    if isinstance(source, Page):
+        return ControllerRelationEndpointPreview(
+            source_id=source.page_id,
+            source_type=ReadingSourceType.PAGE,
+            page_id=source.page_id,
+            # Page IDs remain opaque Controller handles. Do not reintroduce a
+            # physical or printed page number through a relation preview.
+            label_or_snippet="",
+        )
+
+    components: list[str] = []
+    for value in (
+        source.reference_label,
+        source.text,
+        html_to_text(source.html or ""),
+    ):
+        normalized = _normalize_preview_text(value or "")
+        if normalized and all(
+            normalized.casefold() != item.casefold() for item in components
+        ):
+            components.append(normalized)
+    return ControllerRelationEndpointPreview(
+        source_id=source.element_id,
+        source_type=ReadingSourceType.ELEMENT,
+        page_id=source.page_id,
+        element_type=source.element_type,
+        section_path=list(source.section_path or []),
+        label_or_snippet=_truncate_preview(" — ".join(components)),
+        content_availability=source.content_availability,
+    )
+
+
+def _normalize_preview_text(value: str) -> str:
+    return " ".join(value.split())
+
+
+def _truncate_preview(value: str) -> str:
+    if len(value) <= _RELATION_ENDPOINT_PREVIEW_LIMIT:
+        return value
+    shortened = value[: _RELATION_ENDPOINT_PREVIEW_LIMIT - 1].rstrip()
+    boundary = shortened.rfind(" ")
+    if boundary >= _RELATION_ENDPOINT_PREVIEW_LIMIT // 2:
+        shortened = shortened[:boundary]
+    return shortened.rstrip(" ,;:-") + "…"
 
 
 def validate_controller_action(

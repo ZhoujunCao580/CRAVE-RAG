@@ -8,7 +8,7 @@ from softdoc.answering import AnswerInput, AnswerResult
 from softdoc.controller import ControllerInput
 from softdoc.model_runner import ModelBackedRunner, write_model_pipeline_run
 from softdoc.models import Document, Element, ElementType, Page, Provenance
-from softdoc.planning.models import InitialPlan, PlannedSubQuestion, PlannerTrace
+from softdoc.planning.models import InitialPlan, PlannerTrace
 from softdoc.reading_environment import (
     DeterministicContentReader,
     ReadingEnvironmentConfig,
@@ -29,13 +29,7 @@ class FixedPlanner:
     def create_plan(self, question: str) -> InitialPlan:
         return InitialPlan(
             original_question=question,
-            subquestions=[
-                PlannedSubQuestion(
-                    subquestion_id="Q1",
-                    text=question,
-                    depends_on=[],
-                )
-            ],
+            subquestions=[],
             planner_trace=PlannerTrace(
                 backend_name="fake",
                 model="fake",
@@ -153,9 +147,15 @@ def test_model_runner_records_every_executed_stage_and_writes_artifacts(tmp_path
         document=_document(),
         asset_root=tmp_path,
         question="What was revenue in 2023?",
+        question_id="root:model-run",
     )
 
     assert run.reading_run.status == ReadingRunStatus.READY
+    assert run.plan.subquestions == []
+    assert run.reading_run.evidence_memory.questions == []
+    assert run.reading_run.evidence_memory.evidence[0].supports_question_ids == [
+        "root:model-run"
+    ]
     assert run.reading_run.answer is not None
     assert run.reading_run.answer.answer == "Revenue in 2023 was 12 million."
     assert [item.component for item in run.stage_calls] == [

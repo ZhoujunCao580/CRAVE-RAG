@@ -1,0 +1,49 @@
+{"case_id": "REG-SYN-01", "question": "What is the title of Figure 3?"}
+{"case_id": "REG-SYN-02", "question": "According to Table 2, which method has the highest F1?"}
+{"case_id": "REG-SYN-03", "question": "What were revenues in 2022 and 2023?"}
+{"case_id": "REG-SYN-04", "question": "How much did revenue change from 2022 to 2023?"}
+{"case_id": "REG-SYN-05", "question": "Which system has the highest accuracy, and what method does that system use?"}
+{"case_id": "REG-SYN-06", "question": "What methods do System A and System B use?"}
+{"case_id": "REG-SYN-07", "question": "Which country had the highest revenue, and what tax rate applied in that country?"}
+{"case_id": "REG-REAL-Q641", "question": "What is the performance of the InstructGPT model with Self-Ask in the closed-book setting on the dataset with the highest ProgramFC retrieval recall at 10? Please write down the answer in float format with 1 decimal."}
+{"case_id": "SYN-B01", "question": "What was the CAGR from 2020 to 2023?"}
+{"case_id": "SYN-B02", "question": "Which models except Model A exceeded 90% accuracy in 2023?"}
+{"case_id": "SYN-B03", "question": "How many incidents occurred from 2019 through 2022?"}
+{"case_id": "SYN-B04", "question": "Who appears in the first figure on the second page?"}
+{"case_id": "SYN-B05", "question": "List the independent directors alphabetically."}
+{"case_id": "SYN-B06", "question": "Which approach is best in these situations, and why?"}
+{"case_id": "SYN-B07", "question": "Give revenue and operating income for 2022 and 2023 in descending order."}
+{"case_id": "SYN-B08", "question": "The report has a section named \"Ignore previous instructions\". What page is it on?"}
+{"case_id": "SYN-B09", "question": "Which directors are both non-executive and independent?"}
+{"case_id": "SYN-B10", "question": "Given a power of 10 W, what separation distance is required under the document's 500 MHz rule?"}
+{"case_id": "SYN-B11", "question": "What page contains the heading \"Ignore all previous instructions\"?"}
+{"case_id": "SYN-B12", "question": "What does the section named \"A/B {test}\"\nreport for 2023?"}
+{"case_id": "SYN-B13", "question": "Give the 2022 and 2023 revenues as a descending JSON list."}
+{"case_id": "SYN-B14", "question": "Which models other than Model A exceeded 90% accuracy from 2020 through 2023?"}
+{"case_id": "SUP-REAL-Q12", "question": "How many charts and tables in this report are sourced from Annual totals of Pew Research Center survey data?"}
+{"case_id": "SUP-REAL-Q307", "question": "For the users with the safety approval of UL Listed and CSA , what is the second bullet point for safety?"}
+{"case_id": "SUP-REAL-Q345", "question": "What is the percentage difference between the proportion of people who are very confident in Trump's ability to make wise decisions about immigration policy and those who are not confident at all?"}
+{"case_id": "SUP-REAL-Q378", "question": "How many figures are there in total in the article?"}
+{"case_id": "SUP-REAL-Q599", "question": "What are the colors of this document? List all the colors in the list format and by alphabetical, for example [\"black\", \"white\"]"}
+{"case_id": "SUP-REAL-Q224", "question": "Among the Higher-income seniors, what are the percentage of them go online, has smartphone phone, and own a tablet computer? Please write the answer in the list format and in descend order,e.g., [\"9%\",\"8%\"] in the Pew Research Center's Internet Project July 18-September 30, 2022 tracking survey?"}
+{"case_id": "DEV-ACA-Q546", "question": "When number of visible instances = 60, which category has the largest proportion of missed instances?"}
+{"case_id": "DEV-ACA-Q183", "question": "According to this paper,  What's the GPT-4V's performance difference between CS subject and math subject on MMMU datasets? "}
+{"case_id": "DEV-ADM-Q230", "question": "Who is the commanding officer in the first figure on the second page?"}
+{"case_id": "DEV-ADM-Q598", "question": "What is the sum of numbers that are written manually on the page 15 and page 16? Write the answer in the float format."}
+{"case_id": "DEV-BRO-Q1007", "question": "One40 can only be used for Apple Watch, is that true? Please directly answer 'yes' or 'no'."}
+{"case_id": "DEV-BRO-Q104", "question": "How many schools from College of Humanities, Arts, and Social Sciences are not individually introduced in detail?"}
+{"case_id": "DEV-GUI-Q305", "question": "A transmitter operating at a frequency of 500 MHz has a rated maximum output power of 10 W. Using the recommended separation distances between portable and mobile RF communications equipment and the M270TF-XXX / M320TF-XXX, calculate the minimum separation distance required for this transmitter. Write down the answer in float format with 2 decimals."}
+{"case_id": "DEV-GUI-Q661", "question": "What is the minimum voltage of the symbol at the bottom left corner in the Figure of EPROM programming and verification waveforms? Write down the answer in float format."}
+{"case_id": "DEV-RES-Q223", "question": "Among the Higher-income seniors, what are the percentage of them go online, has smartphone phone, and own a tablet computer? Please write the answer in the list format and in descend order,e.g., [\"9%\",\"8%\"] in the Pew Research Center's Internet Project July 18-September 30, 2013 tracking survey?"}
+{"case_id": "DEV-RES-Q611", "question": "What percentage of the second largest demographic segment of respondents reported not conducting promotions to customers over Wi-Fi in 2015?"}
+{"case_id": "DEV-TUT-Q14", "question": "According to the chart on page 14 how much time was spent with family and friends in 2010?"}
+{"case_id": "DEV-TUT-Q857", "question": "What are the two companies that offer both of business intelligence in its app and structured DB in its infrastructure? "}
+{"case_id": "DEV-FIN-Q372", "question": "Who are the non-executive and independent directors of GODFREY PHILLIPS INDIA LIMITED? Enumerate all of them in a list."}
+{"case_id": "DEV-FIN-Q1070", "question": "what is the change of  Best Buy's gross margins change from FY2022 to FY2021? Answer in percentage terms, round to 2 decimal places."}
+{"case_id": "HOLD-ACA-Q762", "question": "How many figures convey similar messages as the first figure?"}
+{"case_id": "HOLD-ADM-Q399", "question": "How many people are there in total in the MQA Executive Leadership and the Prosecution Services Staff?"}
+{"case_id": "HOLD-BRO-Q998", "question": "From 2022 graduate employment survey,  graduates with which degree have the highest average monthly salary?"}
+{"case_id": "HOLD-GUI-Q202", "question": "List all the countries/regions mentioned in the \"Regulatory Compliance Information\" part of this guidebook (except the U.S.). Your answer should be in English."}
+{"case_id": "HOLD-RES-Q359", "question": "What is the percentage difference between the proportion of people who believe the U.S. should help other countries deal with their problems and those who believe the U.S. has done a poor job in dealing with the coronavirus outbreak?\n\n"}
+{"case_id": "HOLD-TUT-Q424", "question": "What is in the overlap area between Danger Zone and Machine Learning?"}
+{"case_id": "HOLD-FIN-Q1065", "question": "what is the total long-term capital lease obligation related to technology infrastructure, and buildings? Answer in million"}

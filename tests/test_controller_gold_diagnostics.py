@@ -13,6 +13,10 @@ def test_fixed_controller_diagnostics_are_valid_and_complete() -> None:
     payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
 
     assert payload["diagnostic_version"] == "controller-gold-5-v0.1"
+    # These are intentional provenance for the historical model run, not the
+    # current canonical Controller versions.
+    assert payload["controller_action_version"] == "controller-action-v0.1"
+    assert payload["controller_prompt_version"] == "controller-policy-v0.2"
     assert [case["question_index"] for case in payload["cases"]] == [
         14,
         230,

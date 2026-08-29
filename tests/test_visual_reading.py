@@ -9,6 +9,7 @@ from softdoc.visual_reading import (
     VisualReadRequest,
     VisualReadResult,
     VISUAL_READER_SYSTEM_PROMPT,
+    VISUAL_READER_PROMPT_VERSION,
     validate_visual_read_result,
     visual_reader_user_prompt,
 )
@@ -111,10 +112,13 @@ def test_limitation_is_free_text_grounded_to_inputs_without_code_taxonomy():
 def test_visual_reader_prompt_forbids_answer_and_global_ids():
     prompt = visual_reader_user_prompt(_request())
 
+    assert VISUAL_READER_PROMPT_VERSION == "visual-reader-v0.4"
     assert '"observations"' in prompt
     assert "Do not\nadd an answer or conclusion field" in prompt
     assert '"action_id"' not in prompt.split("return exactly this JSON shape:", 1)[1]
     assert "Do not generate action IDs" in VISUAL_READER_SYSTEM_PROMPT
+    assert "bbox" not in prompt
+    assert "bbox" not in VISUAL_READER_SYSTEM_PROMPT
 
 
 def test_visual_reader_prompt_shows_joint_shape_for_multiple_images():

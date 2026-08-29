@@ -307,7 +307,14 @@ def test_exact_visual_limitation_then_confirmed_relation_recovers(tmp_path: Path
     ]
     first_feedback = result.action_trace.entries[0].metadata["controller_feedback"]
     assert "visual Reader is required" in first_feedback["limitations"][0]["description"]
-    assert controller.inputs[0].confirmed_relations[0].relation_id == "rel:caption"
+    relation_view = controller.inputs[0].confirmed_relations[0]
+    assert relation_view.relation_id == "rel:caption"
+    assert relation_view.current_endpoint_id == "figure:1"
+    assert relation_view.related_source_preview.source_id == "caption:1"
+    assert relation_view.related_source_preview.element_type == ElementType.CAPTION
+    assert "low-light accuracy comparison" in (
+        relation_view.related_source_preview.label_or_snippet
+    )
     assert result.evidence_memory.evidence[0].observation_ids == [
         result.observation_store.observations[0].observation_id
     ]
@@ -684,6 +691,45 @@ def test_validated_initial_plan_maps_into_runtime_question_order(tmp_path: Path)
     assert result.answer is not None
 
 
+def test_root_direct_initial_plan_runs_without_a_synthetic_subquestion(
+    tmp_path: Path,
+) -> None:
+    document = _document(tmp_path, page_element_specs=[[]])
+    plan = InitialPlan(
+        original_question="What revenue is reported on Page 1?",
+        subquestions=[],
+        planner_trace=PlannerTrace(
+            backend_name="teacher",
+            model="scripted",
+            prompt_version="planner-v0.20",
+        ),
+    )
+    checker = PredicateChecker(lambda text: "12 million" in text)
+
+    result = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=RejectingController(),
+        reader=PageTeacherReader({"page:1": "Revenue was 12 million."}),
+        checker=checker,
+        answerer=EvidenceAnswerer(),
+    ).run_with_plan(
+        root_question_id="root:direct-plan",
+        plan=plan,
+        run_key="empty-plan",
+    )
+
+    assert result.status == ReadingRunStatus.READY
+    assert result.evidence_memory.questions == []
+    assert checker.inputs[0].evidence_memory.current_target.question_id == (
+        "root:direct-plan"
+    )
+    assert result.evidence_memory.evidence[0].supports_question_ids == [
+        "root:direct-plan"
+    ]
+    assert result.answer is not None
+
+
 def test_controller_can_stop_cleanly_with_incomplete_evidence(tmp_path: Path) -> None:
     document = _document(tmp_path, page_element_specs=[[]])
     controller = QueueController(
@@ -715,7 +761,7 @@ def test_controller_can_stop_cleanly_with_incomplete_evidence(tmp_path: Path) ->
     assert result.diagnostics[-1].code == "controller_stopped_incomplete"
 
 
-def test_controller_hides_relations_with_unreadable_other_endpoint(
+def test_controller_hides_relations_with_unreadable_related_source_preview(
     tmp_path: Path,
 ) -> None:
     relation = _relation(

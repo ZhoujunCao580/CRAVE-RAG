@@ -68,7 +68,7 @@ PROMPT_REGISTRY: dict[PromptComponent, PromptSpec] = {
     PromptComponent.PLANNER: PromptSpec(
         component=PromptComponent.PLANNER,
         version=INITIAL_PLANNER_PROMPT_VERSION,
-        prompt_kind="dynamic_user_prompt",
+        prompt_kind="system_and_user_prompt",
         source_module="softdoc.planning.prompt",
         canonical_text=build_initial_planner_prompt(_PLANNER_SENTINEL),
         renderer=build_initial_planner_prompt,

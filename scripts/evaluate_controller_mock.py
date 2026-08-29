@@ -28,6 +28,7 @@ from softdoc.controller import (
     ControllerLimitation,
     ControllerObservationAssessment,
     ControllerReadingLocation,
+    ControllerRelationEndpointPreview,
     ControllerRecentAction,
     ControllerSearchTab,
     ControllerSubQuestion,
@@ -79,6 +80,25 @@ def preview(
         page_id=page_id,
         section_path=["Relevant section"],
         matched_snippet=text,
+        content_availability=availability,
+    )
+
+
+def relation_endpoint(
+    source_id: str,
+    text: str,
+    *,
+    element_type: ElementType,
+    page_id: str,
+    availability: ContentAvailability,
+) -> ControllerRelationEndpointPreview:
+    return ControllerRelationEndpointPreview(
+        source_id=source_id,
+        source_type=ReadingSourceType.ELEMENT,
+        page_id=page_id,
+        element_type=element_type,
+        section_path=["Relevant section"],
+        label_or_snippet=text,
         content_availability=availability,
     )
 
@@ -227,7 +247,7 @@ def build_cases() -> list[ControllerCase]:
                 "Which method has the highest low-light accuracy in Figure 3?",
                 "The method with the highest low-light accuracy is unknown.",
                 locations=[location_caption],
-                confirmed=[ControllerConfirmedRelation(relation_id="relation:caption-chart", relation_type=RelationType.CAPTION_OF, source_id="element:caption-a", target_id="element:chart-a")],
+                confirmed=[ControllerConfirmedRelation(relation_id="relation:caption-chart", relation_type=RelationType.CAPTION_OF, source_id="element:caption-a", target_id="element:chart-a", current_endpoint_id="element:caption-a", related_source_preview=relation_endpoint("element:chart-a", "Figure 3. Low-light accuracy by method.", element_type=ElementType.CHART, page_id="page:opaque-b", availability=ContentAvailability.VISUAL_ONLY))],
             ),
             {"action": "FOLLOW_RELATION", "relation_id": "relation:caption-chart"},
         )
@@ -248,7 +268,7 @@ def build_cases() -> list[ControllerCase]:
                 "What is the total shown in the final row of the table?",
                 "The final rows and total are not present in the opened table fragment.",
                 locations=[location_table],
-                candidates=[ControllerCandidateRelation(relation_id="relation:possible-continuation", relation_type=RelationType.CONTINUED_ON, source_id="element:table-front", target_id="element:table-back", confidence=0.84)],
+                candidates=[ControllerCandidateRelation(relation_id="relation:possible-continuation", relation_type=RelationType.CONTINUED_ON, source_id="element:table-front", target_id="element:table-back", current_endpoint_id="element:table-front", related_source_preview=relation_endpoint("element:table-back", "Possible continuation containing the table's final rows and total.", element_type=ElementType.TABLE, page_id="page:opaque-next", availability=ContentAvailability.STRUCTURED), confidence=0.84)],
             ),
             {"action": "EXPLORE_CANDIDATE_RELATION", "relation_id": "relation:possible-continuation"},
         )
@@ -331,7 +351,7 @@ def build_cases() -> list[ControllerCase]:
                 "The finding about Method C is still unknown because chart labels were unreadable.",
                 locations=[ControllerReadingLocation(source_id="element:chart-small", source_type=ReadingSourceType.ELEMENT, page_id="page:opaque-f")],
                 recent_actions=[ControllerRecentAction(action_id="action:small-chart", question_id="root:K09", action_name="READ_SOURCE", target_ids=["element:chart-small"], execution_status=ActionExecutionStatus.DEGRADED, feedback=ControllerActionFeedback(limitations=[ControllerLimitation(description="Chart labels are too small to read reliably.", source_ids=["element:chart-small"])]))],
-                confirmed=[ControllerConfirmedRelation(relation_id="relation:chart-caption", relation_type=RelationType.CAPTION_OF, source_id="element:caption-detail", target_id="element:chart-small")],
+                confirmed=[ControllerConfirmedRelation(relation_id="relation:chart-caption", relation_type=RelationType.CAPTION_OF, source_id="element:caption-detail", target_id="element:chart-small", current_endpoint_id="element:chart-small", related_source_preview=relation_endpoint("element:caption-detail", "Figure 8 reports Method C accuracy under the evaluated conditions.", element_type=ElementType.CAPTION, page_id="page:opaque-f", availability=ContentAvailability.TEXT_ONLY))],
             ),
             {"action": "FOLLOW_RELATION", "relation_id": "relation:chart-caption"},
         )
@@ -386,7 +406,7 @@ def build_cases() -> list[ControllerCase]:
                 "What value is shown for the referenced Figure 5 condition?",
                 "The value in the referenced Figure 5 is unknown.",
                 locations=[ControllerReadingLocation(source_id="element:reference-sentence", source_type=ReadingSourceType.ELEMENT, page_id="page:opaque-g")],
-                confirmed=[ControllerConfirmedRelation(relation_id="relation:explicit-figure", relation_type=RelationType.REFERS_TO, source_id="element:reference-sentence", target_id="element:figure-five")],
+                confirmed=[ControllerConfirmedRelation(relation_id="relation:explicit-figure", relation_type=RelationType.REFERS_TO, source_id="element:reference-sentence", target_id="element:figure-five", current_endpoint_id="element:reference-sentence", related_source_preview=relation_endpoint("element:figure-five", "Figure 5. Performance under the referenced condition.", element_type=ElementType.FIGURE, page_id="page:opaque-g2", availability=ContentAvailability.VISUAL_ONLY))],
                 tabs=[ControllerSearchTab(search_session_id="search:noise", query="Figure 5 condition value", has_more=True)],
                 visible_session_id="search:noise",
                 previews=[preview("element:bibliography-five", "Reference number 5 discusses experimental conditions.")],
@@ -405,7 +425,7 @@ def build_cases() -> list[ControllerCase]:
                 "What is the warranty period?",
                 "The warranty period is unknown.",
                 locations=[ControllerReadingLocation(source_id="element:old-section", source_type=ReadingSourceType.ELEMENT, page_id="page:opaque-h")],
-                candidates=[ControllerCandidateRelation(relation_id="relation:weak", relation_type=RelationType.CONTINUED_ON, source_id="element:old-section", target_id="element:possible-next", confidence=0.31)],
+                candidates=[ControllerCandidateRelation(relation_id="relation:weak", relation_type=RelationType.CONTINUED_ON, source_id="element:old-section", target_id="element:possible-next", current_endpoint_id="element:old-section", related_source_preview=relation_endpoint("element:possible-next", "Possible continuation of the preceding section.", element_type=ElementType.PARAGRAPH, page_id="page:opaque-h2", availability=ContentAvailability.TEXT_ONLY), confidence=0.31)],
                 tabs=[ControllerSearchTab(search_session_id="search:warranty", query="warranty period", has_more=False)],
                 visible_session_id="search:warranty",
                 previews=[preview("element:warranty", "The limited warranty period is two years from purchase.")],
@@ -451,6 +471,263 @@ def build_cases() -> list[ControllerCase]:
         )
     )
 
+    cases.append(
+        ControllerCase(
+            "K16",
+            "irrelevant_confirmed_relation",
+            "A confirmed Relation is visible, but explicit preview context shows that its other endpoint is unrelated to the current gap.",
+            make_input(
+                "K16",
+                "What was Northwind's revenue in 2023?",
+                "Northwind's 2023 revenue is unknown.",
+                locations=[
+                    ControllerReadingLocation(
+                        source_id="element:methods-caption",
+                        source_type=ReadingSourceType.ELEMENT,
+                        page_id="page:opaque-i",
+                    )
+                ],
+                confirmed=[
+                    ControllerConfirmedRelation(
+                        relation_id="relation:methods-caption-figure",
+                        relation_type=RelationType.CAPTION_OF,
+                        source_id="element:methods-caption",
+                        target_id="element:methods-figure",
+                        current_endpoint_id="element:methods-caption",
+                        related_source_preview=relation_endpoint(
+                            "element:methods-figure",
+                            "Figure 2. Overview of the training methodology.",
+                            element_type=ElementType.FIGURE,
+                            page_id="page:opaque-i",
+                            availability=ContentAvailability.VISUAL_ONLY,
+                        ),
+                    )
+                ],
+                tabs=[
+                    ControllerSearchTab(
+                        search_session_id="search:revenue-2023",
+                        query="Northwind revenue 2023",
+                        has_more=False,
+                    )
+                ],
+                visible_session_id="search:revenue-2023",
+                previews=[
+                    preview(
+                        "element:methods-figure",
+                        "Figure 2: Overview of the training methodology.",
+                        element_type=ElementType.FIGURE,
+                        availability=ContentAvailability.VISUAL_ONLY,
+                    ),
+                    preview(
+                        "element:revenue-table",
+                        "Consolidated revenue for 2022 and 2023.",
+                        element_type=ElementType.TABLE,
+                        availability=ContentAvailability.STRUCTURED,
+                    ),
+                ],
+            ),
+            {"action": "READ_SOURCE", "source_ids": ["element:revenue-table"]},
+        )
+    )
+
+    cases.append(
+        ControllerCase(
+            "K17",
+            "avoid_exact_repeat",
+            "The previous read of the same small chart failed, while a readable table offers a different route to the same fact.",
+            make_input(
+                "K17",
+                "What was Method C's accuracy?",
+                "Method C's accuracy is still unknown because the chart labels were unreadable.",
+                recent_actions=[
+                    ControllerRecentAction(
+                        action_id="action:failed-chart",
+                        question_id="root:K17",
+                        action_name="READ_SOURCE",
+                        target_ids=["element:chart-small"],
+                        execution_status=ActionExecutionStatus.DEGRADED,
+                        feedback=ControllerActionFeedback(
+                            limitations=[
+                                ControllerLimitation(
+                                    description="The chart labels are too small to read reliably.",
+                                    source_ids=["element:chart-small"],
+                                )
+                            ]
+                        ),
+                    )
+                ],
+                tabs=[
+                    ControllerSearchTab(
+                        search_session_id="search:method-c",
+                        query="Method C accuracy",
+                        has_more=False,
+                    )
+                ],
+                visible_session_id="search:method-c",
+                previews=[
+                    preview(
+                        "element:chart-small",
+                        "Small chart comparing method accuracy.",
+                        element_type=ElementType.CHART,
+                        availability=ContentAvailability.VISUAL_ONLY,
+                    ),
+                    preview(
+                        "element:accuracy-table",
+                        "Accessible table listing Method C accuracy.",
+                        element_type=ElementType.TABLE,
+                        availability=ContentAvailability.STRUCTURED,
+                    ),
+                ],
+            ),
+            {"action": "READ_SOURCE", "source_ids": ["element:accuracy-table"]},
+        )
+    )
+
+    cases.append(
+        ControllerCase(
+            "K18",
+            "targeted_reread_after_feedback",
+            "Checker feedback identifies the wrong year as a recoverable reading error, so the same table may be reread with a corrected local target.",
+            make_input(
+                "K18",
+                "What was revenue in 2023?",
+                "The 2023 revenue is still missing; the previous read returned the 2022 value.",
+                recent_actions=[
+                    ControllerRecentAction(
+                        action_id="action:wrong-year",
+                        question_id="root:K18",
+                        action_name="READ_SOURCE",
+                        target_ids=["element:multi-year-table"],
+                        execution_status=ActionExecutionStatus.SUCCEEDED,
+                        observation_ids=["observation:2022"],
+                        feedback=ControllerActionFeedback(
+                            observation_assessments=[
+                                ControllerObservationAssessment(
+                                    observation_id="observation:2022",
+                                    used_for_evidence=False,
+                                    assessment="The observation reports 2022 revenue, but the current gap requires the 2023 row from the same table.",
+                                )
+                            ]
+                        ),
+                    )
+                ],
+                tabs=[
+                    ControllerSearchTab(
+                        search_session_id="search:multi-year-revenue",
+                        query="revenue 2022 2023",
+                        has_more=False,
+                    )
+                ],
+                visible_session_id="search:multi-year-revenue",
+                previews=[
+                    preview(
+                        "element:multi-year-table",
+                        "Revenue table with separate rows for 2022 and 2023.",
+                        element_type=ElementType.TABLE,
+                        availability=ContentAvailability.STRUCTURED,
+                    )
+                ],
+            ),
+            {
+                "action": "READ_SOURCE",
+                "source_ids": ["element:multi-year-table"],
+                "local_problem_contains": ["2023", "revenue"],
+            },
+        )
+    )
+
+    cases.append(
+        ControllerCase(
+            "K19",
+            "decomposed_current_gap",
+            "A completed SubQuestion and its matching preview must not distract from the currently incomplete dependent SubQuestion.",
+            make_input(
+                "K19",
+                "How much did revenue increase from 2022 to 2023?",
+                "The 2023 revenue is still unknown.",
+                subquestions=[
+                    ControllerSubQuestion(
+                        question_id="Q1",
+                        text="What was revenue in 2022?",
+                        depends_on=[],
+                        status=QuestionStatus.SATISFIED,
+                    ),
+                    ControllerSubQuestion(
+                        question_id="Q2",
+                        text="What was revenue in 2023?",
+                        depends_on=["Q1"],
+                        status=QuestionStatus.INCOMPLETE,
+                    ),
+                ],
+                evidence=[
+                    ControllerEvidence(
+                        evidence_id="evidence:2022",
+                        statement="Revenue in 2022 was $10 million.",
+                        supports_question_ids=["Q1"],
+                    )
+                ],
+                tabs=[
+                    ControllerSearchTab(
+                        search_session_id="search:revenue-years",
+                        query="revenue 2022 2023",
+                        has_more=False,
+                    )
+                ],
+                visible_session_id="search:revenue-years",
+                previews=[
+                    preview("element:revenue-2022", "Revenue in 2022 was $10 million."),
+                    preview("element:revenue-2023", "Revenue in 2023 is reported in the annual table."),
+                ],
+            ),
+            {"action": "READ_SOURCE", "source_ids": ["element:revenue-2023"]},
+        )
+    )
+
+    cases.append(
+        ControllerCase(
+            "K20",
+            "stop_no_justified_route",
+            "Multiple distinct searches are exhausted and no preview, Relation, or opened location offers a justified reading route, even though budget remains.",
+            make_input(
+                "K20",
+                "What color was the prototype casing?",
+                "No document-grounded casing color was found after distinct searches were exhausted.",
+                recent_actions=[
+                    ControllerRecentAction(
+                        action_id="action:search-color",
+                        question_id="root:K20",
+                        action_name="SEARCH",
+                        target_ids=["search:prototype-color"],
+                        execution_status=ActionExecutionStatus.SUCCEEDED,
+                    ),
+                    ControllerRecentAction(
+                        action_id="action:search-finish",
+                        question_id="root:K20",
+                        action_name="SEARCH",
+                        target_ids=["search:prototype-finish"],
+                        execution_status=ActionExecutionStatus.SUCCEEDED,
+                    ),
+                ],
+                tabs=[
+                    ControllerSearchTab(
+                        search_session_id="search:prototype-color",
+                        query="prototype casing color",
+                        has_more=False,
+                    ),
+                    ControllerSearchTab(
+                        search_session_id="search:prototype-finish",
+                        query="prototype enclosure finish",
+                        has_more=False,
+                    ),
+                ],
+                visible_session_id="search:prototype-finish",
+                previews=[],
+                budget=2,
+            ),
+            {"action": "STOP"},
+        )
+    )
+
     return cases
 
 
@@ -462,6 +739,12 @@ def matches_expected(actual: dict[str, Any], expected: dict[str, Any]) -> bool:
     for key, expected_value in expected.items():
         if key == "source_ids_set":
             if set(actual.get("source_ids", [])) != set(expected_value):
+                return False
+        elif key == "local_problem_contains":
+            local_problem = str(actual.get("local_problem", "")).casefold()
+            if not all(
+                str(term).casefold() in local_problem for term in expected_value
+            ):
                 return False
         elif actual.get(key) != expected_value:
             return False

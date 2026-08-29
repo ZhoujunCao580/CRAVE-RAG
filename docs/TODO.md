@@ -62,16 +62,10 @@
 
 ## 6. Observation、Evidence Checker 与 Recall
 
-- [ ] 在服务器模型上重新评估 Checker。当前本地 `qwen3:8b` 只证明循环与 Schema
-  可执行，不是质量结论。
-- [ ] 报告 Schema 合法率、delta 应用率、false-ready、冲突处理、两轮循环成功率，
-  并至少对比一个更强模型。
-- [ ] 覆盖这些 failure cases：无 Observation 只有 limitation；部分有用；无关、
-  重复或范围不符；错误 Observation；新旧 Evidence 冲突；多 Evidence 联合才充分；
-  路线或预算耗尽但 Root 仍 incomplete。
-- [ ] `incomplete` 漏写 `remaining_gap_description` 或违反
-  `used_for_evidence`/delta 约束时，最多做一次携带明确 Pydantic 错误的定向重试，
-  不继续加长主 Prompt。
+- [ ] 决定混合 Observation 的持久化边界（回归案例 C23）：当一个 Observation
+  同时包含可靠局部事实和“当前来源不足以证明因果”时，评估是否将可靠子事实提升为
+  Evidence，并只把因果不足保留在 limitation/current gap。v0 尚无 Observation
+  Recall，不能让有用事实静默丢失。
 - [ ] 评估 Observation Recall：当后续问题可能复用旧但未采纳 Observation 时，
   比较重新读取与从 ObservationStore 召回再交 Checker；只有减少成本且不增加错误
   才实现 Recall。

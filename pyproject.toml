@@ -41,6 +41,14 @@ softdoc = "softdoc.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+softdoc = [
+    "prompts/*.txt",
+    "prompts/README.md",
+    "prompts/archive/*.txt",
+    "prompts/archive/README.md",
+]
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]

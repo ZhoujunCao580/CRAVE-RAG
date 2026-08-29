@@ -1,0 +1,25 @@
+{
+  "additionalProperties": false,
+  "description": "Minimal model-owned final answer plus the Evidence it actually used.",
+  "properties": {
+    "answer": {
+      "minLength": 1,
+      "title": "Answer",
+      "type": "string"
+    },
+    "used_evidence_ids": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Used Evidence Ids",
+      "type": "array"
+    }
+  },
+  "required": [
+    "answer",
+    "used_evidence_ids"
+  ],
+  "title": "AnswerResult",
+  "type": "object"
+}

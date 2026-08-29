@@ -1,0 +1,55 @@
+{
+  "$defs": {
+    "PlannedSubQuestion": {
+      "additionalProperties": false,
+      "description": "One independently checkable information need in the initial plan.",
+      "properties": {
+        "subquestion_id": {
+          "minLength": 1,
+          "title": "Subquestion Id",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        }
+      },
+      "required": [
+        "subquestion_id",
+        "text"
+      ],
+      "title": "PlannedSubQuestion",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Strict model-facing output before runtime trace is attached.\n\nAn empty ``subquestions`` list is a valid plan without decomposition: the\noriginal question itself becomes the first reading target.  The field remains\nrequired so a missing plan is not confused with an intentional empty plan.",
+  "properties": {
+    "original_question": {
+      "minLength": 1,
+      "title": "Original Question",
+      "type": "string"
+    },
+    "subquestions": {
+      "items": {
+        "$ref": "#/$defs/PlannedSubQuestion"
+      },
+      "title": "Subquestions",
+      "type": "array"
+    }
+  },
+  "required": [
+    "original_question",
+    "subquestions"
+  ],
+  "title": "PlannerDraft",
+  "type": "object"
+}

@@ -13,10 +13,12 @@ from typing import Self
 from pydantic import Field, field_validator, model_validator
 
 from softdoc.models import SoftDocModel
+
+from softdoc.prompts import load_prompt_text
 from softdoc.reading_state import EvidenceMemory, EvidenceStatus, RootQuestion
 
 
-ANSWERER_PROMPT_VERSION = "answerer-v0.3"
+ANSWERER_PROMPT_VERSION = "answerer-v0.7"
 
 
 def _unique_nonblank(values: list[str], *, label: str) -> list[str]:
@@ -198,40 +200,7 @@ def validate_answer_result(
     return result
 
 
-ANSWERER_SYSTEM_PROMPT = """You are the final Answerer.
-
-Answer the root_question using only the provided Evidence.
-
-Rules:
-
-1. root_question is the authoritative task. question_graph only describes
-   evidence organization and is not a factual source.
-
-2. Use only the supplied Evidence statements. You may combine them and perform
-   deterministic calculations, comparisons, or ordering required by the
-   root_question.
-
-3. Do not use outside knowledge or unsupported assumptions.
-
-4. Before answering, verify that the Evidence directly supports every part of the
-   root_question. If not, state what is unsupported instead of restating the
-   question or guessing.
-
-5. Follow the language and requested answer format of the root_question.
-
-6. used_evidence_ids must include every Evidence item that materially supports
-   the answer, including inputs to any calculation. Copy the supplied IDs exactly.
-
-7. Do not create citations or source locations. The program will expand
-   used_evidence_ids into citations.
-
-Return JSON only:
-
-{
-  "answer": "...",
-  "used_evidence_ids": ["..."]
-}
-"""
+ANSWERER_SYSTEM_PROMPT = load_prompt_text("answerer_v0_7.txt")
 
 
 def answerer_user_prompt(answer_input: AnswerInput) -> str:

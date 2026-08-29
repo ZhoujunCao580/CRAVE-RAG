@@ -1165,6 +1165,7 @@ class ReadingEnvironment:
             observation_store=observations,
             action_trace=trace,
             relations=self.document.relations,
+            relation_sources=[*self.document.pages, *self.document.elements],
             readable_source_ids=[
                 *[page.page_id for page in self.document.pages],
                 *[element.element_id for element in self.document.elements],

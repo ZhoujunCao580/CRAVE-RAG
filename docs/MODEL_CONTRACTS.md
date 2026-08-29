@@ -2,8 +2,9 @@
 
 This document is the canonical, human-readable view of CRAVE-RAG's five
 model-facing boundaries. The Pydantic models in `src/softdoc` remain the
-executable source of truth, and the frozen prompt text is exposed through
-`softdoc prompts show <component>`.
+executable source of truth. Editable frozen prompt text lives in
+`src/softdoc/prompts/` and is exposed through `softdoc prompts show
+<component>`.
 
 The examples use one coherent question so the data flow is visible. IDs are
 opaque handles assigned or validated by the program; models must copy existing
@@ -11,20 +12,29 @@ IDs and must not invent document handles.
 
 ## 1. Planner
 
-The orchestrator supplies one Root Question. The current Planner API accepts
-the question text directly; the equivalent JSON envelope is:
+The orchestrator supplies one Root Question. Stable Planner rules are sent in
+the system message. The dynamic user message contains the question exactly
+once:
 
 ```json
 {
-  "root_question": {
-    "question_id": "root:1",
-    "text": "How did revenue change from 2022 to 2023?"
-  }
+  "original_question": "How did revenue change from 2022 to 2023?"
 }
 ```
 
-The model returns a conservative question DAG. The Root Question is not
-duplicated as a node. Independent evidence needs remain parallel.
+The model returns a conservative question DAG. `subquestions` is required but
+may be empty. With an empty plan, the Root Question itself becomes the current
+target and is not duplicated as a fake Q1.
+
+```json
+{
+  "original_question": "What is the title of Figure 3?",
+  "subquestions": []
+}
+```
+
+When the Root explicitly names multiple independent evidence needs, the
+Planner may decompose them. Independent needs remain parallel:
 
 ```json
 {
@@ -64,7 +74,7 @@ After validation, the program adds `planner_trace` and stores an `InitialPlan`:
   "planner_trace": {
     "backend_name": "ollama",
     "model": "qwen3:8b",
-    "prompt_version": "planner-v0.14",
+    "prompt_version": "planner-v0.20",
     "warnings": [],
     "metadata": {}
   }
@@ -93,7 +103,7 @@ Input:
       "page_id": "page:financial-results",
       "page_number": 18,
       "display_page_label": "16",
-      "page_image_path": "assets/pages/page_0018.png",
+      "page_image_path": "assets/elements/revenue_chart.png",
       "element_id": "element:chart:revenue",
       "element_type": "chart",
       "bbox": [0.12, 0.24, 0.88, 0.72]
@@ -101,6 +111,10 @@ Input:
   ]
 }
 ```
+
+`page_image_path` is a frozen legacy field name. Its value is the visual asset
+actually sent to the model, which may be a full-page image or an element crop.
+The backend copies the same asset path into the stored `visual_asset_path`.
 
 Output:
 
@@ -259,13 +273,23 @@ Output:
 ```
 
 The program, not the model, assigns the Evidence ID and activates the next
-runnable question.
+runnable question. Evidence may support either a planned SubQuestion or the
+Root Question. With an empty plan, `questions` is empty,
+`current_target.question_id` equals `root_question_id`, and accepted Evidence
+uses `supports_question_ids: ["root:1"]`.
+
+Completing all planned SubQuestions does not by itself guarantee that the Root
+is answerable. The Checker evaluates the complete Evidence set against the
+Root. If the Root is still incomplete after all planned nodes are satisfied,
+the program makes the Root the next current target.
 
 ## 4. Controller
 
 The Controller receives a derived working view, not the full ObservationStore
 or the full document graph. Candidate previews and Relations are navigation
-opportunities, not Evidence.
+opportunities, not Evidence. When the plan is empty, `subquestions` is empty
+and `current_gap.question_id` is the Root ID; no separate Controller schema is
+needed.
 
 Input:
 
@@ -334,15 +358,35 @@ Input:
       "relation_id": "relation:caption-of:1",
       "relation_type": "caption_of",
       "source_id": "element:caption:revenue",
-      "target_id": "element:chart:revenue"
+      "target_id": "element:chart:revenue",
+      "current_endpoint_id": "element:chart:revenue",
+      "related_source_preview": {
+        "source_id": "element:caption:revenue",
+        "source_type": "element",
+        "page_id": "page:financial-results",
+        "element_type": "caption",
+        "section_path": ["Financial Results"],
+        "label_or_snippet": "Figure 3. Revenue for 2022 and 2023.",
+        "content_availability": "text_only"
+      }
     }
   ],
   "candidate_relations": [
     {
-      "relation_id": "relation:continued-on:1",
-      "relation_type": "continued_on",
-      "source_id": "element:table:2022",
-      "target_id": "element:table:2023",
+      "relation_id": "relation:refers-to:1",
+      "relation_type": "refers_to",
+      "source_id": "element:chart:revenue",
+      "target_id": "element:paragraph:revenue-note",
+      "current_endpoint_id": "element:chart:revenue",
+      "related_source_preview": {
+        "source_id": "element:paragraph:revenue-note",
+        "source_type": "element",
+        "page_id": "page:financial-results",
+        "element_type": "paragraph",
+        "section_path": ["Financial Results"],
+        "label_or_snippet": "Revenue increased because subscription sales grew.",
+        "content_availability": "text_only"
+      },
       "confidence": 0.76
     }
   ],
@@ -371,6 +415,20 @@ Input:
 }
 ```
 
+`related_source_preview` is produced without a model. For an Element, the
+builder combines its explicit `reference_label`, own `text`, and (when useful)
+HTML converted to plain text, removes repeated whitespace, and truncates the
+result to 240 characters. It also exposes the Element type, section path, page
+handle, and content availability. For a Page endpoint, it exposes only the
+opaque page handle and does not reveal or infer a physical or printed page
+number. The preview is not persisted into
+SoftDoc, does not copy related-neighbor content into retrieval, and cannot be
+promoted to Evidence without a real read.
+
+The builder exposes Relations only when one endpoint matches the most recent
+successful or degraded read focus. In this example the focus is
+`element:chart:revenue`, so the candidate Relation must touch that chart.
+
 Output (one action only):
 
 ```json
@@ -390,7 +448,8 @@ ordinary Controller search decision when the match is unique and readable.
 
 The Answerer is callable only after the Root is `ready`. It sees accepted
 Evidence and the question DAG, but not raw retrieval results, Relations, or
-Observations.
+Observations. `question_graph` may be empty when no decomposition was needed.
+In that case the accepted Evidence supports the Root ID directly.
 
 Input:
 
@@ -447,6 +506,7 @@ actual stateful loop is:
 
 ```text
 Planner
+  -> initialize either the Root target or the first runnable SubQuestion
   -> initial Exact/Search entry
   -> Controller action
   -> Reader

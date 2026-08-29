@@ -1,0 +1,234 @@
+{
+  "$defs": {
+    "AdjacentPageDirection": {
+      "enum": [
+        "next",
+        "previous"
+      ],
+      "title": "AdjacentPageDirection",
+      "type": "string"
+    },
+    "ControllerExploreCandidateRelationAction": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "EXPLORE_CANDIDATE_RELATION",
+          "title": "Action",
+          "type": "string"
+        },
+        "relation_id": {
+          "minLength": 1,
+          "title": "Relation Id",
+          "type": "string"
+        },
+        "local_problem": {
+          "minLength": 1,
+          "title": "Local Problem",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "relation_id",
+        "local_problem"
+      ],
+      "title": "ControllerExploreCandidateRelationAction",
+      "type": "object"
+    },
+    "ControllerFollowRelationAction": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "FOLLOW_RELATION",
+          "title": "Action",
+          "type": "string"
+        },
+        "relation_id": {
+          "minLength": 1,
+          "title": "Relation Id",
+          "type": "string"
+        },
+        "local_problem": {
+          "minLength": 1,
+          "title": "Local Problem",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "relation_id",
+        "local_problem"
+      ],
+      "title": "ControllerFollowRelationAction",
+      "type": "object"
+    },
+    "ControllerReadAdjacentPageAction": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "READ_ADJACENT_PAGE",
+          "title": "Action",
+          "type": "string"
+        },
+        "from_page_id": {
+          "minLength": 1,
+          "title": "From Page Id",
+          "type": "string"
+        },
+        "direction": {
+          "$ref": "#/$defs/AdjacentPageDirection"
+        },
+        "local_problem": {
+          "minLength": 1,
+          "title": "Local Problem",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "from_page_id",
+        "direction",
+        "local_problem"
+      ],
+      "title": "ControllerReadAdjacentPageAction",
+      "type": "object"
+    },
+    "ControllerReadSourceAction": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "READ_SOURCE",
+          "title": "Action",
+          "type": "string"
+        },
+        "source_ids": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Source Ids",
+          "type": "array"
+        },
+        "local_problem": {
+          "minLength": 1,
+          "title": "Local Problem",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "source_ids",
+        "local_problem"
+      ],
+      "title": "ControllerReadSourceAction",
+      "type": "object"
+    },
+    "ControllerSearchAction": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "SEARCH",
+          "title": "Action",
+          "type": "string"
+        },
+        "operation": {
+          "$ref": "#/$defs/ControllerSearchOperation"
+        },
+        "query": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Query"
+        },
+        "search_session_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Search Session Id"
+        }
+      },
+      "required": [
+        "action",
+        "operation"
+      ],
+      "title": "ControllerSearchAction",
+      "type": "object"
+    },
+    "ControllerSearchOperation": {
+      "enum": [
+        "new",
+        "next",
+        "switch"
+      ],
+      "title": "ControllerSearchOperation",
+      "type": "string"
+    },
+    "ControllerStopAction": {
+      "additionalProperties": false,
+      "description": "Stop with incomplete Evidence when no justified route remains.",
+      "properties": {
+        "action": {
+          "const": "STOP",
+          "title": "Action",
+          "type": "string"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "reason"
+      ],
+      "title": "ControllerStopAction",
+      "type": "object"
+    }
+  },
+  "discriminator": {
+    "mapping": {
+      "EXPLORE_CANDIDATE_RELATION": "#/$defs/ControllerExploreCandidateRelationAction",
+      "FOLLOW_RELATION": "#/$defs/ControllerFollowRelationAction",
+      "READ_ADJACENT_PAGE": "#/$defs/ControllerReadAdjacentPageAction",
+      "READ_SOURCE": "#/$defs/ControllerReadSourceAction",
+      "SEARCH": "#/$defs/ControllerSearchAction",
+      "STOP": "#/$defs/ControllerStopAction"
+    },
+    "propertyName": "action"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/ControllerSearchAction"
+    },
+    {
+      "$ref": "#/$defs/ControllerReadSourceAction"
+    },
+    {
+      "$ref": "#/$defs/ControllerFollowRelationAction"
+    },
+    {
+      "$ref": "#/$defs/ControllerExploreCandidateRelationAction"
+    },
+    {
+      "$ref": "#/$defs/ControllerReadAdjacentPageAction"
+    },
+    {
+      "$ref": "#/$defs/ControllerStopAction"
+    }
+  ]
+}

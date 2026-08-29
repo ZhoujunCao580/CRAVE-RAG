@@ -33,7 +33,8 @@ Production-quality model policies, citation materialization, model-quality evalu
 creating a second state model:
 
 ```text
-activate current question
+activate the Root directly when the plan is empty, otherwise activate the
+first dependency-ready SubQuestion
   -> resolve a unique exact anchor when possible
   -> otherwise let the Controller search or navigate
   -> execute a read and append a ReadRecord/Observation
@@ -49,9 +50,14 @@ The v0 boundary is intentionally strict:
 - Reader limitations survive even when no Observation is produced;
 - confirmed relations may be followed from either visible endpoint without
   changing their canonical SoftDoc direction;
+- every visible Relation is oriented around the current reading focus and
+  includes `related_source_preview`, a short deterministic view of its other
+  endpoint; this preview is a navigation clue, never Evidence;
 - candidate relations may be investigated but are not promoted to confirmed;
 - invalid Checker deltas leave canonical EvidenceMemory unchanged;
 - question advancement and Answerer invocation are program controlled;
+- satisfying every planned SubQuestion is necessary but not automatically
+  sufficient: the complete Evidence set must still make the Root ready;
 - the Controller may stop explicitly without changing incomplete Evidence to ready;
 - Relations whose other endpoint cannot be read by the current Environment are not exposed as actions;
 - cross-store references are validated after every action.

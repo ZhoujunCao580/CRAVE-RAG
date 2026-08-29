@@ -50,6 +50,9 @@ class Expected:
     root_status: str = "incomplete"
     gap_required: bool = True
     gap_terms: tuple[str, ...] = ()
+    gap_forbidden_terms: tuple[str, ...] = ()
+    evidence_required_terms: tuple[str, ...] = ()
+    evidence_forbidden_terms: tuple[str, ...] = ()
     next_target: str | None = None
 
 
@@ -329,6 +332,203 @@ def build_cases() -> list[Case]:
         Expected({obs.observation_id: True}, 1, target_status="satisfied",
                  root_status="ready", gap_required=False, next_target=None)))
 
+    cid = "C21"
+    root = f"root:{cid}"
+    q1 = QuestionState(question_id="Q1", text="What accuracy did Method A achieve?")
+    q2 = QuestionState(question_id="Q2", text="What accuracy did Method B achieve?")
+    obs = observation(
+        cid,
+        0,
+        "The same table row reports Method A accuracy of 72% and Method B accuracy of 79%.",
+    )
+    add(Case(
+        cid,
+        "cross_target_observation",
+        "One Observation contains facts for Q1 and Q2, but this turn may update only Q1.",
+        make_input(
+            cid,
+            "Which of Method A and Method B achieved higher accuracy?",
+            target_id="Q1",
+            gap="Method A's accuracy is unknown.",
+            questions=[q1, q2],
+            observations=[obs],
+        ),
+        Expected(
+            {obs.observation_id: True},
+            1,
+            target_status="satisfied",
+            root_status="incomplete",
+            gap_required=False,
+            evidence_required_terms=("Method A", "72"),
+            evidence_forbidden_terms=("Method B", "79"),
+            next_target="Q2",
+        ),
+    ))
+
+    cid = "C22"
+    root = f"root:{cid}"
+    q1 = QuestionState(
+        question_id="Q1",
+        text="What accuracy did Method A achieve?",
+        status="satisfied",
+    )
+    q2 = QuestionState(
+        question_id="Q2",
+        text="What accuracy did Method B achieve?",
+        status="satisfied",
+    )
+    existing = [
+        evidence(cid, 0, "Method A achieved 72% accuracy.", "Q1"),
+        evidence(cid, 1, "Method B achieved 79% accuracy.", "Q2"),
+    ]
+    obs = observation(
+        cid,
+        0,
+        "The evaluation section states that both accuracy values are measured on the held-out test set.",
+    )
+    add(Case(
+        cid,
+        "root_after_plan_ready",
+        "After every SubQuestion is satisfied, a Root-level Observation completes the Root.",
+        make_input(
+            cid,
+            "Which method achieved higher accuracy on the held-out test set?",
+            target_id=root,
+            gap="Confirm that the two reported accuracy values use the held-out test set.",
+            questions=[q1, q2],
+            existing=existing,
+            observations=[obs],
+        ),
+        Expected(
+            {obs.observation_id: True},
+            1,
+            target_status="satisfied",
+            root_status="ready",
+            gap_required=False,
+            next_target=None,
+        ),
+    ))
+
+    cid = "C23"
+    root = f"root:{cid}"
+    q1 = QuestionState(
+        question_id="Q1",
+        text="What accuracy did Method A achieve?",
+        status="satisfied",
+    )
+    q2 = QuestionState(
+        question_id="Q2",
+        text="What accuracy did Method B achieve?",
+        status="satisfied",
+    )
+    existing = [
+        evidence(cid, 0, "Method A achieved 72% accuracy.", "Q1"),
+        evidence(cid, 1, "Method B achieved 79% accuracy.", "Q2"),
+    ]
+    obs = observation(
+        cid,
+        0,
+        "Method B uses an additional supervised training stage, but the document does not state that this caused the accuracy difference.",
+    )
+    add(Case(
+        cid,
+        "root_after_plan_partial",
+        "A Root-level fact is useful but does not establish the document's reason for the difference.",
+        make_input(
+            cid,
+            "Which method achieved higher accuracy, and what reason does the document give for the difference?",
+            target_id=root,
+            gap="The document's stated reason for the accuracy difference is unknown.",
+            questions=[q1, q2],
+            existing=existing,
+            observations=[obs],
+        ),
+        Expected(
+            {obs.observation_id: True},
+            1,
+            gap_terms=("difference",),
+            next_target=root,
+        ),
+    ))
+
+    cid = "C24"
+    root = f"root:{cid}"
+    old = evidence(cid, 0, "The company's 2023 revenue was USD 12 million.", root)
+    obs = observation(
+        cid,
+        0,
+        "The footnote shows that USD 12 million is the 2022 value, while the 2023 row is not visible in the supplied crop.",
+    )
+    add(Case(
+        cid,
+        "remove_invalidated_evidence",
+        "A new Observation invalidates existing Evidence without supplying a replacement value.",
+        make_input(
+            cid,
+            "What was the company's revenue in 2023?",
+            target_id=root,
+            gap="Verify the company's 2023 revenue.",
+            existing=[old],
+            observations=[obs],
+        ),
+        Expected(
+            {obs.observation_id: False},
+            0,
+            remove=1,
+            gap_terms=("2023", "revenue"),
+            next_target=root,
+        ),
+    ))
+
+    cid = "C25"
+    root = f"root:{cid}"
+    obs = observation(cid, 0, "The company's 2023 revenue was USD 12 million.")
+    add(Case(
+        cid,
+        "gap_quality",
+        "The remaining gap names only the missing operating income, not the established revenue.",
+        make_input(
+            cid,
+            "What were the company's revenue and operating income in 2023?",
+            target_id=root,
+            gap="The company's 2023 revenue and operating income are unknown.",
+            observations=[obs],
+        ),
+        Expected(
+            {obs.observation_id: True},
+            1,
+            gap_terms=("operating income",),
+            gap_forbidden_terms=("revenue",),
+            next_target=root,
+        ),
+    ))
+
+    cid = "C26"
+    root = f"root:{cid}"
+    limitation = ObservationLimitation(
+        description="The requested chart labels are too small to read reliably.",
+        input_ids=["I1"],
+    )
+    add(Case(
+        cid,
+        "limitation_only",
+        "A read may fail with a relevant limitation and no Observation.",
+        make_input(
+            cid,
+            "What accuracy did Method B achieve?",
+            target_id=root,
+            gap="A reliable Method B accuracy is missing.",
+            observations=[],
+            limitations=[limitation],
+        ),
+        Expected(
+            {},
+            0,
+            gap_terms=("Method B", "accuracy"),
+            next_target=root,
+        ),
+    ))
+
     return cases
 
 
@@ -399,6 +599,30 @@ def evaluate_result(
         )
     else:
         checks["gap_content"] = True
+    if expected.gap_forbidden_terms:
+        gap_words = normalized_words(result.remaining_gap_description)
+        checks["gap_excludes_established_facts"] = not any(
+            set(term.lower().split()).issubset(gap_words)
+            for term in expected.gap_forbidden_terms
+        )
+    else:
+        checks["gap_excludes_established_facts"] = True
+    update_statements = " ".join(
+        item.statement
+        for item in [
+            *result.evidence_updates.add,
+            *result.evidence_updates.replace,
+        ]
+    )
+    update_words = normalized_words(update_statements)
+    checks["evidence_content_required"] = all(
+        set(term.lower().split()).issubset(update_words)
+        for term in expected.evidence_required_terms
+    )
+    checks["evidence_content_excludes_cross_target_facts"] = not any(
+        set(term.lower().split()).issubset(update_words)
+        for term in expected.evidence_forbidden_terms
+    )
 
     updated: EvidenceMemory | None = None
     apply_error: str | None = None
@@ -513,6 +737,9 @@ def run_pass(
                     "root_status": case.expected.root_status,
                     "gap_required": case.expected.gap_required,
                     "gap_terms": list(case.expected.gap_terms),
+                    "gap_forbidden_terms": list(case.expected.gap_forbidden_terms),
+                    "evidence_required_terms": list(case.expected.evidence_required_terms),
+                    "evidence_forbidden_terms": list(case.expected.evidence_forbidden_terms),
                     "next_target": case.expected.next_target,
                 },
                 "valid_output": True,

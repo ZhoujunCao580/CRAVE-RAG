@@ -136,6 +136,52 @@ def test_limitation_and_observation_must_reference_same_action_input():
         ObservationStore.model_validate(payload)
 
 
+def test_checker_accepts_limitation_only_read_and_rejects_empty_read() -> None:
+    limitation_only = EvidenceCheckInput(
+        action_id="action:read",
+        root_question=RootQuestion(
+            question_id="root:1",
+            text="What accuracy did Method B achieve?",
+        ),
+        evidence_memory=EvidenceMemory(
+            reading_session_id="reading:1",
+            root_question_id="root:1",
+            current_target=CurrentTarget(
+                question_id="root:1",
+                gap_description="A reliable Method B accuracy is missing.",
+            ),
+        ),
+        observations=[],
+        limitations=[
+            ObservationLimitation(
+                description="The labels are too small to read reliably.",
+                input_ids=["I1"],
+            )
+        ],
+    )
+    result = EvidenceCheckResult(
+        action_id="action:read",
+        observation_assessments=[],
+        current_target_status="incomplete",
+        root_status="incomplete",
+        remaining_gap_description="A reliable Method B accuracy is missing.",
+    )
+    updated = apply_evidence_check_result(limitation_only, result)
+    assert updated.current_target == CurrentTarget(
+        question_id="root:1",
+        gap_description="A reliable Method B accuracy is missing.",
+    )
+
+    with pytest.raises(ValidationError, match="Observation or limitation"):
+        EvidenceCheckInput(
+            action_id="action:read",
+            root_question=limitation_only.root_question,
+            evidence_memory=limitation_only.evidence_memory,
+            observations=[],
+            limitations=[],
+        )
+
+
 def test_initialize_memory_selects_first_dependency_ready_question():
     memory = initialize_evidence_memory(
         reading_session_id="reading:1", root_question_id="root:1",
@@ -149,6 +195,22 @@ def test_initialize_memory_selects_first_dependency_ready_question():
         question_id="Q1", gap_description="Find A."
     )
     assert select_next_runnable_question(memory.questions).question_id == "Q1"
+
+
+def test_initialize_memory_with_no_subquestions_targets_root():
+    memory = initialize_evidence_memory(
+        reading_session_id="reading:empty-plan",
+        root_question_id="root:direct",
+        root_question_text="What is the title of Figure 3?",
+        questions=[],
+    )
+
+    assert memory.questions == []
+    assert memory.current_target == CurrentTarget(
+        question_id="root:direct",
+        gap_description="What is the title of Figure 3?",
+    )
+    assert select_next_runnable_question(memory.questions) is None
 
 
 def test_memory_rejects_unknown_cycle_and_blocked_current_target():

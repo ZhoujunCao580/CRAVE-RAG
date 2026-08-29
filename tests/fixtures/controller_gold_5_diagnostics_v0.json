@@ -703,7 +703,20 @@
                 "relation_id": "rel:refers_to:77e9f2f6df3d",
                 "relation_type": "refers_to",
                 "source_id": "doc:2023.acl-long.386:9064dd38:page:0006:element:0007:paragraph:main",
-                "target_id": "doc:2023.acl-long.386:9064dd38:page:0006:element:0003:chart:main"
+                "target_id": "doc:2023.acl-long.386:9064dd38:page:0006:element:0003:chart:main",
+                "current_endpoint_id": "doc:2023.acl-long.386:9064dd38:page:0006:element:0007:paragraph:main",
+                "related_source_preview": {
+                  "source_id": "doc:2023.acl-long.386:9064dd38:page:0006:element:0003:chart:main",
+                  "source_type": "element",
+                  "page_id": "doc:2023.acl-long.386:9064dd38:page:0006",
+                  "element_type": "chart",
+                  "section_path": [
+                    "4 Experiments",
+                    "4.3 Interpretability of Reasoning Programs"
+                  ],
+                  "label_or_snippet": "Figure 5. Retrieval recall@10 for one-step retrieval and iterative retrieval in PROGRAMFC.",
+                  "content_availability": "visual_only"
+                }
               }
             ],
             "candidate_relations": [],

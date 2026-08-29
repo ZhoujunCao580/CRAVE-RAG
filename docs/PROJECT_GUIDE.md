@@ -25,16 +25,17 @@ The guiding principle is:
   spatial queries.
 - Exact Anchor lookup, SearchUnits, BM25, multilingual-E5 dense retrieval,
   SearchSessions, and deterministic CandidatePreviews.
-- Conservative Planner contracts and prompt.
+- Optional conservative Planner: zero SubQuestions when no decomposition is
+  needed, or a validated DAG for genuine decomposition.
 - Visual Reader request/result contracts and prompt.
 - Append-only ObservationStore and atomic Evidence Checker deltas.
 - Derived Controller state, validated action union, and explicit incomplete
   `STOP`.
 - Evidence-only Answerer contract and prompt.
 - An injectable Reading Environment that exercises the complete state loop.
-- Ollama-backed Visual Reader, Checker, and Answerer adapters plus an auditable
-  end-to-end model runner; text and structured tables use the deterministic
-  Reader before any visual fallback.
+- Ollama-backed Planner, Controller, Visual Reader, Checker, and Answerer
+  adapters plus an auditable end-to-end model runner; text and structured
+  tables use the deterministic Reader before any visual fallback.
 - Unified prompt registry, evaluation launcher, Linux bootstrap, and generic
   LoRA/QLoRA SFT entrypoint.
 
@@ -43,6 +44,7 @@ The guiding principle is:
 - Production-quality Reader evaluation and server-native model adapters beyond
   the current Ollama v0 backend.
 - A trained Controller policy or a production Teacher trajectory corpus.
+- A frozen TeacherTrajectory schema and validated local Teacher corpus.
 - Deferred planning and Observation Recall.
 - Citation materialization in final user-facing output.
 - Full-dataset answer-quality evaluation and action-value ablations.
@@ -53,22 +55,23 @@ The guiding principle is:
 ```text
 src/softdoc/
   models.py                 SoftDoc core models
-  mineru_adapter.py         MinerU -> raw SoftDoc conversion
+  adapters/mineru.py        MinerU -> raw SoftDoc conversion
   pipeline.py               deterministic pass orchestration
   relations.py              deterministic relation builders
   store.py / spatial.py     document access and spatial navigation
-  retrieval.py              SearchUnits, Exact, BM25, dense retrieval
-  search_session.py         persistent candidate batches and previews
-  planning/                 Planner models, prompt, and backend interface
-  visual_reading.py         Visual Reader contract and prompt
+  retrieval/                SearchUnits, Exact, BM25, Dense, sessions/previews
+  planning/                 Planner models, renderer, and backend interface
+  prompts/                  current versioned prompt text for all components
+  prompts/archive/          superseded prompt versions for audit/reproduction
+  visual_reading.py         Visual Reader contract and user-prompt renderer
   reading_state.py          reads, Observations, Evidence, and action trace
-  checking_prompt.py        Evidence Checker prompt
+  checking_prompt.py        Checker version and compatibility loader
   controller.py             Controller input and action contracts
-  controller_prompt.py      Controller prompt
+  controller_prompt.py      Controller version and compatibility loader
   reading_environment.py    executable reading-loop orchestration
   model_backends.py         Ollama Reader/Checker/Answerer adapters
   model_runner.py           Planner-to-Answerer runner and audit artifacts
-  answering.py              Answerer contract and prompt
+  answering.py              Answerer contract and user-prompt renderer
   prompt_registry.py        single prompt discovery/version entrypoint
 ```
 
@@ -83,8 +86,15 @@ constraints/                reproducible CI dependency pins
 docs/                       current design, setup, and research boundaries
 ```
 
+`tests/fixtures/controller_gold_5_diagnostics_v0.json` is a historical
+diagnostic captured with Controller prompt v0.2 and action v0.1. Its version
+headers describe the model run that produced the observations; they are not
+the current canonical Prompt or action versions.
+
 ## Canonical references
 
+- [Prompt workspace](../src/softdoc/prompts/README.md): editable versioned
+  model instructions and prompt-change discipline.
 - [Architecture](ARCHITECTURE.md): system loop and safety boundaries.
 - [Model Contracts](MODEL_CONTRACTS.md): complete Planner, Reader, Checker,
   Controller, and Answerer JSON examples.
@@ -95,8 +105,9 @@ docs/                       current design, setup, and research boundaries
 - [TODO](TODO.md): unresolved decisions and experiments. A TODO is not an
   implemented feature.
 
-Frozen prompt text is not copied into documentation. Inspect the executable
-source of truth instead:
+Frozen prompt text is not copied into documentation. Edit or inspect the
+versioned files in `src/softdoc/prompts/`, and use the executable registry to
+render or export the exact runtime form:
 
 ```bash
 softdoc prompts list
