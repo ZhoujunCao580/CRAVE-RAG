@@ -6,13 +6,14 @@ import json
 from pathlib import Path
 from typing import Any, Protocol
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from softdoc.answering import AnswerInput, AnswerResult
 from softdoc.controller import ControllerAction, ControllerInput
 from softdoc.ids import root_question_id
 from softdoc.models import Document, SoftDocModel
 from softdoc.planning.models import InitialPlan
+from softdoc.prompt_registry import prompt_manifest
 from softdoc.reading_environment import (
     AnswererBackend,
     ControllerBackend,
@@ -25,7 +26,7 @@ from softdoc.reading_environment import (
     ReadingEnvironmentConfig,
     ReadingRunResult,
 )
-from softdoc.reading_state import EvidenceCheckInput, EvidenceCheckResult
+from softdoc.reading_state import ActionTrace, EvidenceCheckInput, EvidenceCheckResult
 
 
 MODEL_PIPELINE_VERSION = "model-pipeline-v0.1"
@@ -43,6 +44,7 @@ class StageCallRecord(SoftDocModel):
     input: dict[str, Any]
     output: dict[str, Any]
     succeeded: bool = True
+    action_id: str | None = Field(default=None, min_length=1)
 
 
 class ModelPipelineRun(SoftDocModel):
@@ -53,7 +55,29 @@ class ModelPipelineRun(SoftDocModel):
     question: str
     plan: InitialPlan
     reading_run: ReadingRunResult
+    prompt_bindings: list[dict[str, str | int]] = Field(default_factory=prompt_manifest)
     stage_calls: list[StageCallRecord] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_stage_calls(self) -> "ModelPipelineRun":
+        keys = [(item.component, item.call_index) for item in self.stage_calls]
+        if len(keys) != len(set(keys)):
+            raise ValueError("Stage call component/index pairs must be unique")
+        for record in self.stage_calls:
+            if record.component in {"controller", "reader", "checker"} and (
+                record.action_id is None
+            ):
+                raise ValueError(
+                    f"{record.component} stage call {record.call_index} requires action_id"
+                )
+        controller_action_ids = [
+            item.action_id
+            for item in self.stage_calls
+            if item.component == "controller"
+        ]
+        if len(controller_action_ids) != len(set(controller_action_ids)):
+            raise ValueError("Controller stage calls must reference unique action IDs")
+        return self
 
 
 class _RecordingController:
@@ -102,6 +126,7 @@ class _RecordingReader:
                     input=input_payload,
                     output={"error_type": type(exc).__name__, "error": str(exc)},
                     succeeded=False,
+                    action_id=context.action_id,
                 )
             )
             raise
@@ -111,6 +136,7 @@ class _RecordingReader:
                 call_index=_next_index(self.records, "reader"),
                 input=input_payload,
                 output=output.model_dump(mode="json"),
+                action_id=context.action_id,
             )
         )
         return output
@@ -137,6 +163,7 @@ class _RecordingChecker:
                     input=input_payload,
                     output={"error_type": type(exc).__name__, "error": str(exc)},
                     succeeded=False,
+                    action_id=checker_input.action_id,
                 )
             )
             raise
@@ -146,6 +173,7 @@ class _RecordingChecker:
                 call_index=_next_index(self.records, "checker"),
                 input=input_payload,
                 output=output.model_dump(mode="json"),
+                action_id=checker_input.action_id,
             )
         )
         return output
@@ -241,6 +269,7 @@ class ModelBackedRunner:
             plan=plan,
             run_key=run_key,
         )
+        _bind_controller_action_ids(records, result.action_trace)
         return ModelPipelineRun(
             document_id=document.document_id,
             question=normalized_question,
@@ -278,13 +307,20 @@ def write_model_pipeline_run(run: ModelPipelineRun, output_dir: Path) -> None:
 
     manifest = {
         "pipeline_version": run.pipeline_version,
+        "reading_session_id": run.reading_run.evidence_memory.reading_session_id,
+        "root_question_id": run.reading_run.root_question.question_id,
         "document_id": run.document_id,
         "question": run.question,
         "status": run.reading_run.status.value,
+        "prompts": run.prompt_bindings,
         "call_counts": {
             component: len(records)
             for component, records in sorted(calls_by_component.items())
         },
+        "stage_call_order": [
+            {"component": record.component, "call_index": record.call_index}
+            for record in run.stage_calls
+        ],
         "answer": (
             run.reading_run.answer.model_dump(mode="json")
             if run.reading_run.answer is not None
@@ -292,6 +328,93 @@ def write_model_pipeline_run(run: ModelPipelineRun, output_dir: Path) -> None:
         ),
     }
     _write_json(output_dir / "run_manifest.json", manifest)
+
+
+def load_model_pipeline_run(input_dir: Path) -> ModelPipelineRun:
+    """Load one audit packet written by :func:`write_model_pipeline_run`."""
+
+    input_dir = Path(input_dir)
+    manifest = json.loads((input_dir / "run_manifest.json").read_text(encoding="utf-8"))
+    plan = InitialPlan.model_validate_json(
+        (input_dir / "planner.json").read_text(encoding="utf-8")
+    )
+    reading_run = ReadingRunResult.model_validate_json(
+        (input_dir / "reading_run.json").read_text(encoding="utf-8")
+    )
+    loaded_records = [
+        StageCallRecord(
+            component="planner",
+            call_index=0,
+            input={"question": manifest["question"]},
+            output=plan.model_dump(mode="json"),
+        )
+    ]
+    for component in ("controller", "reader", "checker", "answerer"):
+        path = input_dir / f"{component}_calls.jsonl"
+        if not path.is_file():
+            raise FileNotFoundError(f"Missing model call log: {path}")
+        for line_number, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), 1
+        ):
+            if not line.strip():
+                continue
+            try:
+                loaded_records.append(StageCallRecord.model_validate_json(line))
+            except Exception as exc:
+                raise ValueError(f"{path}:{line_number}: invalid stage call: {exc}") from exc
+    order = manifest.get("stage_call_order")
+    if order is None:
+        records = loaded_records
+    else:
+        by_key = {
+            (record.component, record.call_index): record
+            for record in loaded_records
+        }
+        requested_keys = [
+            (item["component"], item["call_index"])
+            for item in order
+        ]
+        if len(requested_keys) != len(set(requested_keys)):
+            raise ValueError("run_manifest stage_call_order contains duplicate keys")
+        if set(requested_keys) != set(by_key):
+            raise ValueError(
+                "run_manifest stage_call_order does not cover every model call"
+            )
+        records = [by_key[key] for key in requested_keys]
+    return ModelPipelineRun(
+        pipeline_version=manifest["pipeline_version"],
+        document_id=manifest["document_id"],
+        question=manifest["question"],
+        plan=plan,
+        reading_run=reading_run,
+        prompt_bindings=manifest["prompts"],
+        stage_calls=records,
+    )
+
+
+def _bind_controller_action_ids(
+    records: list[StageCallRecord], action_trace: ActionTrace
+) -> None:
+    """Bind model decisions to executed actions, excluding automatic Exact reads."""
+
+    controller_records = [item for item in records if item.component == "controller"]
+    controller_entries = [
+        item
+        for item in action_trace.entries
+        if item.metadata.get("trigger") != "exact_anchor"
+    ]
+    if len(controller_records) != len(controller_entries):
+        raise ValueError(
+            "Controller call count does not match non-automatic ActionTrace entries"
+        )
+    for record, entry in zip(controller_records, controller_entries, strict=True):
+        proposed_name = record.output.get("action")
+        if proposed_name != entry.action_name:
+            raise ValueError(
+                "Controller output/action trace mismatch at call "
+                f"{record.call_index}: {proposed_name!r} != {entry.action_name!r}"
+            )
+        record.action_id = entry.action_id
 
 
 def _next_index(records: list[StageCallRecord], component: str) -> int:

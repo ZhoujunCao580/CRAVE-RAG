@@ -18,7 +18,11 @@ from softdoc.model_backends import (
     OllamaStructuredClient,
     OllamaVisualReaderBackend,
 )
-from softdoc.model_runner import ModelBackedRunner, write_model_pipeline_run
+from softdoc.model_runner import (
+    ModelBackedRunner,
+    load_model_pipeline_run,
+    write_model_pipeline_run,
+)
 from softdoc.planning import InitialPlanner, OllamaPlannerBackend, OllamaPlannerConfig
 from softdoc.pipeline import SoftDocPipeline
 from softdoc.prompt_registry import PromptComponent, get_prompt, prompt_manifest
@@ -26,6 +30,12 @@ from softdoc.rule_audit import write_rule_coverage_reports
 from softdoc.server_readiness import check_server_readiness, readiness_install_hint
 from softdoc.serialization import load_document, write_document
 from softdoc.store import DocumentStore
+from softdoc.teacher_data import (
+    build_teacher_review_template,
+    load_reviewed_run,
+    write_controller_sft_dataset,
+    write_teacher_review,
+)
 from softdoc.reading_environment import (
     DocumentSearchService,
     ReadingEnvironmentConfig,
@@ -96,6 +106,23 @@ def build_parser() -> argparse.ArgumentParser:
     run_model.add_argument("--dense-model-path", type=Path)
     run_model.add_argument("--dense-device", choices=("auto", "cpu", "cuda"), default="auto")
     run_model.add_argument("--embedding-cache", type=Path)
+
+    teacher_data = subparsers.add_parser(
+        "teacher-data",
+        help="Create thin run reviews or export accepted Controller SFT decisions",
+    )
+    teacher_subparsers = teacher_data.add_subparsers(
+        dest="teacher_command", required=True
+    )
+    teacher_init = teacher_subparsers.add_parser(
+        "init-review", help="Create a pending teacher_review.json beside one run"
+    )
+    teacher_init.add_argument("run_dir", type=Path)
+    teacher_export = teacher_subparsers.add_parser(
+        "export-controller", help="Export accepted Controller decisions from reviewed runs"
+    )
+    teacher_export.add_argument("run_dirs", nargs="+", type=Path)
+    teacher_export.add_argument("--output", type=Path, required=True)
     return parser
 
 
@@ -277,6 +304,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"artifacts written to {args.output}"
         )
         return 0
+    if args.command == "teacher-data":
+        if args.teacher_command == "init-review":
+            run = load_model_pipeline_run(args.run_dir)
+            review = build_teacher_review_template(run)
+            output = args.run_dir / "teacher_review.json"
+            write_teacher_review(review, output)
+            print(
+                f"Created {output} with {len(review.controller_steps)} pending "
+                "Controller decisions"
+            )
+            return 0
+        if args.teacher_command == "export-controller":
+            reviewed_runs = [load_reviewed_run(path) for path in args.run_dirs]
+            manifest = write_controller_sft_dataset(reviewed_runs, args.output)
+            print(
+                f"Exported {manifest.example_count} accepted Controller decisions "
+                f"to {args.output}"
+            )
+            return 0
     return 2
 
 

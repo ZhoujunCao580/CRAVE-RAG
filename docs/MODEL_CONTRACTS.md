@@ -517,3 +517,42 @@ Planner
 
 Search results, CandidatePreviews, Relations, and Observations never bypass the
 Checker to become answer Evidence.
+
+## Teacher review and Controller SFT export
+
+A model run is already the complete trajectory. Teacher supervision is stored
+as a separate, deliberately small review rather than copying the run:
+
+```json
+{
+  "schema_version": "teacher-review-v0",
+  "reading_session_id": "reading:1",
+  "episode_status": "accepted",
+  "controller_steps": [
+    {
+      "controller_call_index": 0,
+      "action_id": "action:1",
+      "training_label_status": "accepted",
+      "review_note": "The selected source directly addresses the current gap."
+    }
+  ],
+  "first_corrupted_action_id": null
+}
+```
+
+`teacher_review.json` is not training data. The exporter joins it with the
+corresponding `ModelPipelineRun`, validates exact call/action coverage and the
+recorded Controller action, and produces:
+
+```text
+controller_sft.jsonl   accepted ControllerInput -> ControllerAction examples
+controller_sft_messages.jsonl
+                       the same examples as system/user/assistant messages
+dataset_info.json      LLaMA-Factory OpenAI-messages dataset registration
+dataset_manifest.json Prompt hash/version and source-run lineage
+```
+
+The review stores neither Gold-access declarations nor duplicated Evidence.
+Gold isolation is enforced by the generation/evaluation protocol, while the
+canonical run remains the source of truth for what the model saw and what the
+environment executed.

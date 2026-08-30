@@ -2,7 +2,12 @@ import json
 
 import pytest
 
-from softdoc.training_data import SFTExample, load_sft_jsonl
+from softdoc.training_data import (
+    OpenAIMessagesSFTRecord,
+    SFTExample,
+    load_openai_messages_sft_jsonl,
+    load_sft_jsonl,
+)
 
 
 def _record(**updates):
@@ -24,6 +29,29 @@ def test_sft_example_materializes_current_prompt() -> None:
     assert "Reading Controller" in messages[0]["content"]
     assert messages[1]["role"] == "user"
     assert json.loads(example.target_text())["action"] == "STOP"
+    training_messages = example.training_messages()
+    assert [message["role"] for message in training_messages] == [
+        "system",
+        "user",
+        "assistant",
+    ]
+    assert json.loads(training_messages[2]["content"])["action"] == "STOP"
+
+
+def test_openai_messages_loader_requires_one_complete_controller_turn(tmp_path) -> None:
+    path = tmp_path / "messages.jsonl"
+    valid = OpenAIMessagesSFTRecord.model_validate(
+        {
+            "messages": [
+                {"role": "system", "content": "Controller Prompt"},
+                {"role": "user", "content": '{"current_gap":{}}'},
+                {"role": "assistant", "content": '{"action":"STOP"}'},
+            ]
+        }
+    )
+    path.write_text(valid.model_dump_json() + "\n", encoding="utf-8")
+    loaded = load_openai_messages_sft_jsonl(path)
+    assert loaded == [valid]
 
 
 def test_sft_example_rejects_stale_prompt_version() -> None:

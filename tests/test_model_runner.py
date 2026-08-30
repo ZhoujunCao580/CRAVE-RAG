@@ -6,7 +6,11 @@ from typing import Any
 
 from softdoc.answering import AnswerInput, AnswerResult
 from softdoc.controller import ControllerInput
-from softdoc.model_runner import ModelBackedRunner, write_model_pipeline_run
+from softdoc.model_runner import (
+    ModelBackedRunner,
+    load_model_pipeline_run,
+    write_model_pipeline_run,
+)
 from softdoc.models import Document, Element, ElementType, Page, Provenance
 from softdoc.planning.models import InitialPlan, PlannerTrace
 from softdoc.reading_environment import (
@@ -23,6 +27,15 @@ from softdoc.reading_state import (
     ObservationAssessment,
     QuestionStatus,
 )
+from softdoc.teacher_data import (
+    ReviewStatus,
+    TeacherReview,
+    build_teacher_review_template,
+    load_reviewed_run,
+    write_controller_sft_dataset,
+    write_teacher_review,
+)
+from softdoc.training_data import load_openai_messages_sft_jsonl, load_sft_jsonl
 
 
 class FixedPlanner:
@@ -166,6 +179,16 @@ def test_model_runner_records_every_executed_stage_and_writes_artifacts(tmp_path
         "checker",
         "answerer",
     ]
+    controller_calls = [
+        item for item in run.stage_calls if item.component == "controller"
+    ]
+    assert [item.action_id for item in controller_calls] == [
+        item.action_id for item in run.reading_run.action_trace.entries
+    ]
+    reader_call = next(item for item in run.stage_calls if item.component == "reader")
+    checker_call = next(item for item in run.stage_calls if item.component == "checker")
+    assert reader_call.action_id == controller_calls[1].action_id
+    assert checker_call.action_id == controller_calls[1].action_id
 
     output = tmp_path / "run"
     write_model_pipeline_run(run, output)
@@ -177,3 +200,71 @@ def test_model_runner_records_every_executed_stage_and_writes_artifacts(tmp_path
     manifest = json.loads((output / "run_manifest.json").read_text(encoding="utf-8"))
     assert manifest["status"] == "ready"
     assert manifest["call_counts"]["controller"] == 2
+    assert [item["component"] for item in manifest["stage_call_order"]] == [
+        item.component for item in run.stage_calls
+    ]
+    assert any(item["component"] == "controller" for item in manifest["prompts"])
+
+    reloaded = load_model_pipeline_run(output)
+    assert reloaded.model_dump(mode="json") == run.model_dump(mode="json")
+
+    interleaved = run.model_copy(
+        update={
+            "stage_calls": [
+                run.stage_calls[0],
+                run.stage_calls[1],
+                run.stage_calls[3],
+                run.stage_calls[2],
+                run.stage_calls[4],
+                run.stage_calls[5],
+            ]
+        }
+    )
+    interleaved_output = tmp_path / "interleaved-run"
+    write_model_pipeline_run(interleaved, interleaved_output)
+    assert load_model_pipeline_run(interleaved_output).stage_calls == (
+        interleaved.stage_calls
+    )
+
+    template = build_teacher_review_template(reloaded)
+    assert template.episode_status == ReviewStatus.PENDING
+    assert len(template.controller_steps) == 2
+    review_payload = template.model_dump(mode="json")
+    review_payload["episode_status"] = "accepted"
+    for step in review_payload["controller_steps"]:
+        step["training_label_status"] = "accepted"
+        step["review_note"] = "The action is valid and advances the current gap."
+    review = TeacherReview.model_validate(review_payload)
+    write_teacher_review(review, output / "teacher_review.json")
+
+    reviewed_run = load_reviewed_run(output)
+    dataset_dir = tmp_path / "controller_dataset"
+    dataset_manifest = write_controller_sft_dataset([reviewed_run], dataset_dir)
+    assert dataset_manifest.example_count == 2
+    examples = load_sft_jsonl(dataset_dir / "controller_sft.jsonl")
+    assert [item.target["action"] for item in examples] == ["SEARCH", "READ_SOURCE"]
+    assert json.loads(examples[0].input_text)["current_gap"]["question_id"] == (
+        "root:model-run"
+    )
+    assert json.loads(
+        (dataset_dir / "dataset_manifest.json").read_text(encoding="utf-8")
+    )["generation_protocol"] == "teacher-no-gold-v0"
+    message_records = load_openai_messages_sft_jsonl(
+        dataset_dir / "controller_sft_messages.jsonl"
+    )
+    assert len(message_records) == 2
+    assert [item.role for item in message_records[0].messages] == [
+        "system",
+        "user",
+        "assistant",
+    ]
+    assert json.loads(message_records[0].messages[1].content)["current_gap"][
+        "question_id"
+    ] == "root:model-run"
+    assert json.loads(message_records[0].messages[2].content)["action"] == "SEARCH"
+    dataset_info = json.loads(
+        (dataset_dir / "dataset_info.json").read_text(encoding="utf-8")
+    )
+    assert dataset_info["crave_controller_sft"]["columns"] == {
+        "messages": "messages"
+    }
