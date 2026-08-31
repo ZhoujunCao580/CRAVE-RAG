@@ -102,6 +102,8 @@ the current canonical Prompt or action versions.
   Controller, and Answerer JSON examples.
 - [Server Setup](SERVER_SETUP.md): fresh Linux GPU environment and training
   entrypoint.
+- [External Datasets](EXTERNAL_DATASETS.md): native adapters, portable
+  manifests, fail-fast corpus auditing, and Gold-free batch export.
 - [Research Positioning](RESEARCH_POSITIONING.md): current research hypothesis
   and novelty boundary.
 - [TODO](TODO.md): unresolved decisions and experiments. A TODO is not an

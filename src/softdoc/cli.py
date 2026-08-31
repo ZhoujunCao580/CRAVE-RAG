@@ -10,6 +10,13 @@ from typing import Sequence
 
 from softdoc.adapters import MinerUAdapter
 from softdoc.controller_ollama import OllamaControllerBackend, OllamaControllerConfig
+from softdoc.external_data import (
+    MMLongBenchDocAdapter,
+    audit_external_dataset,
+    export_batch_cases,
+    load_external_dataset_manifest,
+    write_external_dataset_manifest,
+)
 from softdoc.model_backends import (
     ModelBackedReader,
     OllamaAnswererBackend,
@@ -141,6 +148,48 @@ def build_parser() -> argparse.ArgumentParser:
     )
     checker_export.add_argument("run_dirs", nargs="+", type=Path)
     checker_export.add_argument("--output", type=Path, required=True)
+
+    datasets = subparsers.add_parser(
+        "datasets",
+        help="Build, audit, or export portable external-dataset manifests",
+    )
+    dataset_subparsers = datasets.add_subparsers(
+        dest="dataset_command", required=True
+    )
+    build_mmlongbench = dataset_subparsers.add_parser(
+        "build-mmlongbench",
+        help="Map native MMLongBench-Doc files and SoftDocs into one manifest",
+    )
+    build_mmlongbench.add_argument("--questions", type=Path, required=True)
+    build_mmlongbench.add_argument("--documents", type=Path, required=True)
+    build_mmlongbench.add_argument("--softdocs", type=Path, required=True)
+    build_mmlongbench.add_argument("--path-root", type=Path, default=Path.cwd())
+    build_mmlongbench.add_argument("--output", type=Path, required=True)
+    build_mmlongbench.add_argument(
+        "--question-index",
+        type=int,
+        action="append",
+        help="Include only this zero-based questions.json index; repeat as needed",
+    )
+    build_mmlongbench.add_argument(
+        "--hash-sources",
+        action="store_true",
+        help="Record PDF SHA-256 values (slower but detects later source drift)",
+    )
+    audit_dataset = dataset_subparsers.add_parser(
+        "audit",
+        help="Fail if any manifest source, SoftDoc, asset, relation, or page is invalid",
+    )
+    audit_dataset.add_argument("manifest", type=Path)
+    audit_dataset.add_argument("--path-root", type=Path)
+    audit_dataset.add_argument("--output", type=Path)
+    export_dataset = dataset_subparsers.add_parser(
+        "export-batch",
+        help="Export Gold-free JSONL accepted by scripts/run_model_batch.py",
+    )
+    export_dataset.add_argument("manifest", type=Path)
+    export_dataset.add_argument("--path-root", type=Path)
+    export_dataset.add_argument("--output", type=Path, required=True)
     return parser
 
 
@@ -359,6 +408,61 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"Exported {manifest.example_count} accepted Checker decisions "
                 f"to {args.output}"
             )
+            return 0
+    if args.command == "datasets":
+        if args.dataset_command == "build-mmlongbench":
+            adapter = MMLongBenchDocAdapter()
+            manifest = adapter.build_manifest(
+                questions_path=args.questions,
+                documents_root=args.documents,
+                softdocs_root=args.softdocs,
+                path_root=args.path_root,
+                manifest_path=args.output,
+                question_indices=(
+                    set(args.question_index) if args.question_index is not None else None
+                ),
+                hash_sources=args.hash_sources,
+            )
+            write_external_dataset_manifest(manifest, args.output)
+            print(
+                f"Mapped {len(manifest.questions)} questions across "
+                f"{len(manifest.documents)} documents to {args.output}"
+            )
+            return 0
+        manifest = load_external_dataset_manifest(args.manifest)
+        if args.dataset_command == "audit":
+            report = audit_external_dataset(
+                manifest,
+                manifest_path=args.manifest,
+                path_root_override=args.path_root,
+            )
+            payload = report.model_dump(mode="json")
+            if args.output is not None:
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                args.output.write_text(
+                    json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            return 0 if report.status == "passed" else 1
+        if args.dataset_command == "export-batch":
+            report = audit_external_dataset(
+                manifest,
+                manifest_path=args.manifest,
+                path_root_override=args.path_root,
+            )
+            if report.status != "passed":
+                raise SystemExit(
+                    "External dataset audit failed; refusing to export runnable cases. "
+                    "Run `softdoc datasets audit` for the full report."
+                )
+            count = export_batch_cases(
+                manifest,
+                manifest_path=args.manifest,
+                output=args.output,
+                path_root_override=args.path_root,
+            )
+            print(f"Exported {count} Gold-free batch cases to {args.output}")
             return 0
     return 2
 

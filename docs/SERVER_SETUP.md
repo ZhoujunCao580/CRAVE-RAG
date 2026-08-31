@@ -54,7 +54,12 @@ generated assets. Copy or mount the following before a real run:
 - optional local dense-model weights and embedding cache;
 - a model endpoint and its text/visual model weights.
 
-Validate every transferred SoftDoc before paying for model inference:
+Build and audit an external-dataset manifest before paying for model inference.
+For MMLongBench-Doc, see `docs/EXTERNAL_DATASETS.md`. The audit verifies source
+files, SoftDocs, visual assets, page counts, and question-document mappings and
+fails explicitly if the external corpus is absent.
+
+For a single manually transferred SoftDoc, also validate it directly:
 
 ```bash
 softdoc validate /workspace/data/softdoc/example
@@ -109,7 +114,9 @@ First run one question. Only after its `run_manifest.json`, stage-call JSONL,
 Reader limitations, and Evidence transitions look sensible should you start a
 batch.
 
-For an isolated batch, create a UTF-8 JSONL manifest with no Gold fields:
+For an isolated batch, export a Gold-free JSONL file from an audited dataset
+manifest. A hand-written UTF-8 JSONL file remains supported for small ad hoc
+experiments:
 
 ```json
 {"case_id":"Q305","question_id":"benchmark:Q305","document_dir":"data/softdoc/doc_a","question":"What value is reported?"}
@@ -201,11 +208,12 @@ script for these artifacts. Do not commit credentials or copyrighted corpora.
 ## 7. Recommended first-server checklist
 
 1. Run `nvidia-smi` and install the `train` dependency profile.
-2. Install the external development assets referenced by the visual regression
-   suite, then confirm `python -m pytest -q` passes. Until those assets are
-   present, use the model-free schema and training-data checks as the fresh-clone
-   smoke test instead of treating missing corpus files as a code failure.
-3. Transfer one SoftDoc and run `softdoc validate`.
+2. Confirm the hermetic repository suite passes with `python -m pytest -q`.
+   Real-corpus semantic evaluation remains a separate, explicit external-data
+   operation.
+3. Build and run `softdoc datasets audit` for the installed corpus. Transfer
+   one SoftDoc and also run `softdoc validate` while diagnosing individual
+   document failures.
 4. Confirm the Ollama-compatible endpoint and both model names respond.
 5. Run exactly one `softdoc run-model` question and inspect all stage logs.
 6. Run the small batch with a fresh output directory.

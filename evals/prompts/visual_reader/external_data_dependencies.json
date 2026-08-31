@@ -1,0 +1,11 @@
+{
+  "schema_version": "prompt-eval-external-data-v0.1",
+  "datasets": [
+    {
+      "dataset_id": "representative-28",
+      "path_prefix": "data/processed/representative_28",
+      "purpose": "Real-document visual Reader development cases",
+      "required_for": "visual_reader semantic evaluation"
+    }
+  ]
+}

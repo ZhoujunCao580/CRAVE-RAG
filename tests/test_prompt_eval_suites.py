@@ -72,17 +72,44 @@ def test_prompt_suites_are_split_and_inputs_validate() -> None:
                 adapter.validate_python(row[payload_keys[component]])
 
 
-def test_visual_reader_case_assets_exist() -> None:
+def test_visual_reader_case_assets_are_tracked_or_explicitly_external() -> None:
+    dependency_path = (
+        EVAL_ROOT / "visual_reader" / "external_data_dependencies.json"
+    )
+    dependency_payload = json.loads(dependency_path.read_text(encoding="utf-8"))
+    assert dependency_payload["schema_version"] == "prompt-eval-external-data-v0.1"
+    prefixes = {
+        item["path_prefix"]: item["dataset_id"]
+        for item in dependency_payload["datasets"]
+    }
+    assert prefixes
     rows = _jsonl(
         EVAL_ROOT / "visual_reader" / "model_inputs" / "visual_reader_cases_v1.jsonl"
     )
+    external_dependencies: set[str] = set()
     for row in rows:
         request = VisualReadRequest.model_validate(row["request"])
         for visual_input in request.visual_inputs:
             path = visual_input.page_image_path
-            if not path.is_absolute():
-                path = ROOT / path
-            assert path.is_file(), f"Missing visual asset for {row['case_id']}: {path}"
+            assert not path.is_absolute(), (
+                f"Visual eval paths must be repository-relative: {row['case_id']}: {path}"
+            )
+            relative = path.as_posix()
+            matched = [
+                dataset_id
+                for prefix, dataset_id in prefixes.items()
+                if relative == prefix or relative.startswith(prefix + "/")
+            ]
+            if matched:
+                assert len(matched) == 1
+                external_dependencies.add(matched[0])
+                continue
+            resolved = (ROOT / path).resolve()
+            assert resolved.is_relative_to(ROOT.resolve())
+            assert resolved.is_file(), (
+                f"Missing tracked visual asset for {row['case_id']}: {resolved}"
+            )
+    assert external_dependencies == set(prefixes.values())
 
 
 def test_exported_output_schemas_match_runtime(tmp_path: Path) -> None:

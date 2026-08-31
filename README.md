@@ -122,6 +122,8 @@ This creates an isolated environment, installs runtime and LoRA/QLoRA
 dependencies, runs the test suite, exports the prompt manifest, and validates
 the training-data contract. Actual SFT additionally requires a model checkpoint
 and a Teacher JSONL dataset; neither large model weights nor research data are
-committed to Git. See [Server Setup](docs/SERVER_SETUP.md).
+committed to Git. Use the [external-dataset manifest and
+auditor](docs/EXTERNAL_DATASETS.md) before batch execution. See [Server
+Setup](docs/SERVER_SETUP.md).
 
 See [Project Guide](docs/PROJECT_GUIDE.md), [Model Contracts](docs/MODEL_CONTRACTS.md), [Architecture](docs/ARCHITECTURE.md), and [TODO](docs/TODO.md) for the current implementation boundary, complete JSON interfaces, and open research questions.
