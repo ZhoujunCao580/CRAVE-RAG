@@ -56,9 +56,8 @@ def test_all_canonical_prompts_use_markdown_sections() -> None:
         assert "# Output" in prompt
 
 
-def test_current_and_archived_prompt_assets_are_separated() -> None:
+def test_prompt_directory_contains_only_current_prompt_assets() -> None:
     current = {path.name for path in PROMPT_DIRECTORY.glob("*.txt")}
-    archived = {path.name for path in (PROMPT_DIRECTORY / "archive").glob("*.txt")}
 
     assert current == {
         "planner_v0_20.txt",
@@ -67,34 +66,7 @@ def test_current_and_archived_prompt_assets_are_separated() -> None:
         "controller_policy_v0_7.txt",
         "answerer_v0_7.txt",
     }
-    assert archived == {
-        "planner_v0_19.txt",
-        "planner_v0_18.txt",
-        "planner_v0_17.txt",
-        "planner_v0_16.txt",
-        "planner_v0_15.txt",
-        "planner_v0_14.txt",
-        "visual_reader_v0_3.txt",
-        "visual_reader_v0_2.txt",
-        "visual_reader_v0_1.txt",
-        "checker_v1_7.txt",
-        "checker_v1_6.txt",
-        "checker_v1_5.txt",
-        "checker_v1_4.txt",
-        "checker_v1_3.txt",
-        "checker_v1_2.txt",
-        "checker_v1_1.txt",
-        "checker_v1_0.txt",
-        "checker_v1_8.txt",
-        "controller_policy_v0_6.txt",
-        "controller_policy_v0_5.txt",
-        "controller_policy_v0_4.txt",
-        "controller_policy_v0_3.txt",
-        "answerer_v0_5.txt",
-        "answerer_v0_6.txt",
-        "answerer_v0_4.txt",
-        "answerer_v0_3.txt",
-    }
+    assert not (PROMPT_DIRECTORY / "archive").exists()
 
 
 def test_checker_prompt_explains_root_target_progression() -> None:

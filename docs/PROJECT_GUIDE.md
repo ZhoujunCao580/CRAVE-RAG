@@ -38,13 +38,15 @@ The guiding principle is:
   tables use the deterministic Reader before any visual fallback.
 - Unified prompt registry, evaluation launcher, Linux bootstrap, and generic
   LoRA/QLoRA SFT entrypoint.
+- Complete model-run audit packets, thin per-decision Teacher reviews, and
+  separate strict Controller/Checker SFT exporters with Prompt/version lineage.
 
 ## Not yet claimed as complete
 
 - Production-quality Reader evaluation and server-native model adapters beyond
   the current Ollama v0 backend.
 - A trained Controller policy or a production Teacher trajectory corpus.
-- A frozen TeacherTrajectory schema and validated local Teacher corpus.
+- A reviewed, diverse local Teacher corpus and preference/RL data.
 - Deferred planning and Observation Recall.
 - Citation materialization in final user-facing output.
 - Full-dataset answer-quality evaluation and action-value ablations.
@@ -62,7 +64,6 @@ src/softdoc/
   retrieval/                SearchUnits, Exact, BM25, Dense, sessions/previews
   planning/                 Planner models, renderer, and backend interface
   prompts/                  current versioned prompt text for all components
-  prompts/archive/          superseded prompt versions for audit/reproduction
   visual_reading.py         Visual Reader contract and user-prompt renderer
   reading_state.py          reads, Observations, Evidence, and action trace
   checking_prompt.py        Checker version and compatibility loader
@@ -71,6 +72,7 @@ src/softdoc/
   reading_environment.py    executable reading-loop orchestration
   model_backends.py         Ollama Reader/Checker/Answerer adapters
   model_runner.py           Planner-to-Answerer runner and audit artifacts
+  teacher_data.py           thin Controller/Checker reviews and separate SFT exports
   answering.py              Answerer contract and user-prompt renderer
   prompt_registry.py        single prompt discovery/version entrypoint
 ```
@@ -104,6 +106,8 @@ the current canonical Prompt or action versions.
   and novelty boundary.
 - [TODO](TODO.md): unresolved decisions and experiments. A TODO is not an
   implemented feature.
+- [Teacher Loop Handoff](TEACHER_LOOP_HANDOFF.md): artifact boundaries,
+  review/export workflow, and quality rules for trajectory distillation.
 
 Frozen prompt text is not copied into documentation. Edit or inspect the
 versioned files in `src/softdoc/prompts/`, and use the executable registry to

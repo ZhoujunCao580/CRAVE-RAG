@@ -45,8 +45,6 @@ where = ["src"]
 softdoc = [
     "prompts/*.txt",
     "prompts/README.md",
-    "prompts/archive/*.txt",
-    "prompts/archive/README.md",
 ]
 
 [tool.pytest.ini_options]

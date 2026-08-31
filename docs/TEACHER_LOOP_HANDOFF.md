@@ -48,11 +48,12 @@ component failures.
    terminal result. Controller calls are linked to executed actions by
    `action_id`; automatic Exact Anchor reads remain distinguishable from model
    decisions.
-2. **`teacher_review.json`** is a thin human/Teacher label file beside that run.
-   It identifies the reading session and marks each Controller decision
-   `pending`, `accepted`, or `rejected`. It never copies model inputs, outputs,
-   Evidence, or observations.
-3. **Controller SFT exports** are derived training data, with one row per
+2. **Thin review files** sit beside that run. `teacher_review.json` marks each
+   Controller decision `pending`, `accepted`, or `rejected`.
+   `checker_review.json` independently reviews each Checker call and can hold a
+   corrected delta without changing the raw run. Neither file duplicates model
+   inputs, Evidence, or Observations.
+3. **Component-specific SFT exports** are derived training data, with one row per
    explicitly accepted decision. `controller_sft.jsonl` preserves CRAVE-RAG's
    internal provenance-bearing `SFTExample`; `controller_sft_messages.jsonl`
    materializes the LLaMA-Factory/OpenAI `messages` form:
@@ -70,6 +71,12 @@ then emits both representations plus `dataset_manifest.json` and a
 LLaMA-Factory `dataset_info.json`. The two JSONL files contain the same examples
 in the same order; only the model-facing messages file is passed to
 LLaMA-Factory.
+
+The Checker exporter performs the analogous join for
+`EvidenceCheckInput -> EvidenceCheckResult` and additionally runs the ordinary
+atomic Evidence update validator before accepting an example. It writes a
+separate `checker_sft_messages.jsonl`; Checker targets are never mixed into the
+Controller dataset.
 
 ## Recommended production loop
 
@@ -168,6 +175,9 @@ then export one or more reviewed runs:
 ```bash
 softdoc teacher-data export-controller path/to/run_a path/to/run_b \
   --output path/to/controller_dataset
+softdoc teacher-data init-checker-review path/to/run
+softdoc teacher-data export-checker path/to/run_a path/to/run_b \
+  --output path/to/checker_dataset
 python scripts/train_sft.py \
   --data path/to/controller_dataset/controller_sft.jsonl --validate-only
 ```

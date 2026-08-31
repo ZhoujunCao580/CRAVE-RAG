@@ -31,8 +31,12 @@ from softdoc.server_readiness import check_server_readiness, readiness_install_h
 from softdoc.serialization import load_document, write_document
 from softdoc.store import DocumentStore
 from softdoc.teacher_data import (
+    build_checker_review_template,
     build_teacher_review_template,
+    load_checker_reviewed_run,
     load_reviewed_run,
+    write_checker_review,
+    write_checker_sft_dataset,
     write_controller_sft_dataset,
     write_teacher_review,
 )
@@ -98,6 +102,10 @@ def build_parser() -> argparse.ArgumentParser:
     run_model.add_argument("--action-budget", type=int, default=7)
     run_model.add_argument("--run-key", default="model-v0")
     run_model.add_argument(
+        "--question-id",
+        help="Optional stable benchmark question ID; otherwise derive one from the text",
+    )
+    run_model.add_argument(
         "--dense",
         action="store_true",
         help="Enable multilingual-E5 Dense retrieval in addition to BM25",
@@ -118,11 +126,21 @@ def build_parser() -> argparse.ArgumentParser:
         "init-review", help="Create a pending teacher_review.json beside one run"
     )
     teacher_init.add_argument("run_dir", type=Path)
+    checker_init = teacher_subparsers.add_parser(
+        "init-checker-review",
+        help="Create a pending checker_review.json beside one run",
+    )
+    checker_init.add_argument("run_dir", type=Path)
     teacher_export = teacher_subparsers.add_parser(
         "export-controller", help="Export accepted Controller decisions from reviewed runs"
     )
     teacher_export.add_argument("run_dirs", nargs="+", type=Path)
     teacher_export.add_argument("--output", type=Path, required=True)
+    checker_export = teacher_subparsers.add_parser(
+        "export-checker", help="Export accepted Checker decisions from reviewed runs"
+    )
+    checker_export.add_argument("run_dirs", nargs="+", type=Path)
+    checker_export.add_argument("--output", type=Path, required=True)
     return parser
 
 
@@ -295,6 +313,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             asset_root=args.document_dir,
             question=question,
             run_key=args.run_key,
+            question_id=args.question_id,
             search_service=search_service,
         )
         write_model_pipeline_run(result, args.output)
@@ -315,11 +334,29 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "Controller decisions"
             )
             return 0
+        if args.teacher_command == "init-checker-review":
+            run = load_model_pipeline_run(args.run_dir)
+            review = build_checker_review_template(run)
+            output = args.run_dir / "checker_review.json"
+            write_checker_review(review, output)
+            print(
+                f"Created {output} with {len(review.checker_steps)} pending "
+                "Checker decisions"
+            )
+            return 0
         if args.teacher_command == "export-controller":
             reviewed_runs = [load_reviewed_run(path) for path in args.run_dirs]
             manifest = write_controller_sft_dataset(reviewed_runs, args.output)
             print(
                 f"Exported {manifest.example_count} accepted Controller decisions "
+                f"to {args.output}"
+            )
+            return 0
+        if args.teacher_command == "export-checker":
+            reviewed_runs = [load_checker_reviewed_run(path) for path in args.run_dirs]
+            manifest = write_checker_sft_dataset(reviewed_runs, args.output)
+            print(
+                f"Exported {manifest.example_count} accepted Checker decisions "
                 f"to {args.output}"
             )
             return 0

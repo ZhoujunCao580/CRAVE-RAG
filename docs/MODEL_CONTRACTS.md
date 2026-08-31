@@ -518,7 +518,7 @@ Planner
 Search results, CandidatePreviews, Relations, and Observations never bypass the
 Checker to become answer Evidence.
 
-## Teacher review and Controller SFT export
+## Teacher reviews and component-specific SFT export
 
 A model run is already the complete trajectory. Teacher supervision is stored
 as a separate, deliberately small review rather than copying the run:
@@ -556,3 +556,20 @@ The review stores neither Gold-access declarations nor duplicated Evidence.
 Gold isolation is enforced by the generation/evaluation protocol, while the
 canonical run remains the source of truth for what the model saw and what the
 environment executed.
+
+Checker supervision uses the same separation. `checker_review.json` labels
+each recorded Checker call and may attach a corrected `replacement_output`
+without mutating the raw run. Before export, the corrected or original
+`EvidenceCheckResult` is applied to its recorded `EvidenceCheckInput` using the
+normal atomic state-transition validator. The separate export contains:
+
+```text
+checker_sft.jsonl      accepted EvidenceCheckInput -> EvidenceCheckResult examples
+checker_sft_messages.jsonl
+                       the same examples as system/user/assistant messages
+dataset_info.json      LLaMA-Factory dataset registration
+dataset_manifest.json Checker prompt hash/version and source-run lineage
+```
+
+Controller and Checker examples are never mixed into one dataset or one
+adapter merely because they came from the same full episode.

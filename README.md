@@ -37,9 +37,9 @@ The structure preserves page layout, element bounding boxes, reading order, visu
 
 The repository currently provides the SoftDoc representation, MinerU adaptation pipeline, deterministic document relations, spatial navigation, exact/sparse/dense retrieval, candidate previews, search sessions, frozen contracts for planning, reading, evidence checking, and answering, an executable stateful reading loop, and an Ollama-backed end-to-end runner with explicit incomplete termination.
 
-The immediate research stage is prompt development on a small fixed case set,
-freezing TeacherTrajectory v0, and generating validated local Teacher traces
-before Controller SFT. Production policy evaluation, final source citation
+The immediate research stage is generating and reviewing a small, diverse set
+of local reading runs, then exporting validated Controller decisions for SFT.
+Production policy evaluation, final source citation
 materialization, and full answer-quality and reading-efficiency experiments
 follow after that foundation is stable.
 

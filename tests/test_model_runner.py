@@ -28,10 +28,15 @@ from softdoc.reading_state import (
     QuestionStatus,
 )
 from softdoc.teacher_data import (
+    CheckerReview,
     ReviewStatus,
     TeacherReview,
+    build_checker_review_template,
     build_teacher_review_template,
+    load_checker_reviewed_run,
     load_reviewed_run,
+    write_checker_review,
+    write_checker_sft_dataset,
     write_controller_sft_dataset,
     write_teacher_review,
 )
@@ -268,3 +273,29 @@ def test_model_runner_records_every_executed_stage_and_writes_artifacts(tmp_path
     assert dataset_info["crave_controller_sft"]["columns"] == {
         "messages": "messages"
     }
+
+    checker_template = build_checker_review_template(reloaded)
+    assert len(checker_template.checker_steps) == 1
+    checker_payload = checker_template.model_dump(mode="json")
+    checker_payload["episode_status"] = "accepted"
+    checker_payload["checker_steps"][0]["training_label_status"] = "accepted"
+    checker_payload["checker_steps"][0]["review_note"] = (
+        "The delta is valid and closes the Root target."
+    )
+    checker_review = CheckerReview.model_validate(checker_payload)
+    write_checker_review(checker_review, output / "checker_review.json")
+
+    checker_dataset_dir = tmp_path / "checker_dataset"
+    checker_manifest = write_checker_sft_dataset(
+        [load_checker_reviewed_run(output)], checker_dataset_dir
+    )
+    assert checker_manifest.example_count == 1
+    checker_examples = load_sft_jsonl(checker_dataset_dir / "checker_sft.jsonl")
+    assert checker_examples[0].component.value == "checker"
+    assert checker_examples[0].target["root_status"] == "ready"
+    checker_message_records = load_openai_messages_sft_jsonl(
+        checker_dataset_dir / "checker_sft_messages.jsonl"
+    )
+    assert json.loads(checker_message_records[0].messages[2].content)[
+        "current_target_status"
+    ] == "satisfied"

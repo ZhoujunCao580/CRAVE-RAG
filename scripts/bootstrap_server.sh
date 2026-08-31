@@ -24,6 +24,7 @@ case "${PROFILE}" in
     ;;
 esac
 
+python -m pip check
 softdoc doctor --profile "${PROFILE}"
 python -m pytest -q
 softdoc prompts export --output .runlogs/prompts

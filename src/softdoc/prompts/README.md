@@ -18,15 +18,14 @@ runtime discovery entrypoint.
 
 Current prompts use Markdown headings to separate stable instruction sections.
 At runtime, stable instructions are sent as the system message and validated,
-dynamic component input is sent as a separate user message. Superseded files
-live in [`archive/`](archive/README.md) as immutable history and are not loaded
-by the canonical runtime. The current directory keeps only the active `.txt`
-version of each component.
+and dynamic component input is sent as a separate user message. This directory
+keeps only the active `.txt` version of each component. Superseded versions are
+recoverable from Git history and are not duplicated in the working tree.
 
 When changing prompt semantics:
 
 1. create the new versioned file in this directory;
-2. move the superseded file into `archive/`;
+2. delete the superseded working-tree file after updating the runtime loader;
 3. update the corresponding version constant and loader reference;
 4. update focused prompt tests and evaluation cases;
 5. regenerate the prompt manifest and record evaluation results;

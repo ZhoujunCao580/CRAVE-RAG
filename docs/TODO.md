@@ -1,94 +1,123 @@
 # TODO
 
-这里只保留尚未完成、必须通过真实实验决定的事项。已实现的契约与流程见
-[`MODEL_CONTRACTS.md`](MODEL_CONTRACTS.md) 和
-[`ARCHITECTURE.md`](ARCHITECTURE.md)，不在 TODO 重复记录。
+This file contains only unresolved work that requires evidence from real
+experiments. Implemented contracts and workflows belong in
+[`MODEL_CONTRACTS.md`](MODEL_CONTRACTS.md) and
+[`ARCHITECTURE.md`](ARCHITECTURE.md), not here.
 
-## 1. PDF 与 SoftDoc 完整性
+## 1. PDF and SoftDoc integrity
 
-- [ ] 在完整数据集上区分 MinerU 上游漏检/错类型/错裁剪与 SoftDoc Adapter
-  丢失，优先修复通用问题，不按单份文档堆规则。
-- [ ] 复核 22 个上游 Table 类型误判候选，并测量它们对检索、阅读和回答的
-  真实影响，再决定是否需要通用类型校验或其他解析后端。
-- [ ] 审计复合 Table 内部图片：有效 `<img src>`、仅有 `<image N>` 占位、完全
-  无提示但视觉区域含图三类必须分开；暂不增加每表都调用 VLM 的检测模块。
-- [ ] 在更大样本上比较当前 Pipeline、MinerU Hybrid 和视觉 recovery；没有净
-  收益的 recovery/Normalizer 不保留。
-- [ ] 跨页聚合 Table 的拆分只是 representative-28 上的开发策略。完整数据集上
-  比较“保留 MinerU 聚合结果”和“按物理页拆分并生成 confirmed
-  `continued_on`”。行归属、重复表头或跨页 `rowspan` 无法唯一验证时不得强拆。
+- [ ] On the complete datasets, distinguish MinerU omissions, wrong element
+  types, and wrong crops from information lost by the SoftDoc adapter. Fix
+  general failures instead of adding rules for individual documents.
+- [ ] Review the 22 upstream Table-type error candidates and measure their
+  impact on retrieval, reading, and answers before adding general type
+  validation or another parser backend.
+- [ ] Audit composite Tables as three distinct cases: valid `<img src>`, only
+  an `<image N>` placeholder, and no hint even though the visual region contains
+  an image. Do not add a VLM call for every Table in v0.
+- [ ] Compare the current pipeline, MinerU Hybrid, and visual recovery on a
+  larger sample. Remove recovery/normalization rules with no net benefit.
+- [ ] Treat splitting MinerU-aggregated cross-page Tables as a development
+  strategy validated only on representative-28. On the full datasets, compare
+  retaining MinerU aggregation with splitting by physical page and producing a
+  confirmed `continued_on` relation. Do not split when row ownership, repeated
+  headers, or cross-page `rowspan` cannot be validated uniquely.
 
-## 2. Planner 策略
+## 2. Planner policy
 
-- [ ] 在完整 Reading Loop 上同条件比较 No Planner、Initial Planner 和 Deferred
-  Planner。
-- [ ] 同时报告答案质量、Evidence 完整性、动作/模型调用数、延迟和成本；只有
-  Deferred Planning 有稳定净收益才实现动态计划更新。
+- [ ] Compare No Planner, Initial Planner, and Deferred Planner under identical
+  full-loop conditions.
+- [ ] Report answer quality, Evidence completeness, action/model-call count,
+  latency, and cost. Implement dynamic plan updates only if Deferred Planning
+  provides a stable net gain.
 
-## 3. 检索、候选批次与预算
+## 3. Retrieval, candidate batches, and budget
 
-- [ ] 比较 weighted RRF、固定配额混合（如 `3 BM25 + 2 Dense`）和 BM25-first
-  后按需 Dense 三种策略。
-- [ ] 调整每批 Preview 数（如 `3/5/10`）、BM25/Dense 配额、RRF 参数，以及何时
-  next/switch/new search。
-- [ ] 不只报告 Top-k recall；还报告找到充分 Evidence 所需批次、完整读取数、
-  VLM 调用、延迟和费用。
-- [ ] 将当前 action-count 占位预算替换为可配置资源成本。搜索翻批、文本读取、
-  整页视觉和局部视觉不能默认等成本。
+- [ ] Compare weighted RRF, fixed-quota mixing such as `3 BM25 + 2 Dense`, and
+  BM25-first with Dense used only when needed.
+- [ ] Tune CandidatePreview batch sizes such as `3/5/10`, BM25/Dense quotas,
+  RRF parameters, and the policy for next/switch/new search.
+- [ ] Report more than Top-k recall: include candidate batches, full reads, VLM
+  calls, latency, and cost required to obtain sufficient Evidence.
+- [ ] Replace the current action-count placeholder budget with configurable
+  resource cost. Paging search results, reading text, reading a whole page, and
+  inspecting a visual region must not be treated as equal-cost actions.
 
-## 4. Reader 与视觉动作
+## 4. Reader and visual actions
 
-- [ ] 用真实 QA 比较 Controller 直接消费结构化内容与专门 Reader 输出
-  Observation；只有后者改善质量或成本时才保留专门 Reader。
-- [ ] Visual Reader v0 暂时统一 Page/Figure/Chart；以后再以实验决定是否拆分
-  Page/Element 或 Figure/Chart Reader。
-- [ ] 默认单图读取；可拆成独立数值/事实的多图比较应分别读取并由 Answerer
-  汇总。只有视觉关系本身不可拆分时才联合多图读取。
-- [ ] `INSPECT_REGION`/zoom、结构化 Table Reader 和视觉 fallback 均等待真实
-  failure taxonomy 后再加入动作空间，不为假设场景提前扩 Schema。
-- [ ] 当 `continued_on` 未检测到、candidate Relation 可疑或结构化读取失败时，
-  由 Controller 决定相邻页、候选关系或视觉读取；Reader 不自动导航。
+- [ ] On real QA, compare direct Controller use of structured content with a
+  dedicated Reader producing Observations. Keep the dedicated Reader only if it
+  improves quality or cost.
+- [ ] Visual Reader v0 handles Page, Figure, and Chart together. Decide from
+  experiments whether Page/Element or Figure/Chart Readers should be separated.
+- [ ] Default to single-image reads. Decompose multi-image numeric or factual
+  comparisons into separate reads followed by Answerer aggregation. Use joint
+  multi-image reading only when the visual relationship itself is inseparable.
+- [ ] Add `INSPECT_REGION`/zoom, a structured Table Reader, or visual fallback
+  only after a real failure taxonomy justifies them; do not expand the action
+  schema for hypothetical cases.
+- [ ] When `continued_on` is absent, a candidate Relation is uncertain, or a
+  structured read fails, let the Controller choose an adjacent page, candidate
+  relation, or visual read. The Reader must not navigate automatically.
 
-## 5. Relation 与规则审计
+## 5. Relation and rule audits
 
-- [ ] 在真实轨迹上逐类消融 `caption_of`、`footnote_of`、`refers_to`、Section、
-  page/reading adjacency 和 `continued_on`，测量 Evidence 增益、减少的搜索次数和
-  错误导航成本。
-- [ ] 审计仍偏激进的规则，优先检查
-  `parser_declared_function_target`、`bounded_nearest_compatible_element` 和
-  `profile_forced_sibling_level`；依据最终 QA 收益决定保留、降为 candidate 或删除。
-- [ ] confirmed Relation 与 candidate Relation 必须持续分开评估；candidate 只能
-  作为调查机会，不能因被探索而自动升级为事实。
+- [ ] Ablate `caption_of`, `footnote_of`, `refers_to`, Section, page/reading
+  adjacency, and `continued_on` on real trajectories. Measure Evidence gain,
+  searches avoided, and incorrect-navigation cost.
+- [ ] Audit the remaining aggressive rules, starting with
+  `parser_declared_function_target`, `bounded_nearest_compatible_element`, and
+  `profile_forced_sibling_level`. Retain, downgrade to candidate, or remove each
+  rule based on final QA utility.
+- [ ] Keep confirmed and candidate Relations separate in evaluation. A
+  candidate is an investigation opportunity and must not become a fact merely
+  because the Controller explored it.
 
-## 6. Observation、Evidence Checker 与 Recall
+## 6. Observation, Evidence Checker, and Recall
 
-- [ ] 决定混合 Observation 的持久化边界（回归案例 C23）：当一个 Observation
-  同时包含可靠局部事实和“当前来源不足以证明因果”时，评估是否将可靠子事实提升为
-  Evidence，并只把因果不足保留在 limitation/current gap。v0 尚无 Observation
-  Recall，不能让有用事实静默丢失。
-- [ ] 评估 Observation Recall：当后续问题可能复用旧但未采纳 Observation 时，
-  比较重新读取与从 ObservationStore 召回再交 Checker；只有减少成本且不增加错误
-  才实现 Recall。
-- [ ] 评估一次 Observation 可支持多个问题造成的重复读取风险；v0 仍一次只评估
-  当前 target，不提前扩大 Checker 范围。
+- [ ] Decide how to persist mixed Observations (regression case C23). When one
+  Observation contains both a reliable local fact and a claim that the current
+  source cannot establish causality, test whether to promote the reliable
+  sub-fact while keeping the causal insufficiency in the limitation/current
+  gap. Observation Recall is absent in v0, so useful facts can otherwise be
+  lost silently.
+- [ ] Evaluate Observation Recall when later targets could reuse a previously
+  rejected Observation. Compare rereading with recalling from ObservationStore
+  and resubmitting to the Checker; implement Recall only if it reduces cost
+  without increasing errors.
+- [ ] Evaluate duplicate reads caused by one Observation potentially supporting
+  multiple questions. v0 still evaluates only the current target per Checker
+  invocation.
 
-## 7. Controller 策略与训练
+## 7. Controller policy and training
 
-- [ ] 用更强服务器模型验证 Controller 是否能拒绝“主题相关但不能填补当前字段”的
-  Preview，以及是否真正区分 confirmed/candidate Relation。
-- [ ] 建立 Teacher 轨迹并记录每一步的可接受动作、Evidence 净增益、成本和失败原因；
-  先做 prompted Teacher/SFT，再决定是否需要偏好训练或 RL。
-- [ ] 防止无意义循环：重复动作只有在 Evidence、gap、输入可读性或候选状态发生变化
-  后才允许；`STOP` 不得把 incomplete 改成 ready。
-- [ ] 比较只给当前 gap 与给完整精简 Evidence/近期反馈的策略，确认哪些状态字段确实
-  改善动作选择后再冻结训练输入。
+- [ ] With stronger server models, test whether the Controller rejects previews
+  that are topically relevant but cannot fill the current field, and whether it
+  reliably distinguishes confirmed from candidate Relations.
+- [ ] Build Teacher trajectories that record acceptable actions, net Evidence
+  gain, cost, and failure cause per step. Start with prompted Teacher/SFT before
+  deciding whether preference training or RL is necessary.
+- [ ] Prevent meaningless loops: repeat an action only after Evidence, gap,
+  readability, or candidate state changes. `STOP` must never turn incomplete
+  into ready.
+- [ ] Compare giving the Controller only the current gap with giving it concise
+  full Evidence and recent feedback. Freeze training inputs only after testing
+  which state fields actually improve action selection.
+- [ ] Single-step Controller SFT learns only `ControllerInput -> Action` and may
+  miss long-horizon credit assignment, route planning, temporarily low immediate
+  information gain, and trajectory-level cost control. Preserve the full
+  `ModelPipelineRun`, then compare multi-turn trajectory supervision,
+  preference learning, and RL before expanding the training target.
 
-## 8. Answerer 与最终引用
+## 8. Answerer and final citations
 
-- [ ] 在更强模型上验证 Evidence 只证明“发生变化”但 Root 追问“为什么”时的拒答
-  行为；首要防线仍是 Checker 不应过早 `ready`。
-- [ ] 实现 Citation Materializer：确定性展开
-  `used_evidence_ids -> observation_ids -> ReadRecord.inputs -> SoftDoc source`，生成
-  Document/Page/Element/Region 引用；Answerer 不得自行编造位置。
-- [ ] 在完整数据集上进行端到端答案质量、Evidence 充分性、citation correctness、
-  动作效率和成本评估。
+- [ ] With stronger models, test abstention when Evidence proves only that a
+  change occurred but the Root asks why it occurred. The primary safeguard is
+  still preventing the Checker from declaring `ready` too early.
+- [ ] Implement a deterministic Citation Materializer that expands
+  `used_evidence_ids -> observation_ids -> ReadRecord.inputs -> SoftDoc source`
+  into Document/Page/Element/Region citations. The Answerer must not invent
+  source locations.
+- [ ] On complete datasets, evaluate end-to-end answer quality, Evidence
+  sufficiency, citation correctness, reading efficiency, and cost.
