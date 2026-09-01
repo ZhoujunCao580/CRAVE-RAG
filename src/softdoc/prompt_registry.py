@@ -18,10 +18,15 @@ from softdoc.visual_reading import (
     VISUAL_READER_PROMPT_VERSION,
     VISUAL_READER_SYSTEM_PROMPT,
 )
+from softdoc.visual_retrieval import (
+    VISUAL_RETRIEVAL_PROMPT_VERSION,
+    VISUAL_RETRIEVAL_SYSTEM_PROMPT,
+)
 
 
 class PromptComponent(StrEnum):
     PLANNER = "planner"
+    VISUAL_RETRIEVAL = "visual_retrieval"
     VISUAL_READER = "visual_reader"
     CHECKER = "checker"
     ANSWERER = "answerer"
@@ -79,6 +84,13 @@ PROMPT_REGISTRY: dict[PromptComponent, PromptSpec] = {
         prompt_kind="system_prompt",
         source_module="softdoc.visual_reading",
         canonical_text=VISUAL_READER_SYSTEM_PROMPT,
+    ),
+    PromptComponent.VISUAL_RETRIEVAL: PromptSpec(
+        component=PromptComponent.VISUAL_RETRIEVAL,
+        version=VISUAL_RETRIEVAL_PROMPT_VERSION,
+        prompt_kind="system_prompt",
+        source_module="softdoc.visual_retrieval",
+        canonical_text=VISUAL_RETRIEVAL_SYSTEM_PROMPT,
     ),
     PromptComponent.CHECKER: PromptSpec(
         component=PromptComponent.CHECKER,

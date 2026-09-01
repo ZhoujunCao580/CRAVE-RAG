@@ -120,7 +120,14 @@ class PdfTextLayerCoverageRecovery:
                         or _is_extreme_margin_line(fragment, page)
                     ):
                         continue
-                    element = self._recovered_element(document, page, fragment, page_elements)
+                    element = self._recovered_element(
+                        document,
+                        page,
+                        fragment,
+                        page_elements,
+                    )
+                    if element is None:
+                        continue
                     page_elements.append(element)
                     recovered.append(element)
 
@@ -179,7 +186,7 @@ class PdfTextLayerCoverageRecovery:
         page: Page,
         line: PdfTextLine,
         page_elements: list[Element],
-    ) -> Element:
+    ) -> Element | None:
         # Reserve a high source index so parser-provided IDs (normally dense,
         # low indexes) remain untouched.  The PDF line index makes this stable
         # across repeated parses of the same source.
@@ -202,8 +209,15 @@ class PdfTextLayerCoverageRecovery:
                 _RECOVERY_ROLE,
             )
 
-        x1, bottom, x2, top = line.bbox
         source_width, source_height = _source_page_size(line, page)
+        clipped_bbox = _clip_pdf_bbox(
+            line.bbox,
+            page_width=source_width,
+            page_height=source_height,
+        )
+        if clipped_bbox is None:
+            return None
+        x1, bottom, x2, top = clipped_bbox
         raw_bbox = (
             x1 / source_width * page.width,
             (source_height - top) / source_height * page.height,
@@ -217,6 +231,9 @@ class PdfTextLayerCoverageRecovery:
             "text": line.text,
             "pdf_bbox": line.bbox,
         }
+        bbox_was_clipped = clipped_bbox != line.bbox
+        if bbox_was_clipped:
+            provenance_payload["clipped_pdf_bbox"] = clipped_bbox
         return Element(
             element_id=candidate_id,
             document_id=document.document_id,
@@ -249,6 +266,7 @@ class PdfTextLayerCoverageRecovery:
                     "reason": "No normalized-text and spatial coverage match in parser output",
                     "source_pdf": self.source_pdf.as_posix(),
                     "pdf_bbox": line.bbox,
+                    "bbox_clipped_to_page": bbox_was_clipped,
                 }
             },
         )
@@ -552,6 +570,32 @@ def _source_page_size(line: PdfTextLine, page: Page) -> tuple[float, float]:
         line.source_page_width or page.width,
         line.source_page_height or page.height,
     )
+
+
+def _clip_pdf_bbox(
+    bbox: tuple[float, float, float, float],
+    *,
+    page_width: float,
+    page_height: float,
+) -> tuple[float, float, float, float] | None:
+    """Clip PDF glyph overhang to the physical page instead of aborting recovery.
+
+    Some valid PDFs expose selectable glyph boxes slightly outside the media
+    box, especially for transformed text or decorative fonts.  The overflow is
+    not a reason to discard recovery for every other line in the document.
+    Lines wholly outside the page remain unusable and are skipped.
+    """
+
+    x1, bottom, x2, top = bbox
+    clipped = (
+        max(0.0, min(page_width, x1)),
+        max(0.0, min(page_height, bottom)),
+        max(0.0, min(page_width, x2)),
+        max(0.0, min(page_height, top)),
+    )
+    if clipped[0] >= clipped[2] or clipped[1] >= clipped[3]:
+        return None
+    return clipped
 
 
 def _reading_order_key(element: Element) -> tuple[float, float, float, float, int, str]:

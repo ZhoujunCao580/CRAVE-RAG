@@ -1,6 +1,6 @@
 # Model Contracts
 
-This document is the canonical, human-readable view of CRAVE-RAG's five
+This document is the canonical, human-readable view of CRAVE-RAG's six
 model-facing boundaries. The Pydantic models in `src/softdoc` remain the
 executable source of truth. Editable frozen prompt text lives in
 `src/softdoc/prompts/` and is exposed through `softdoc prompts show
@@ -81,7 +81,31 @@ After validation, the program adds `planner_trace` and stores an `InitialPlan`:
 }
 ```
 
-## 2. Reader
+## 2. Visual retrieval indexing
+
+Before question answering, a VLM may create a search-only identity for a real
+Figure, Chart, or Table asset. Confirmed captions and the section path may be
+supplied as context. Candidate Relations are excluded. The model returns:
+
+```json
+{
+  "search_summary": "A line chart compares AP and AP50 with and without NMS across decoder layers.",
+  "keywords": ["AP", "AP50", "NMS", "decoder layers"]
+}
+```
+
+The program binds this output to the requested Element, records the visual
+asset hash, generator model, Prompt version, and purpose `search_only`, then
+adds the summary and keywords to the Element's SearchUnit. BM25 and Dense
+retrieval may rank this text, but it is never an Observation or Evidence. A
+Reader must still inspect the source image before the Checker can admit a fact
+into Evidence Memory.
+
+The frozen Prompt is `visual-retrieval-v0.1`. It deliberately avoids chart
+values, trends, rankings, conclusions, inferred identities, and decorative
+diagram objects.
+
+## 3. Reader
 
 The example below is the Visual Reader contract. Text, table, page, and visual
 Readers are normalized afterward into the same `ReadRecord` and
@@ -186,7 +210,7 @@ failed reads. The canonical stored form for this example is:
 }
 ```
 
-## 3. Evidence Checker
+## 4. Evidence Checker
 
 The Checker receives the complete current Evidence Memory plus only the new
 Observations and limitations produced by one read action. It returns a delta;
@@ -283,7 +307,7 @@ is answerable. The Checker evaluates the complete Evidence set against the
 Root. If the Root is still incomplete after all planned nodes are satisfied,
 the program makes the Root the next current target.
 
-## 4. Controller
+## 5. Controller
 
 The Controller receives a derived working view, not the full ObservationStore
 or the full document graph. Candidate previews and Relations are navigation
@@ -444,7 +468,7 @@ The complete action union also supports `SEARCH` (`new`, `next`, or `switch`),
 `STOP`. Exact Anchor matches are resolved and read by the Environment before an
 ordinary Controller search decision when the match is unique and readable.
 
-## 5. Answerer
+## 6. Answerer
 
 The Answerer is callable only after the Root is `ready`. It sees accepted
 Evidence and the question DAG, but not raw retrieval results, Relations, or

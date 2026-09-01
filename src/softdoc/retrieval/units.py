@@ -14,6 +14,7 @@ from softdoc.retrieval.models import (
     SkippedSearchElement,
 )
 from softdoc.retrieval.tokenization import TokenSpan, chunk_token_spans
+from softdoc.visual_retrieval import visual_retrieval_descriptor
 
 
 _BOUNDARY_END = frozenset(".!?。！？;；:")
@@ -41,7 +42,7 @@ class SearchUnitBuilder:
         skipped: list[SkippedSearchElement] = []
         for element in ordered:
             try:
-                body, context = _searchable_content(element)
+                body, context, visual_descriptor_id = _searchable_content(element)
                 display_label = _display_label(element)
                 if not body:
                     generated_visual = bool(
@@ -81,13 +82,16 @@ class SearchUnitBuilder:
                     content_search_start = search_text.rfind(content_text)
                     if content_search_start < 0:
                         raise ValueError("SearchUnit content is missing from search_text")
-                    unit_id = "search-unit:" + stable_digest(
+                    unit_id_parts: list[object] = [
                         document.document_id,
                         element.element_id,
                         part_index,
                         self.config.model_dump(mode="json"),
                         content_text,
-                    )
+                    ]
+                    if visual_descriptor_id is not None:
+                        unit_id_parts.extend([visual_descriptor_id, search_text])
+                    unit_id = "search-unit:" + stable_digest(*unit_id_parts)
                     units.append(
                         SearchUnit(
                             search_unit_id=unit_id,
@@ -115,6 +119,7 @@ class SearchUnitBuilder:
                                 element.content_availability
                                 or ContentAvailability.UNAVAILABLE
                             ),
+                            visual_descriptor_id=visual_descriptor_id,
                             index_version=self.config.index_version,
                         )
                     )
@@ -136,7 +141,9 @@ class SearchUnitBuilder:
         )
 
 
-def _searchable_content(element: Element) -> tuple[str, list[str]]:
+def _searchable_content(
+    element: Element,
+) -> tuple[str, list[str], str | None]:
     section_path = _clean_components(element.section_path or [])
     text = _normalize_text(element.text or "")
     label = _normalize_text(element.reference_label or "")
@@ -144,25 +151,55 @@ def _searchable_content(element: Element) -> tuple[str, list[str]]:
     if element.element_type == ElementType.HEADING:
         if section_path and _same_text(section_path[-1], text):
             section_path = section_path[:-1]
-        return text, section_path
+        return text, section_path, None
 
     if element.element_type in {ElementType.FIGURE, ElementType.CHART}:
         if element.metadata.get("generated_visual_text") is True:
             text = ""
-        body = _join_unique([label, text])
-        return body, section_path
+        descriptor = visual_retrieval_descriptor(element)
+        descriptor_text = _descriptor_text(descriptor)
+        body = _join_unique([label, text, descriptor_text])
+        return (
+            body,
+            section_path,
+            descriptor.descriptor_id if descriptor is not None else None,
+        )
 
     if element.element_type == ElementType.TABLE:
         table_text = html_to_text(element.html or "")
-        body = _join_unique([table_text, text])
+        descriptor = visual_retrieval_descriptor(element)
+        descriptor_text = _descriptor_text(descriptor)
+        body = _join_unique([table_text, text, descriptor_text])
         if not body:
             body = label
             context = section_path
         else:
             context = _clean_components([*section_path, label])
-        return body, context
+        return (
+            body,
+            context,
+            descriptor.descriptor_id if descriptor is not None else None,
+        )
 
-    return text, section_path
+    return text, section_path, None
+
+
+def _descriptor_text(descriptor: object | None) -> str:
+    if descriptor is None:
+        return ""
+    search_summary = _normalize_text(getattr(descriptor, "search_summary", ""))
+    keywords = _clean_components(getattr(descriptor, "keywords", []))
+    keyword_text = ", ".join(keywords)
+    return _join_unique(
+        [
+            (
+                f"Visual search summary: {search_summary}"
+                if search_summary
+                else ""
+            ),
+            f"Visual retrieval keywords: {keyword_text}" if keyword_text else "",
+        ]
+    )
 
 
 def _display_label(element: Element) -> str | None:

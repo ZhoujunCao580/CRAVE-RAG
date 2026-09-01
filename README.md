@@ -90,7 +90,7 @@ Reader, Checker, and Answerer records alongside the complete reading state.
 
 Editable, versioned prompt text lives together under
 [`src/softdoc/prompts/`](src/softdoc/prompts/README.md). The registry remains
-the runtime discovery and hashing interface for all five model-facing prompts:
+the runtime discovery and hashing interface for all six model-facing prompts:
 
 ```bash
 softdoc prompts list

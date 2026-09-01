@@ -34,6 +34,9 @@ def test_registry_text_comes_from_central_versioned_prompt_assets() -> None:
     assert get_prompt("visual_reader").canonical_text == load_prompt_text(
         "visual_reader_v0_4.txt"
     )
+    assert get_prompt("visual_retrieval").canonical_text == load_prompt_text(
+        "visual_retrieval_v0_1.txt"
+    ).removesuffix("\n")
     assert get_prompt("checker").canonical_text == load_prompt_text(
         "checker_v1_9.txt"
     ).removesuffix("\n")
@@ -61,6 +64,7 @@ def test_prompt_directory_contains_only_current_prompt_assets() -> None:
 
     assert current == {
         "planner_v0_20.txt",
+        "visual_retrieval_v0_1.txt",
         "visual_reader_v0_4.txt",
         "checker_v1_9.txt",
         "controller_policy_v0_7.txt",

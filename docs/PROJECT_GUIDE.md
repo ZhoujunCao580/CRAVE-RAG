@@ -28,12 +28,14 @@ The guiding principle is:
 - Optional conservative Planner: zero SubQuestions when no decomposition is
   needed, or a validated DAG for genuine decomposition.
 - Visual Reader request/result contracts and prompt.
+- Retrieval-only visual search identities with asset and Prompt provenance.
 - Append-only ObservationStore and atomic Evidence Checker deltas.
 - Derived Controller state, validated action union, and explicit incomplete
   `STOP`.
 - Evidence-only Answerer contract and prompt.
 - An injectable Reading Environment that exercises the complete state loop.
-- Ollama-backed Planner, Controller, Visual Reader, Checker, and Answerer
+- Ollama-backed Visual Retrieval, Planner, Controller, Visual Reader, Checker,
+  and Answerer
   adapters plus an auditable end-to-end model runner; text and structured
   tables use the deterministic Reader before any visual fallback.
 - Unified prompt registry, evaluation launcher, Linux bootstrap, and generic
@@ -65,6 +67,7 @@ src/softdoc/
   planning/                 Planner models, renderer, and backend interface
   prompts/                  current versioned prompt text for all components
   visual_reading.py         Visual Reader contract and user-prompt renderer
+  visual_retrieval.py       Offline visual search identity and provenance
   reading_state.py          reads, Observations, Evidence, and action trace
   checking_prompt.py        Checker version and compatibility loader
   controller.py             Controller input and action contracts

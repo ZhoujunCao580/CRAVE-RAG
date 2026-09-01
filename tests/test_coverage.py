@@ -161,3 +161,87 @@ def test_recovery_does_not_duplicate_table_text_or_page_numbers(
     result = recovery.recover(document)
 
     assert result.recovered_count == 0
+
+
+def test_recovery_clips_negative_pdf_coordinates_without_aborting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = (tmp_path / "coverage.pdf").resolve()
+    source.write_bytes(b"not read because extraction is mocked")
+    document = _document(source)
+    recovery = PdfTextLayerCoverageRecovery(source)
+    monkeypatch.setattr(
+        recovery,
+        "_extract_lines",
+        lambda: {
+            0: [
+                PdfTextLine(
+                    0,
+                    0,
+                    "Visible text with a glyph overhang",
+                    (-24, 620, 320, 650),
+                    source_page_width=612,
+                    source_page_height=792,
+                )
+            ]
+        },
+    )
+
+    result = recovery.recover(document)
+
+    assert result.recovered_count == 1
+    recovered = next(
+        element
+        for element in document.elements
+        if element.element_id in result.recovered_element_ids
+    )
+    assert recovered.bbox is not None
+    assert recovered.bbox.normalized[0] == 0.0
+    assert recovered.provenance.raw_payload["pdf_bbox"][0] == -24
+    assert recovered.provenance.raw_payload["clipped_pdf_bbox"][0] == 0.0
+    assert recovered.metadata["coverage_recovery"]["bbox_clipped_to_page"] is True
+
+
+def test_recovery_skips_fully_outside_line_and_keeps_valid_lines(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = (tmp_path / "coverage.pdf").resolve()
+    source.write_bytes(b"not read because extraction is mocked")
+    document = _document(source)
+    recovery = PdfTextLayerCoverageRecovery(source)
+    monkeypatch.setattr(
+        recovery,
+        "_extract_lines",
+        lambda: {
+            0: [
+                PdfTextLine(
+                    0,
+                    0,
+                    "Decorative text outside the media box",
+                    (-200, 620, -20, 650),
+                    source_page_width=612,
+                    source_page_height=792,
+                ),
+                PdfTextLine(
+                    0,
+                    1,
+                    "A valid uncovered line remains recoverable",
+                    (40, 620, 320, 650),
+                    source_page_width=612,
+                    source_page_height=792,
+                ),
+            ]
+        },
+    )
+
+    result = recovery.recover(document)
+
+    assert result.recovered_count == 1
+    recovered = next(
+        element
+        for element in document.elements
+        if element.element_id in result.recovered_element_ids
+    )
+    assert recovered.text == "A valid uncovered line remains recoverable"

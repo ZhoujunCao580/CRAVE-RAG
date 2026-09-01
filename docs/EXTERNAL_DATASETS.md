@@ -63,7 +63,7 @@ The exported JSONL deliberately contains only question IDs, question text, and
 SoftDoc locations. Gold answers, evidence pages, and benchmark metadata remain
 outside the model input.
 
-## DocVQA2026 and M109NC
+## DocVQA2026
 
 The auditor is dataset-independent. A future adapter only has to normalize the
 native release into the same `ExternalDatasetManifest`:
@@ -71,9 +71,6 @@ native release into the same `ExternalDatasetManifest`:
 - DocVQA2026 documents are multi-page image lists with nested question IDs and
   question text. Its adapter should materialize each document's images, point
   to the matching SoftDoc, and emit one manifest question per nested question.
-- M109NC depends on the licensed Manga109-v2026 books plus the Q-Guide task
-  annotations. Its adapter should map each book/page collection and question to
-  the matching SoftDoc without copying licensed images into Git.
 
 Do not guess an unpublished or unavailable annotation schema. Once the actual
 files are installed, add a thin adapter and adapter-specific fixture test; the

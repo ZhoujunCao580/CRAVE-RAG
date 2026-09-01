@@ -178,6 +178,7 @@ class SearchUnit(SoftDocModel):
     section_path: list[str] = Field(default_factory=list)
     element_type: ElementType
     content_availability: ContentAvailability
+    visual_descriptor_id: str | None = Field(default=None, min_length=1)
     index_version: str = Field(min_length=1)
 
     @model_validator(mode="after")

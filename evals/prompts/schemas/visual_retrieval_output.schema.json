@@ -1,0 +1,27 @@
+{
+  "additionalProperties": false,
+  "description": "Exact schema returned by the retrieval-only visual model call.",
+  "properties": {
+    "search_summary": {
+      "maxLength": 300,
+      "minLength": 12,
+      "title": "Search Summary",
+      "type": "string"
+    },
+    "keywords": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 8,
+      "minItems": 3,
+      "title": "Keywords",
+      "type": "array"
+    }
+  },
+  "required": [
+    "search_summary",
+    "keywords"
+  ],
+  "title": "VisualSearchIdentity",
+  "type": "object"
+}

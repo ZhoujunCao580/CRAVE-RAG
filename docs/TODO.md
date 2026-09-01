@@ -36,8 +36,13 @@ experiments. Implemented contracts and workflows belong in
 
 - [ ] Compare weighted RRF, fixed-quota mixing such as `3 BM25 + 2 Dense`, and
   BM25-first with Dense used only when needed.
+- [ ] On evidence-page retrieval, compare text-only BM25/Dense, retrieval-only
+  VLM descriptions, native visual page retrieval, and their combinations.
+  Generated descriptions may create CandidatePreviews but must never become
+  Observations or Evidence without reading the original visual source.
 - [ ] Tune CandidatePreview batch sizes such as `3/5/10`, BM25/Dense quotas,
-  RRF parameters, and the policy for next/switch/new search.
+  RRF parameters (including any visual channel), and the policy for
+  next/switch/new search.
 - [ ] Report more than Top-k recall: include candidate batches, full reads, VLM
   calls, latency, and cost required to obtain sufficient Evidence.
 - [ ] Replace the current action-count placeholder budget with configurable

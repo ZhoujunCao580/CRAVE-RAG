@@ -15,6 +15,8 @@
 ## Safety Boundary
 
 - Search results and candidate previews are reading leads, not Evidence.
+- Visual search summaries and keywords are offline retrieval metadata, not
+  Observations or Evidence; the original asset must still be read.
 - Confirmed Relations are navigation handles.
 - Candidate Relations are investigation hints, not established facts.
 - Readers produce Observations; only the Checker may admit them into Evidence Memory.

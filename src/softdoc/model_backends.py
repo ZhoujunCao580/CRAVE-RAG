@@ -46,6 +46,15 @@ from softdoc.visual_reading import (
     validate_visual_read_result,
     visual_reader_user_prompt,
 )
+from softdoc.visual_retrieval import (
+    VISUAL_RETRIEVAL_PROMPT_VERSION,
+    VISUAL_RETRIEVAL_SYSTEM_PROMPT,
+    VisualRetrievalDraft,
+    VisualRetrievalRequest,
+    VisualRetrievalResult,
+    VisualSearchIdentity,
+    visual_retrieval_user_prompt,
+)
 
 
 class OllamaModelError(RuntimeError):
@@ -259,6 +268,34 @@ class OllamaAnswererBackend:
             user_prompt=answerer_user_prompt(answer_input),
             output_model=AnswerResult,
         )
+
+
+class OllamaVisualRetrievalBackend:
+    """Generate one schema-bound, retrieval-only identity per visual asset."""
+
+    prompt_version = VISUAL_RETRIEVAL_PROMPT_VERSION
+
+    def __init__(self, client: OllamaStructuredClient) -> None:
+        self.client = client
+
+    def describe(self, request: VisualRetrievalRequest) -> VisualRetrievalResult:
+        descriptors: list[VisualRetrievalDraft] = []
+        for visual_input in request.visual_inputs:
+            identity = self.client.generate(
+                component="visual_retrieval",
+                system_prompt=VISUAL_RETRIEVAL_SYSTEM_PROMPT,
+                user_prompt=visual_retrieval_user_prompt(visual_input),
+                output_model=VisualSearchIdentity,
+                image_paths=[visual_input.visual_asset_path],
+            )
+            descriptors.append(
+                VisualRetrievalDraft(
+                    input_id=visual_input.input_id,
+                    search_summary=identity.search_summary,
+                    keywords=identity.keywords,
+                )
+            )
+        return VisualRetrievalResult(descriptors=descriptors)
 
 
 class OllamaVisualReaderBackend:

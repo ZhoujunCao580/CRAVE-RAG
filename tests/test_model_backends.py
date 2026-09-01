@@ -11,6 +11,7 @@ from softdoc.model_backends import (
     OllamaEvidenceCheckerBackend,
     OllamaModelConfig,
     OllamaStructuredClient,
+    OllamaVisualRetrievalBackend,
     OllamaVisualReaderBackend,
 )
 from softdoc.models import Document, Element, ElementType, Page, Provenance
@@ -26,6 +27,7 @@ from softdoc.reading_state import (
     StoredObservation,
     initialize_evidence_memory,
 )
+from softdoc.visual_retrieval import build_visual_retrieval_request
 
 
 class FakeTransport:
@@ -132,6 +134,69 @@ def test_visual_reader_backend_sends_pixels_and_maps_local_sources(tmp_path: Pat
     assert payload["format"]["title"] == "VisualReadResult"
     assert len(payload["messages"][1]["images"]) == 1
     assert client.call_records[0].component == "visual_reader"
+
+
+def test_visual_retrieval_backend_returns_program_bound_identity(
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "chart.png"
+    Image.new("RGB", (20, 20), "white").save(image_path)
+    doc_id = "doc:visual-index"
+    page = Page(
+        page_id="page:visual-index",
+        document_id=doc_id,
+        page_index=0,
+        page_number=1,
+        width=100,
+        height=100,
+        element_ids=["chart:1"],
+        reading_order=["chart:1"],
+        provenance=_provenance("page:visual-index"),
+    )
+    chart = Element(
+        element_id="chart:1",
+        document_id=doc_id,
+        page_id=page.page_id,
+        page_number=1,
+        element_type=ElementType.CHART,
+        reading_order=0,
+        image_path=image_path,
+        section_path=["Results"],
+        provenance=_provenance("chart:1"),
+    )
+    document = Document(
+        document_id=doc_id,
+        source_path=Path("paper.pdf"),
+        pages=[page],
+        elements=[chart],
+        provenance=_provenance(doc_id),
+    )
+    transport = FakeTransport(
+        {
+            "model": "vision-test",
+            "message": {
+                "content": (
+                    '{"search_summary":"A line chart compares AP and AP50 '
+                    'across decoder layers.","keywords":["AP","AP50",'
+                    '"decoder layers"]}'
+                )
+            },
+        }
+    )
+    client = OllamaStructuredClient(
+        OllamaModelConfig(model="vision-test"), transport
+    )
+    request = build_visual_retrieval_request(document, tmp_path)
+
+    result = OllamaVisualRetrievalBackend(client).describe(request)
+
+    assert result.descriptors[0].input_id == "I1"
+    assert result.descriptors[0].keywords == ["AP", "AP50", "decoder layers"]
+    payload = transport.calls[0][1]
+    assert payload["format"]["title"] == "VisualSearchIdentity"
+    assert payload["messages"][1]["images"]
+    assert '"element_type": "chart"' in payload["messages"][1]["content"]
+    assert client.call_records[0].component == "visual_retrieval"
 
 
 def test_checker_and_answerer_backends_use_their_frozen_schemas() -> None:

@@ -12,6 +12,7 @@ from softdoc.controller import ControllerAction
 from softdoc.planning.models import PlannerDraft
 from softdoc.reading_state import EvidenceCheckResult
 from softdoc.visual_reading import VisualReadResult
+from softdoc.visual_retrieval import VisualSearchIdentity
 
 
 OUTPUT_DIR = Path("evals/prompts/schemas")
@@ -21,6 +22,7 @@ def export_schemas(output_dir: Path = OUTPUT_DIR) -> list[Path]:
     schemas = {
         "planner_output.schema.json": PlannerDraft.model_json_schema(),
         "visual_reader_output.schema.json": VisualReadResult.model_json_schema(),
+        "visual_retrieval_output.schema.json": VisualSearchIdentity.model_json_schema(),
         "checker_output.schema.json": EvidenceCheckResult.model_json_schema(),
         "controller_output.schema.json": TypeAdapter(ControllerAction).json_schema(),
         "answerer_output.schema.json": AnswerResult.model_json_schema(),

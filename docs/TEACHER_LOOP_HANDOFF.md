@@ -23,7 +23,7 @@ investigation opportunities. The Controller never promotes either into factual
 Evidence. The program validates IDs, state transitions, action execution, and
 Checker deltas.
 
-The current canonical Prompt files are the five `.txt` files directly under
+The current canonical Prompt files are the six `.txt` files directly under
 `src/softdoc/prompts/`. Previous Prompt revisions are available through Git
 history and must not be recreated in a working-tree archive.
 
