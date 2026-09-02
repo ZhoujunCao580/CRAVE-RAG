@@ -866,3 +866,40 @@ def test_visual_asset_ids_do_not_depend_on_absolute_asset_root(
     assert first_environment._read_input("figure:1", 0).visual_asset_id == (
         second_environment._read_input("figure:1", 0).visual_asset_id
     )
+
+
+def test_linux_read_input_resolves_windows_authored_relative_asset_path(
+    tmp_path: Path,
+) -> None:
+    document = _document(
+        tmp_path,
+        page_element_specs=[
+            [
+                {
+                    "element_id": "figure:windows-path",
+                    "element_type": ElementType.FIGURE,
+                    "visual": True,
+                }
+            ]
+        ],
+    )
+    expected = tmp_path / "assets" / "elements" / "figure.png"
+    expected.parent.mkdir(parents=True)
+    Image.new("RGB", (120, 80), "white").save(expected)
+    element = document.elements[0].model_copy(
+        update={"image_path": Path(r"assets\elements\figure.png")}
+    )
+    document = document.model_copy(update={"elements": [element]})
+    environment = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=RejectingController(),
+        reader=DeterministicContentReader(),
+        checker=PredicateChecker(lambda _text: False),
+        answerer=EvidenceAnswerer(),
+    )
+
+    read_input = environment._read_input("figure:windows-path", 0)
+
+    assert read_input.representation == ReadRepresentation.ELEMENT_VISUAL
+    assert read_input.visual_asset_path == expected

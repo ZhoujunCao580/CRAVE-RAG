@@ -1058,7 +1058,9 @@ class ReadingEnvironment:
     def _asset_path(self, path: Path | None) -> Path | None:
         if path is None:
             return None
-        path = Path(path)
+        # SoftDocs may be authored on Windows and consumed on Linux. Relative
+        # asset references retain the source platform's path separator.
+        path = Path(str(path).replace("\\", "/"))
         resolved = path if path.is_absolute() else self.asset_root / path
         return resolved if resolved.is_file() else None
 
