@@ -92,6 +92,7 @@ from softdoc.retrieval import (
     SearchUnitBuildResult,
     SearchUnitBuilder,
     SubQuestionInput,
+    VisualSearchResult,
     html_to_text,
 )
 from softdoc.store import DocumentStore
@@ -159,6 +160,11 @@ class DenseSearchBackend(Protocol):
         """Optional Dense retriever already bound to this Document index."""
 
 
+class VisualSearchBackend(Protocol):
+    def search(self, subquestion: SubQuestionInput) -> VisualSearchResult:
+        """Optional visual retriever already bound to this Document index."""
+
+
 class ReadingRunStatus(str, Enum):
     READY = "ready"
     STOPPED_INCOMPLETE = "stopped_incomplete"
@@ -194,7 +200,7 @@ class ReadingRunResult(SoftDocModel):
 
 
 class DocumentSearchService:
-    """One-document Exact + BM25 + optional Dense retrieval service."""
+    """One-document Exact + BM25 + optional Dense/Visual retrieval service."""
 
     def __init__(
         self,
@@ -202,6 +208,7 @@ class DocumentSearchService:
         *,
         search_units: SearchUnitBuildResult | None = None,
         dense_backend: DenseSearchBackend | None = None,
+        visual_backend: VisualSearchBackend | None = None,
         config: SearchSessionConfig | None = None,
     ) -> None:
         self.document = document
@@ -209,6 +216,7 @@ class DocumentSearchService:
         self.exact_lookup = ExactAnchorLookup()
         self.bm25 = BM25Index(self.search_units)
         self.dense_backend = dense_backend
+        self.visual_backend = visual_backend
         self.builder = SearchSessionBuilder(config)
         self.navigator = SearchSessionNavigator(self.search_units)
 
@@ -224,11 +232,13 @@ class DocumentSearchService:
         request = SubQuestionInput(subquestion_id=question_id, text=query)
         bm25 = self.bm25.search(request)
         dense = self.dense_backend.search(request) if self.dense_backend else None
+        visual = self.visual_backend.search(request) if self.visual_backend else None
         session = self.builder.create(
             subquestion=request,
             search_units=self.search_units,
             bm25=bm25,
             dense=dense,
+            visual=visual,
         )
         return self.navigator.next_batch(session)
 

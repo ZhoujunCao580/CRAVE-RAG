@@ -15,7 +15,7 @@ from softdoc.reading_state import EvidenceStatus, RootQuestion
 
 
 def test_controller_prompt_is_frozen_to_current_action_contract() -> None:
-    assert CONTROLLER_PROMPT_VERSION == "controller-policy-v0.7"
+    assert CONTROLLER_PROMPT_VERSION == "controller-policy-v0.8"
     assert "Treat ControllerInput as read-only" in CONTROLLER_SYSTEM_PROMPT
     assert "using only IDs supplied\nin ControllerInput" in CONTROLLER_SYSTEM_PROMPT
     assert "Return only the action JSON matching the provided Schema" in (
@@ -83,6 +83,14 @@ def test_controller_user_prompt_is_only_validated_input_json() -> None:
 def test_controller_prompt_maps_preview_handles_without_exposing_page_as_source() -> None:
     assert "copy its element_id into READ_SOURCE.source_ids" in CONTROLLER_SYSTEM_PROMPT
     assert "CandidatePreview page_id is location metadata" in CONTROLLER_SYSTEM_PROMPT
+    assert (
+        "A visual candidate may be promising when the required information is likely"
+        in CONTROLLER_SYSTEM_PROMPT
+    )
+    assert (
+        "Candidate position does not\n  guarantee relevance or source type."
+        in CONTROLLER_SYSTEM_PROMPT
+    )
 
 
 def test_controller_policy_suite_covers_v06_relation_preview_boundaries() -> None:

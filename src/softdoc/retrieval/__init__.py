@@ -33,6 +33,7 @@ from softdoc.retrieval.models import (
     BM25TraceEntry,
     CandidateMergePolicy,
     CandidatePreview,
+    CandidateSelectionRoute,
     DenseConfig,
     DenseDevice,
     DenseElementCandidate,
@@ -58,9 +59,12 @@ from softdoc.retrieval.models import (
     SkippedSearchElement,
     SnippetSource,
     SubQuestionInput,
+    VisualElementCandidate,
+    VisualSearchResult,
 )
 from softdoc.retrieval.session import SearchSessionBuilder, SearchSessionNavigator
 from softdoc.retrieval.units import SearchUnitBuilder, html_to_text
+from softdoc.retrieval.visual_dense import VisualDenseIndex
 
 __all__ = [
     "AnchorKind",
@@ -75,6 +79,7 @@ __all__ = [
     "BM25TraceEntry",
     "CandidateMergePolicy",
     "CandidatePreview",
+    "CandidateSelectionRoute",
     "DenseConfig",
     "DenseDevice",
     "DenseElementCandidate",
@@ -116,6 +121,9 @@ __all__ = [
     "SkippedSearchElement",
     "SnippetSource",
     "SubQuestionInput",
+    "VisualDenseIndex",
+    "VisualElementCandidate",
+    "VisualSearchResult",
     "TextEncoder",
     "e5_prefixed_text",
     "resolve_dense_device",

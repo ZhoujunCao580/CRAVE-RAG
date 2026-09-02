@@ -22,6 +22,10 @@ dense = [
     "torch>=2.2",
     "transformers>=4.40,<5",
 ]
+visual-retrieval = [
+    "torch>=2.2",
+    "sentence-transformers[image]>=5.1,<7",
+]
 train = [
     "accelerate>=0.30,<2",
     "datasets>=2.18,<5",

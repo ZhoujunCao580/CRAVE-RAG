@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
+import math
 from typing import Any, Self
 
 from pydantic import Field, field_validator, model_validator
@@ -42,10 +43,17 @@ class AnchorTargetType(str, Enum):
 class RetrievalSource(str, Enum):
     BM25 = "bm25"
     DENSE = "dense"
+    VISUAL_DENSE = "visual_dense"
 
 
 class SnippetSource(str, Enum):
     SEARCH_UNIT_TEXT = "search_unit.search_text"
+    VISUAL_METADATA = "visual_candidate.preview_text"
+
+
+class CandidateSelectionRoute(str, Enum):
+    TEXT = "text"
+    VISUAL = "visual"
 
 
 class PreviewMatchScope(str, Enum):
@@ -440,8 +448,56 @@ class DenseSearchResult(SoftDocModel):
         return self
 
 
+class VisualElementCandidate(SoftDocModel):
+    """One question-to-image match bound to a real SoftDoc Element."""
+
+    element_id: str = Field(min_length=1)
+    visual_asset_id: str = Field(min_length=1)
+    visual_score: float
+    visual_rank: int = Field(ge=1)
+    page_id: str = Field(min_length=1)
+    page_number: int = Field(ge=1)
+    section_id: str | None = None
+    section_path: list[str] = Field(default_factory=list)
+    display_label: str | None = Field(default=None, min_length=1)
+    preview_text: str = Field(min_length=1)
+    element_type: ElementType
+    content_availability: ContentAvailability
+
+    @field_validator("visual_score")
+    @classmethod
+    def validate_finite_score(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("Visual candidate score must be finite")
+        return value
+
+
+class VisualSearchResult(SoftDocModel):
+    subquestion_id: str = Field(min_length=1)
+    document_id: str = Field(min_length=1)
+    index_fingerprint: str = Field(min_length=1)
+    model_name: str = Field(min_length=1)
+    total_visual_assets: int = Field(ge=0)
+    total_candidates: int = Field(ge=0)
+    candidates: list[VisualElementCandidate] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_ranks(self) -> Self:
+        if self.total_candidates != len(self.candidates):
+            raise ValueError("Visual total_candidates must match candidates")
+        if [item.visual_rank for item in self.candidates] != list(
+            range(1, len(self.candidates) + 1)
+        ):
+            raise ValueError("Visual candidate ranks must be contiguous")
+        if self.total_visual_assets < self.total_candidates:
+            raise ValueError("Visual candidates cannot exceed indexed assets")
+        return self
+
+
 class CandidateMergePolicy(str, Enum):
     WEIGHTED_RRF = "weighted_rrf"
+    FIXED_QUOTA = "fixed_quota"
+    FIXED_TEXT_VISUAL_QUOTA = "fixed_text_visual_quota"
     ROUND_ROBIN_BM25_FIRST = "round_robin_bm25_first"
 
 
@@ -453,12 +509,30 @@ class SearchSessionConfig(SoftDocModel):
     rrf_k: int = Field(default=20, ge=1)
     bm25_weight: float = Field(default=1.0, gt=0.0)
     dense_weight: float = Field(default=1.25, gt=0.0)
+    bm25_quota: int = Field(default=3, ge=1)
+    dense_quota: int = Field(default=2, ge=1)
+    text_quota: int = Field(default=3, ge=1)
+    visual_quota: int = Field(default=2, ge=1)
 
     @model_validator(mode="after")
     def validate_snippet_window(self) -> Self:
         if self.snippet_context_chars * 2 >= self.snippet_max_chars:
             raise ValueError(
                 "CandidatePreview context must leave room for matched content"
+            )
+        if (
+            self.merge_policy == CandidateMergePolicy.FIXED_QUOTA
+            and self.bm25_quota + self.dense_quota != self.batch_size
+        ):
+            raise ValueError(
+                "Fixed-quota BM25 and Dense quotas must sum to batch_size"
+            )
+        if (
+            self.merge_policy == CandidateMergePolicy.FIXED_TEXT_VISUAL_QUOTA
+            and self.text_quota + self.visual_quota != self.batch_size
+        ):
+            raise ValueError(
+                "Fixed-quota Text and Visual quotas must sum to batch_size"
             )
         return self
 
@@ -486,6 +560,11 @@ class SessionCandidate(SoftDocModel):
     dense_match_start: int | None = Field(default=None, ge=0)
     dense_match_end: int | None = Field(default=None, gt=0)
     rrf_score: float | None = Field(default=None, gt=0.0)
+    visual_asset_id: str | None = None
+    visual_rank: int | None = Field(default=None, ge=1)
+    visual_score: float | None = None
+    visual_preview_text: str | None = None
+    selection_route: CandidateSelectionRoute | None = None
 
     @model_validator(mode="after")
     def validate_sources(self) -> Self:
@@ -517,6 +596,38 @@ class SessionCandidate(SoftDocModel):
             )
         ):
             raise ValueError("Dense metadata requires the dense source")
+        if RetrievalSource.VISUAL_DENSE in self.matched_by:
+            if (
+                self.visual_rank is None
+                or self.visual_score is None
+                or not self.visual_asset_id
+                or not self.visual_preview_text
+            ):
+                raise ValueError(
+                    "Visual candidates require rank, score, asset, and preview text"
+                )
+            if not math.isfinite(self.visual_score):
+                raise ValueError("Visual candidate score must be finite")
+        elif any(
+            value is not None
+            for value in (
+                self.visual_asset_id,
+                self.visual_rank,
+                self.visual_score,
+                self.visual_preview_text,
+            )
+        ):
+            raise ValueError("Visual metadata requires the visual_dense source")
+        if self.selection_route == CandidateSelectionRoute.TEXT and not any(
+            source in self.matched_by
+            for source in (RetrievalSource.BM25, RetrievalSource.DENSE)
+        ):
+            raise ValueError("Text selection route requires a text retrieval source")
+        if (
+            self.selection_route == CandidateSelectionRoute.VISUAL
+            and RetrievalSource.VISUAL_DENSE not in self.matched_by
+        ):
+            raise ValueError("Visual selection route requires visual_dense")
         return self
 
 
@@ -535,19 +646,35 @@ class CandidatePreview(SoftDocModel):
     snippet_truncated: bool
     snippet_source: SnippetSource = SnippetSource.SEARCH_UNIT_TEXT
     snippet_source_id: str = Field(min_length=1)
-    matched_search_unit_id: str = Field(min_length=1)
+    matched_search_unit_id: str | None = Field(default=None, min_length=1)
+    visual_asset_id: str | None = Field(default=None, min_length=1)
     matched_by: list[RetrievalSource] = Field(min_length=1)
     preview_source: RetrievalSource
     match_scope: PreviewMatchScope
     bm25_rank: int | None = Field(default=None, ge=1)
     dense_rank: int | None = Field(default=None, ge=1)
+    visual_rank: int | None = Field(default=None, ge=1)
     rrf_score: float | None = Field(default=None, gt=0.0)
     content_availability: ContentAvailability
 
     @model_validator(mode="after")
     def validate_snippet_range(self) -> Self:
-        if self.snippet_source_id != self.matched_search_unit_id:
-            raise ValueError("CandidatePreview snippet source must be its SearchUnit")
+        if self.snippet_source == SnippetSource.SEARCH_UNIT_TEXT:
+            if (
+                self.matched_search_unit_id is None
+                or self.snippet_source_id != self.matched_search_unit_id
+            ):
+                raise ValueError(
+                    "Text CandidatePreview snippet source must be its SearchUnit"
+                )
+        elif (
+            self.visual_asset_id is None
+            or self.snippet_source_id != self.visual_asset_id
+            or self.preview_source != RetrievalSource.VISUAL_DENSE
+        ):
+            raise ValueError(
+                "Visual CandidatePreview snippet source must be its visual asset"
+            )
         if self.preview_source not in self.matched_by:
             raise ValueError("CandidatePreview source must be a matched source")
         if self.snippet_char_start > self.snippet_char_end:

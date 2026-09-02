@@ -1,0 +1,13 @@
+{
+  "schema_version": "mmlongbench-doc-rrf-config-v0.2",
+  "merge_policy": "weighted_rrf",
+  "rrf_k": 20,
+  "bm25_weight": 1.0,
+  "dense_weight": 1.25,
+  "candidate_batch_size": 5,
+  "exact_anchor": "shared upstream unchanged",
+  "fallback_enabled": false,
+  "visual_descriptions": "SearchUnit search-only metadata",
+  "selection_note": "Batch size 5 supersedes the earlier size 3 choice. Ranking quality is identical because batching only paginates one frozen ranking. On the 808-question tuning set, size 5 reduced mean batches to first Gold from 5.499 to 3.582 and to all Gold from 10.948 to 6.818, while increasing mean shown previews only from 16.496 to 17.908 and from 32.844 to 34.090 respectively.",
+  "source_tuning_run": ".runlogs/stage3_retrieval/tuning/rrf-tuning-20260901T202210Z"
+}

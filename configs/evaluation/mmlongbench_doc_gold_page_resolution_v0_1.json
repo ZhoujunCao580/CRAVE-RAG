@@ -1,0 +1,105 @@
+{
+  "schema_version": "mmlongbench-doc-gold-page-resolution-v0.1",
+  "dataset_id": "mmlongbench-doc",
+  "purpose": "Preserve upstream annotations while resolving verified mixed page-address conventions to 1-based physical PDF pages.",
+  "entries": {
+    "Q144": {
+      "raw_evidence_pages": [0],
+      "resolved_evidence_pages": [1],
+      "status": "resolved",
+      "method": "verified_zero_based_first_page",
+      "note": "The answer-bearing table is on the first physical PDF page."
+    },
+    "Q189": {
+      "raw_evidence_pages": [0],
+      "resolved_evidence_pages": [1],
+      "status": "resolved",
+      "method": "verified_zero_based_first_page",
+      "note": "The abstract on the first physical PDF page states the answer."
+    },
+    "Q573": {
+      "raw_evidence_pages": [115, 116],
+      "resolved_evidence_pages": [115, 116],
+      "status": "resolved",
+      "method": "official_full_source_restored",
+      "note": "The bundled 105-page truncation was replaced by the official 158-page Pew PDF after verifying that pages 1-105 have identical extracted text. Gold pages 115-116 now exist in the canonical source and SoftDoc; the original bundled source and SoftDoc remain under source_variants/bundled_105."
+    },
+    "Q657": {
+      "raw_evidence_pages": [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31],
+      "resolved_evidence_pages": [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18],
+      "status": "resolved",
+      "method": "softdoc_confirmed_printed_spread_aliases",
+      "note": "The question names printed pages 11-31. The guidebook uses two printed page labels per physical spread, mapping them to physical PDF pages 8-18."
+    },
+    "Q705": {
+      "raw_evidence_pages": [3, 4, 6, 7, 8, 9, 11, 12, 1418, 20],
+      "resolved_evidence_pages": [3, 4, 6, 7, 8, 9, 11, 12, 14, 18, 20],
+      "status": "resolved",
+      "method": "verified_delimiter_omission",
+      "note": "The out-of-range token 1418 is a missing delimiter between physical pages 14 and 18; both pages contain figure evidence."
+    },
+    "Q787": {
+      "raw_evidence_pages": [289, 290],
+      "resolved_evidence_pages": [8, 9],
+      "status": "resolved",
+      "method": "softdoc_confirmed_printed_page_alias",
+      "note": "Printed map pages 289-290 are physical PDF pages 8-9."
+    },
+    "Q790": {
+      "raw_evidence_pages": [288],
+      "resolved_evidence_pages": [7],
+      "status": "resolved",
+      "method": "softdoc_confirmed_printed_page_alias",
+      "note": "Printed map page 288 is physical PDF page 7."
+    },
+    "Q791": {
+      "raw_evidence_pages": [317, 318],
+      "resolved_evidence_pages": [36, 37],
+      "status": "resolved",
+      "method": "softdoc_confirmed_printed_page_alias",
+      "note": "Printed map pages 317-318 are physical PDF pages 36-37."
+    },
+    "Q793": {
+      "raw_evidence_pages": [310],
+      "resolved_evidence_pages": [29],
+      "status": "resolved",
+      "method": "softdoc_confirmed_printed_page_alias",
+      "note": "Printed map page 310 is physical PDF page 29."
+    },
+    "Q907": {
+      "raw_evidence_pages": [25],
+      "resolved_evidence_pages": [27],
+      "status": "resolved",
+      "method": "pdf_page_label_dictionary",
+      "note": "NYU printed page 25 is physical PDF page 27."
+    },
+    "Q908": {
+      "raw_evidence_pages": [28],
+      "resolved_evidence_pages": [30],
+      "status": "resolved",
+      "method": "pdf_page_label_dictionary",
+      "note": "NYU printed page 28 is physical PDF page 30."
+    },
+    "Q910": {
+      "raw_evidence_pages": [25, 26, 27, 28],
+      "resolved_evidence_pages": [27, 28, 29, 30],
+      "status": "resolved",
+      "method": "pdf_page_label_dictionary",
+      "note": "NYU printed pages 25-28 are physical PDF pages 27-30."
+    },
+    "Q941": {
+      "raw_evidence_pages": [0],
+      "resolved_evidence_pages": [1],
+      "status": "resolved",
+      "method": "verified_zero_based_first_page",
+      "note": "The logo is on the first physical PDF page."
+    },
+    "Q997": {
+      "raw_evidence_pages": [61],
+      "resolved_evidence_pages": [63],
+      "status": "resolved",
+      "method": "pdf_page_label_dictionary",
+      "note": "Printed page 61 is physical PDF page 63."
+    }
+  }
+}

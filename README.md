@@ -86,6 +86,12 @@ dependencies are optional, so the default command remains lightweight and uses
 Exact Anchor lookup plus BM25. Every run writes separate Planner, Controller,
 Reader, Checker, and Answerer records alongside the complete reading state.
 
+When a completed visual embedding index is available, add
+`--visual-search-index <INDEX_DIR>`. This enables the frozen mixed policy: each
+five-card batch draws three candidates from BM25/Dense weighted RRF and two
+from visual retrieval, deduplicates them, and presents one stable mixed list.
+The Controller sees candidate content, not route quotas or rank metadata.
+
 ## Prompts and Evaluations
 
 Editable, versioned prompt text lives together under

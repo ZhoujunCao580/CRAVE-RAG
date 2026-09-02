@@ -59,6 +59,18 @@ For MMLongBench-Doc, see `docs/EXTERNAL_DATASETS.md`. The audit verifies source
 files, SoftDocs, visual assets, page counts, and question-document mappings and
 fails explicitly if the external corpus is absent.
 
+Before a benchmark run, also validate the frozen evaluation protocol and create
+an immutable experiment snapshot as described in `docs/EVALUATION_PROTOCOL.md`:
+
+```bash
+python scripts/freeze_experiment.py \
+  --protocol configs/evaluation/mmlongbench_doc_reference_v0_1.json \
+  --validate-only
+```
+
+MMLongBench-Doc is currently a development/reference benchmark, not a clean
+holdout. A run report must retain that distinction.
+
 For a single manually transferred SoftDoc, also validate it directly:
 
 ```bash
@@ -103,7 +115,9 @@ softdoc run-model /workspace/data/softdoc/example \
   --visual-model qwen3-vl:4b \
   --dense \
   --dense-device cuda \
-  --embedding-cache /workspace/cache/e5
+  --embedding-cache /workspace/cache/e5 \
+  --visual-search-index /workspace/cache/visual-retrieval/colsmol-500m \
+  --visual-search-device cuda
 ```
 
 The default transport is Ollama-compatible HTTP. The core runner itself uses
@@ -132,6 +146,9 @@ python scripts/run_model_batch.py \
   --output-root /workspace/runs/pilot-01 \
   --text-model qwen3:8b \
   --visual-model qwen3-vl:4b \
+  --dense \
+  --dense-device cuda \
+  --visual-search-index /workspace/cache/visual-retrieval/colsmol-500m \
   --case-timeout 3600
 ```
 

@@ -11,6 +11,7 @@ from softdoc.retrieval import (
     BM25ElementCandidate,
     BM25SearchResult,
     CandidateMergePolicy,
+    CandidateSelectionRoute,
     DenseElementCandidate,
     DenseSearchResult,
     ExactAnchorMatch,
@@ -27,6 +28,8 @@ from softdoc.retrieval import (
     SearchUnitConfig,
     SnippetSource,
     SubQuestionInput,
+    VisualElementCandidate,
+    VisualSearchResult,
 )
 
 
@@ -170,6 +173,36 @@ def _question() -> SubQuestionInput:
     return SubQuestionInput(subquestion_id="Q1", text="Find the supporting evidence")
 
 
+def _visual() -> VisualSearchResult:
+    candidates = []
+    for rank, index in enumerate(range(12, 19), start=1):
+        candidates.append(
+            VisualElementCandidate(
+                element_id=f"element:{index:02d}",
+                visual_asset_id=f"visual:{index:02d}",
+                visual_score=1.0 - rank / 100.0,
+                visual_rank=rank,
+                page_id=f"page:{index // 4:02d}",
+                page_number=index // 4 + 1,
+                section_id="section:methods",
+                section_path=["Methods"],
+                display_label=f"Figure {index}",
+                preview_text=f"Visual figure about needle-{index} evidence.",
+                element_type=ElementType.FIGURE,
+                content_availability=ContentAvailability.VISUAL_ONLY,
+            )
+        )
+    return VisualSearchResult(
+        subquestion_id="Q1",
+        document_id=DOCUMENT_ID,
+        index_fingerprint="visual-index-v1",
+        model_name="mock-visual",
+        total_visual_assets=len(candidates),
+        total_candidates=len(candidates),
+        candidates=candidates,
+    )
+
+
 def test_session_keeps_exact_separate_and_merges_retrieval_sources() -> None:
     units = _search_units()
     session = SearchSessionBuilder().create(
@@ -230,6 +263,115 @@ def test_round_robin_remains_an_explicit_reproducible_baseline() -> None:
         "element:03",
     ]
     assert all(item.rrf_score is None for item in session.candidate_catalog)
+
+
+def test_fixed_quota_builds_three_bm25_then_two_dense_with_unique_backfill() -> None:
+    units = _search_units()
+    session = SearchSessionBuilder(
+        SearchSessionConfig(
+            merge_policy=CandidateMergePolicy.FIXED_QUOTA,
+            batch_size=5,
+            bm25_quota=3,
+            dense_quota=2,
+        )
+    ).create(
+        subquestion=_question(),
+        search_units=units,
+        exact=_exact(),
+        bm25=_bm25(units),
+        dense=_dense(units),
+    )
+
+    assert session.ranked_candidate_ids[:5] == [
+        "element:01",
+        "element:02",
+        "element:03",
+        "element:05",
+        "element:06",
+    ]
+    assert session.ranked_candidate_ids[5:10] == [
+        "element:04",
+        "element:07",
+        "element:08",
+        "element:09",
+        "element:10",
+    ]
+    assert len(session.ranked_candidate_ids) == len(set(session.ranked_candidate_ids))
+    assert all(item.rrf_score is None for item in session.candidate_catalog)
+
+
+def test_fixed_quota_requires_quotas_to_equal_batch_size() -> None:
+    with pytest.raises(ValueError, match="must sum to batch_size"):
+        SearchSessionConfig(
+            merge_policy=CandidateMergePolicy.FIXED_QUOTA,
+            batch_size=5,
+            bm25_quota=2,
+            dense_quota=2,
+        )
+
+
+def test_fixed_text_visual_quota_mixes_three_text_and_two_visual_candidates() -> None:
+    units = _search_units()
+    config = SearchSessionConfig(
+        merge_policy=CandidateMergePolicy.FIXED_TEXT_VISUAL_QUOTA,
+        batch_size=5,
+        text_quota=3,
+        visual_quota=2,
+    )
+    builder = SearchSessionBuilder(config)
+    first_session = builder.create(
+        subquestion=_question(),
+        search_units=units,
+        bm25=_bm25(units),
+        dense=_dense(units),
+        visual=_visual(),
+    )
+    repeated_session = builder.create(
+        subquestion=_question(),
+        search_units=units,
+        bm25=_bm25(units),
+        dense=_dense(units),
+        visual=_visual(),
+    )
+
+    assert first_session.ranked_candidate_ids == repeated_session.ranked_candidate_ids
+    first_five = first_session.candidate_catalog[:5]
+    assert sum(
+        item.selection_route == CandidateSelectionRoute.TEXT for item in first_five
+    ) == 3
+    assert sum(
+        item.selection_route == CandidateSelectionRoute.VISUAL for item in first_five
+    ) == 2
+    assert len(first_session.ranked_candidate_ids) == len(
+        set(first_session.ranked_candidate_ids)
+    )
+
+    _, batch = SearchSessionNavigator(units).next_batch(first_session)
+    visual_previews = [
+        item
+        for item in batch.candidate_previews
+        if item.preview_source == RetrievalSource.VISUAL_DENSE
+    ]
+    assert len(visual_previews) == 2
+    assert all(item.snippet_source == SnippetSource.VISUAL_METADATA for item in visual_previews)
+    assert all(item.matched_search_unit_id is None for item in visual_previews)
+    assert all(item.visual_asset_id for item in visual_previews)
+
+
+def test_fixed_text_visual_quota_requires_visual_result() -> None:
+    units = _search_units()
+    builder = SearchSessionBuilder(
+        SearchSessionConfig(
+            merge_policy=CandidateMergePolicy.FIXED_TEXT_VISUAL_QUOTA
+        )
+    )
+    with pytest.raises(ValueError, match="requires a Visual search result"):
+        builder.create(
+            subquestion=_question(),
+            search_units=units,
+            bm25=_bm25(units),
+            dense=_dense(units),
+        )
 
 
 def test_default_candidate_policy_is_the_frozen_weighted_rrf_configuration() -> None:

@@ -78,6 +78,7 @@ src/softdoc/
   teacher_data.py           thin Controller/Checker reviews and separate SFT exports
   answering.py              Answerer contract and user-prompt renderer
   prompt_registry.py        single prompt discovery/version entrypoint
+  evaluation_protocol.py    frozen metrics and immutable experiment snapshots
 ```
 
 Supporting areas:
@@ -107,6 +108,8 @@ the current canonical Prompt or action versions.
   entrypoint.
 - [External Datasets](EXTERNAL_DATASETS.md): native adapters, portable
   manifests, fail-fast corpus auditing, and Gold-free batch export.
+- [Evaluation Protocol](EVALUATION_PROTOCOL.md): canonical development/reference
+  scoring boundary, metric definitions, and immutable experiment IDs.
 - [Research Positioning](RESEARCH_POSITIONING.md): current research hypothesis
   and novelty boundary.
 - [TODO](TODO.md): unresolved decisions and experiments. A TODO is not an
@@ -149,6 +152,12 @@ softdoc run-model <SOFTDOC_OUTPUT_DIR> \
   --text-model qwen3:8b \
   --visual-model qwen3-vl:4b
 ```
+
+Production retrieval experiments may additionally pass `--dense` and
+`--visual-search-index <INDEX_DIR>`. That combination uses a five-candidate
+mixed view: three text-RRF candidates and two visual candidates, with stable
+per-batch mixing and Element-level deduplication. The quota and source ranks
+remain backend provenance and are not exposed to the Controller.
 
 The output packet contains:
 

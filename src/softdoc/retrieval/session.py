@@ -11,6 +11,7 @@ from softdoc.retrieval.models import (
     BM25SearchResult,
     CandidateMergePolicy,
     CandidatePreview,
+    CandidateSelectionRoute,
     DenseElementCandidate,
     DenseSearchResult,
     ExactAnchorMatch,
@@ -26,6 +27,8 @@ from softdoc.retrieval.models import (
     SessionCandidate,
     SnippetSource,
     SubQuestionInput,
+    VisualElementCandidate,
+    VisualSearchResult,
 )
 
 
@@ -43,6 +46,7 @@ class SearchSessionBuilder:
         exact: ExactLookupResult | None = None,
         bm25: BM25SearchResult | None = None,
         dense: DenseSearchResult | None = None,
+        visual: VisualSearchResult | None = None,
     ) -> SearchSession:
         _validate_result_identity(
             subquestion=subquestion,
@@ -50,7 +54,16 @@ class SearchSessionBuilder:
             exact=exact,
             bm25=bm25,
             dense=dense,
+            visual=visual,
         )
+        if (
+            self.config.merge_policy
+            == CandidateMergePolicy.FIXED_TEXT_VISUAL_QUOTA
+            and visual is None
+        ):
+            raise ValueError(
+                "Fixed Text/Visual quota requires a Visual search result"
+            )
         units_by_id = {unit.search_unit_id: unit for unit in search_units.units}
         bm25_by_id = {
             candidate.element_id: candidate
@@ -60,6 +73,10 @@ class SearchSessionBuilder:
             candidate.element_id: candidate
             for candidate in (dense.candidates if dense is not None else [])
         }
+        visual_by_id = {
+            candidate.element_id: candidate
+            for candidate in (visual.candidates if visual is not None else [])
+        }
         exact_matches = _deduplicate_exact_matches(
             exact.exact_anchor_matches if exact is not None else []
         )
@@ -68,7 +85,61 @@ class SearchSessionBuilder:
             for match in exact_matches
             if match.target_type.value not in {"page", "section"}
         }
-        merged_ids, rrf_scores = _rank_candidate_ids(
+        rank_bm25 = bm25.candidates if bm25 is not None else []
+        rank_dense = dense.candidates if dense is not None else []
+        rank_visual = visual.candidates if visual is not None else []
+        if self.config.merge_policy in {
+            CandidateMergePolicy.FIXED_QUOTA,
+            CandidateMergePolicy.FIXED_TEXT_VISUAL_QUOTA,
+        }:
+            # Exact targets are a separate upstream result.  Remove them before
+            # quota assignment so each preview batch still contains 3+2 unique
+            # non-Exact candidates instead of developing a quota hole.
+            rank_bm25 = [
+                candidate
+                for candidate in rank_bm25
+                if candidate.element_id not in exact_element_ids
+            ]
+            rank_dense = [
+                candidate
+                for candidate in rank_dense
+                if candidate.element_id not in exact_element_ids
+            ]
+            rank_visual = [
+                candidate
+                for candidate in rank_visual
+                if candidate.element_id not in exact_element_ids
+            ]
+        selection_routes: dict[str, CandidateSelectionRoute] = {}
+        if (
+            self.config.merge_policy
+            == CandidateMergePolicy.FIXED_TEXT_VISUAL_QUOTA
+        ):
+            text_ids, rrf_scores = _weighted_rrf_ids(
+                bm25=rank_bm25,
+                dense=rank_dense,
+                config=self.config,
+            )
+            selections = _fixed_text_visual_ids(
+                text_ids=text_ids,
+                visual=rank_visual,
+                config=self.config,
+                presentation_key=(
+                    search_units.document_id,
+                    subquestion.subquestion_id,
+                    subquestion.text,
+                    search_units.index_version,
+                ),
+            )
+            merged_ids = [element_id for element_id, _ in selections]
+            selection_routes = dict(selections)
+        else:
+            merged_ids, rrf_scores = _rank_candidate_ids(
+                bm25=rank_bm25,
+                dense=rank_dense,
+                config=self.config,
+            )
+        _, exact_rrf_scores = _weighted_rrf_ids(
             bm25=bm25.candidates if bm25 is not None else [],
             dense=dense.candidates if dense is not None else [],
             config=self.config,
@@ -78,7 +149,7 @@ class SearchSessionBuilder:
                 match,
                 bm25=bm25_by_id.get(match.target_id),
                 dense=dense_by_id.get(match.target_id),
-                rrf_score=rrf_scores.get(match.target_id),
+                rrf_score=exact_rrf_scores.get(match.target_id),
             )
             for match in exact_matches
         ]
@@ -92,8 +163,10 @@ class SearchSessionBuilder:
                 element_id=element_id,
                 bm25=bm25_by_id.get(element_id),
                 dense=dense_by_id.get(element_id),
+                visual=visual_by_id.get(element_id),
                 units_by_id=units_by_id,
                 rrf_score=rrf_scores.get(element_id),
+                selection_route=selection_routes.get(element_id),
             )
             for element_id in ranked_ids
         ]
@@ -111,6 +184,7 @@ class SearchSessionBuilder:
             exact=exact,
             bm25=bm25,
             dense=dense,
+            visual=visual,
             exact_element_ids=exact_element_ids,
             ranked_count=len(catalog),
             config=self.config,
@@ -122,7 +196,17 @@ class SearchSessionBuilder:
             subquestion.text,
             search_units.index_version,
             [match.model_dump(mode="json") for match in exact_matches],
-            ranked_ids,
+            [
+                {
+                    "element_id": element_id,
+                    "selection_route": (
+                        selection_routes[element_id].value
+                        if element_id in selection_routes
+                        else None
+                    ),
+                }
+                for element_id in ranked_ids
+            ],
             self.config.model_dump(mode="json"),
         )
         return SearchSession(
@@ -229,8 +313,14 @@ def _validate_result_identity(
     exact: ExactLookupResult | None,
     bm25: BM25SearchResult | None,
     dense: DenseSearchResult | None,
+    visual: VisualSearchResult | None,
 ) -> None:
-    for name, result in (("exact", exact), ("bm25", bm25), ("dense", dense)):
+    for name, result in (
+        ("exact", exact),
+        ("bm25", bm25),
+        ("dense", dense),
+        ("visual", visual),
+    ):
         if result is None:
             continue
         if result.subquestion_id != subquestion.subquestion_id:
@@ -295,6 +385,52 @@ def _round_robin_ids(
     return result
 
 
+def _fixed_quota_ids(
+    bm25: list[BM25ElementCandidate],
+    dense: list[DenseElementCandidate],
+    config: SearchSessionConfig,
+) -> list[str]:
+    """Build deterministic batches with source quotas and unique backfill."""
+
+    streams: tuple[tuple[list[object], int], ...] = (
+        (list(bm25), config.bm25_quota),
+        (list(dense), config.dense_quota),
+    )
+    cursors = [0, 0]
+    result: list[str] = []
+    seen: set[str] = set()
+
+    def take(stream_index: int, count: int) -> int:
+        candidates = streams[stream_index][0]
+        added = 0
+        while cursors[stream_index] < len(candidates) and added < count:
+            candidate = candidates[cursors[stream_index]]
+            cursors[stream_index] += 1
+            element_id = str(getattr(candidate, "element_id"))
+            if element_id in seen:
+                continue
+            seen.add(element_id)
+            result.append(element_id)
+            added += 1
+        return added
+
+    while True:
+        batch_start = len(result)
+        for stream_index, (_, quota) in enumerate(streams):
+            take(stream_index, quota)
+        while len(result) - batch_start < config.batch_size:
+            before = len(result)
+            for stream_index in range(len(streams)):
+                take(stream_index, 1)
+                if len(result) - batch_start >= config.batch_size:
+                    break
+            if len(result) == before:
+                break
+        if len(result) == batch_start:
+            break
+    return result
+
+
 def _rank_candidate_ids(
     *,
     bm25: list[BM25ElementCandidate],
@@ -303,6 +439,8 @@ def _rank_candidate_ids(
 ) -> tuple[list[str], dict[str, float]]:
     if config.merge_policy == CandidateMergePolicy.ROUND_ROBIN_BM25_FIRST:
         return _round_robin_ids(bm25, dense), {}
+    if config.merge_policy == CandidateMergePolicy.FIXED_QUOTA:
+        return _fixed_quota_ids(bm25, dense, config), {}
     if config.merge_policy == CandidateMergePolicy.WEIGHTED_RRF:
         return _weighted_rrf_ids(bm25=bm25, dense=dense, config=config)
     raise ValueError(f"Unsupported candidate merge policy: {config.merge_policy}")
@@ -345,23 +483,92 @@ def _weighted_rrf_ids(
     return ordered, scores
 
 
+def _fixed_text_visual_ids(
+    *,
+    text_ids: list[str],
+    visual: list[VisualElementCandidate],
+    config: SearchSessionConfig,
+    presentation_key: tuple[str, str, str, str],
+) -> list[tuple[str, CandidateSelectionRoute]]:
+    """Create fixed 3+2 batches, then deterministically mix each batch.
+
+    Text candidates are the BM25/Dense weighted-RRF ranking. Visual candidates
+    are ranked independently. An Element can enter a session only once; when
+    one route runs short, the other route backfills the batch. The final order
+    is stable for the same question and index but does not expose route slots.
+    """
+
+    streams: tuple[tuple[list[str], CandidateSelectionRoute, int], ...] = (
+        (list(text_ids), CandidateSelectionRoute.TEXT, config.text_quota),
+        (
+            [candidate.element_id for candidate in visual],
+            CandidateSelectionRoute.VISUAL,
+            config.visual_quota,
+        ),
+    )
+    cursors = [0, 0]
+    selected: list[tuple[str, CandidateSelectionRoute]] = []
+    seen: set[str] = set()
+    batch_index = 0
+
+    def take(stream_index: int, count: int) -> list[tuple[str, CandidateSelectionRoute]]:
+        ids, route, _ = streams[stream_index]
+        added: list[tuple[str, CandidateSelectionRoute]] = []
+        while cursors[stream_index] < len(ids) and len(added) < count:
+            element_id = ids[cursors[stream_index]]
+            cursors[stream_index] += 1
+            if element_id in seen:
+                continue
+            seen.add(element_id)
+            added.append((element_id, route))
+        return added
+
+    while True:
+        batch: list[tuple[str, CandidateSelectionRoute]] = []
+        for stream_index, (_, _, quota) in enumerate(streams):
+            batch.extend(take(stream_index, quota))
+        while len(batch) < config.batch_size:
+            before = len(batch)
+            for stream_index in range(len(streams)):
+                batch.extend(take(stream_index, 1))
+                if len(batch) >= config.batch_size:
+                    break
+            if len(batch) == before:
+                break
+        if not batch:
+            break
+        batch.sort(
+            key=lambda item: stable_digest(
+                *presentation_key,
+                batch_index,
+                item[0],
+                item[1].value,
+            )
+        )
+        selected.extend(batch)
+        batch_index += 1
+    return selected
+
+
 def _session_candidate(
     *,
     element_id: str,
     bm25: BM25ElementCandidate | None,
     dense: DenseElementCandidate | None,
+    visual: VisualElementCandidate | None,
     units_by_id: dict[str, SearchUnit],
     rrf_score: float | None,
+    selection_route: CandidateSelectionRoute | None,
 ) -> SessionCandidate:
     source_unit_id = (
         bm25.matched_search_unit_id if bm25 is not None
         else dense.matched_search_unit_id if dense is not None
         else None
     )
-    if source_unit_id is None or source_unit_id not in units_by_id:
-        raise ValueError(f"Candidate refers to a missing SearchUnit: {element_id}")
-    source_unit = units_by_id[source_unit_id]
-    if source_unit.element_id != element_id:
+    source_unit = units_by_id.get(source_unit_id) if source_unit_id else None
+    if source_unit is None and visual is None:
+        raise ValueError(f"Candidate has no available source metadata: {element_id}")
+    if source_unit is not None and source_unit.element_id != element_id:
         raise ValueError("Candidate SearchUnit belongs to another Element")
     for candidate in (bm25, dense):
         if candidate is None:
@@ -375,20 +582,49 @@ def _session_candidate(
         if unit.element_id != element_id:
             raise ValueError("Merged candidate SearchUnits disagree on Element ID")
 
+    if visual is not None:
+        if visual.element_id != element_id:
+            raise ValueError("Visual candidate belongs to another Element")
+        if source_unit is not None and (
+            visual.page_id != source_unit.page_id
+            or visual.page_number != source_unit.page_number
+            or visual.element_type != source_unit.element_type
+        ):
+            raise ValueError("Text and Visual candidate metadata disagree")
+
     matched_by = []
     if bm25 is not None:
         matched_by.append(RetrievalSource.BM25)
     if dense is not None:
         matched_by.append(RetrievalSource.DENSE)
+    if visual is not None:
+        matched_by.append(RetrievalSource.VISUAL_DENSE)
+    if source_unit is not None:
+        element_type = source_unit.element_type
+        page_id = source_unit.page_id
+        page_number = source_unit.page_number
+        section_id = source_unit.section_id
+        section_path = source_unit.section_path
+        display_label = source_unit.display_label
+        content_availability = source_unit.content_availability
+    else:
+        assert visual is not None
+        element_type = visual.element_type
+        page_id = visual.page_id
+        page_number = visual.page_number
+        section_id = visual.section_id
+        section_path = visual.section_path
+        display_label = visual.display_label
+        content_availability = visual.content_availability
     return SessionCandidate(
         element_id=element_id,
-        element_type=source_unit.element_type,
-        page_id=source_unit.page_id,
-        page_number=source_unit.page_number,
-        section_id=source_unit.section_id,
-        section_path=source_unit.section_path,
-        display_label=source_unit.display_label,
-        content_availability=source_unit.content_availability,
+        element_type=element_type,
+        page_id=page_id,
+        page_number=page_number,
+        section_id=section_id,
+        section_path=section_path,
+        display_label=display_label,
+        content_availability=content_availability,
         matched_by=matched_by,
         bm25_rank=bm25.bm25_rank if bm25 is not None else None,
         bm25_score=bm25.bm25_score if bm25 is not None else None,
@@ -409,6 +645,11 @@ def _session_candidate(
             dense.matched_text_char_end if dense is not None else None
         ),
         rrf_score=rrf_score,
+        visual_asset_id=(visual.visual_asset_id if visual is not None else None),
+        visual_rank=visual.visual_rank if visual is not None else None,
+        visual_score=visual.visual_score if visual is not None else None,
+        visual_preview_text=(visual.preview_text if visual is not None else None),
+        selection_route=selection_route,
     )
 
 
@@ -417,6 +658,7 @@ def _session_trace(
     exact: ExactLookupResult | None,
     bm25: BM25SearchResult | None,
     dense: DenseSearchResult | None,
+    visual: VisualSearchResult | None,
     exact_element_ids: set[str],
     ranked_count: int,
     config: SearchSessionConfig,
@@ -426,19 +668,32 @@ def _session_trace(
         SearchSessionTraceEntry(
             code="candidate_ranking_created",
             description=(
-                "BM25 and Dense Element rankings were merged with stable "
-                "Element deduplication."
+                "Text and optional Visual Element rankings were merged with "
+                "stable Element deduplication."
             ),
             data={
                 "policy": config.merge_policy.value,
                 "bm25_candidates": len(bm25.candidates) if bm25 else 0,
                 "dense_candidates": len(dense.candidates) if dense else 0,
+                "visual_candidates": len(visual.candidates) if visual else 0,
                 "ranked_candidates": ranked_count,
                 "exact_element_targets_excluded": len(exact_element_ids),
                 "fixed_final_top_k": False,
                 "rrf_k": config.rrf_k,
                 "bm25_weight": config.bm25_weight,
                 "dense_weight": config.dense_weight,
+                "bm25_quota": config.bm25_quota,
+                "dense_quota": config.dense_quota,
+                "text_quota": config.text_quota,
+                "visual_quota": config.visual_quota,
+                "stable_mixed_presentation": (
+                    config.merge_policy
+                    == CandidateMergePolicy.FIXED_TEXT_VISUAL_QUOTA
+                ),
+                "visual_index_fingerprint": (
+                    visual.index_fingerprint if visual is not None else None
+                ),
+                "visual_model": visual.model_name if visual is not None else None,
             },
         )
     ]
@@ -533,6 +788,41 @@ def _candidate_preview(
         config,
         units_by_id,
     )
+    if preview_source == RetrievalSource.VISUAL_DENSE:
+        text = candidate.visual_preview_text or ""
+        start, end = _snippet_window(
+            text=text,
+            anchor_start=0,
+            anchor_end=min(len(text), config.snippet_max_chars),
+            max_chars=config.snippet_max_chars,
+            context_chars=config.snippet_context_chars,
+        )
+        if not candidate.visual_asset_id:
+            raise ValueError("Visual CandidatePreview requires a visual asset")
+        return CandidatePreview(
+            element_id=candidate.element_id,
+            element_type=candidate.element_type,
+            page_id=candidate.page_id,
+            page_number=candidate.page_number,
+            section_path=candidate.section_path,
+            display_label=candidate.display_label,
+            matched_snippet=text[start:end],
+            snippet_char_start=start,
+            snippet_char_end=end,
+            snippet_truncated=start > 0 or end < len(text),
+            snippet_source=SnippetSource.VISUAL_METADATA,
+            snippet_source_id=candidate.visual_asset_id,
+            matched_search_unit_id=None,
+            visual_asset_id=candidate.visual_asset_id,
+            matched_by=candidate.matched_by,
+            preview_source=RetrievalSource.VISUAL_DENSE,
+            match_scope=PreviewMatchScope.UNKNOWN,
+            bm25_rank=candidate.bm25_rank,
+            dense_rank=candidate.dense_rank,
+            visual_rank=candidate.visual_rank,
+            rrf_score=candidate.rrf_score,
+            content_availability=candidate.content_availability,
+        )
     if preview_source == RetrievalSource.BM25:
         unit_id = candidate.bm25_search_unit_id
         offsets = candidate.bm25_matched_offsets
@@ -574,6 +864,7 @@ def _candidate_preview(
         match_scope=match_scope,
         bm25_rank=candidate.bm25_rank,
         dense_rank=candidate.dense_rank,
+        visual_rank=candidate.visual_rank,
         rrf_score=candidate.rrf_score,
         content_availability=candidate.content_availability,
     )
@@ -584,8 +875,14 @@ def _preview_choice(
     config: SearchSessionConfig,
     units_by_id: dict[str, SearchUnit],
 ) -> tuple[RetrievalSource, PreviewMatchScope]:
+    if candidate.selection_route == CandidateSelectionRoute.VISUAL:
+        return RetrievalSource.VISUAL_DENSE, PreviewMatchScope.UNKNOWN
     has_bm25 = RetrievalSource.BM25 in candidate.matched_by
     has_dense = RetrievalSource.DENSE in candidate.matched_by
+    if not has_bm25 and not has_dense:
+        if RetrievalSource.VISUAL_DENSE in candidate.matched_by:
+            return RetrievalSource.VISUAL_DENSE, PreviewMatchScope.UNKNOWN
+        raise ValueError("Candidate has no previewable retrieval source")
     if not has_bm25:
         return RetrievalSource.DENSE, _dense_match_scope(candidate, units_by_id)
     if not has_dense:

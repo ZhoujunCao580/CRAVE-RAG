@@ -1,7 +1,7 @@
 {
   "suite_id": "controller-dev-suite-v1",
   "case_set_version": "controller-cases-v1",
-  "prompt_version_under_test": "controller-policy-v0.7",
+  "prompt_version_under_test": "controller-policy-v0.8",
   "case_count": 28,
   "model_input_file": "model_inputs/controller_cases_v1.jsonl",
   "review_gold_file": "review_only/controller_gold_v1.jsonl",

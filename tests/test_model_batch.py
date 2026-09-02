@@ -26,6 +26,10 @@ def _args(tmp_path: Path) -> argparse.Namespace:
         dense_model_path=None,
         dense_device="cpu",
         embedding_cache=None,
+        visual_search_index=None,
+        visual_search_model=None,
+        visual_search_device="cuda",
+        visual_similarity_chunk_elements=16_000_000,
     )
 
 
@@ -138,3 +142,25 @@ def test_dense_case_command_preserves_runtime_options(tmp_path: Path) -> None:
     assert "--dense" in command
     assert command[command.index("--dense-device") + 1] == "cpu"
     assert command[command.index("--dense-model-path") + 1] == str(tmp_path / "model")
+
+
+def test_visual_case_command_preserves_runtime_options(tmp_path: Path) -> None:
+    args = _args(tmp_path)
+    args.dense = True
+    args.visual_search_index = tmp_path / "visual-index"
+    args.visual_search_model = "visual-retriever"
+    command = build_case_command(
+        {
+            "case_id": "Q1",
+            "document_dir": str(tmp_path / "doc"),
+            "question": "Question?",
+        },
+        args,
+        tmp_path / "output",
+    )
+    assert command[command.index("--visual-search-index") + 1] == str(
+        tmp_path / "visual-index"
+    )
+    assert command[command.index("--visual-search-model") + 1] == (
+        "visual-retriever"
+    )

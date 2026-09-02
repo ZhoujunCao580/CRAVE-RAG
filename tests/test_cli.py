@@ -24,9 +24,12 @@ def test_cli_parses_model_runner_without_calling_models(tmp_path) -> None:
             "--dense",
             "--dense-device",
             "cpu",
+            "--visual-search-index",
+            str(tmp_path / "visual-index"),
         ]
     )
     assert args.command == "run-model"
     assert args.question == "What changed?"
     assert args.dense is True
+    assert args.visual_search_index == tmp_path / "visual-index"
     assert args.action_budget == 7

@@ -48,6 +48,10 @@ and current_gap is present.
   copy its target_id. A CandidatePreview page_id is location metadata; do not
   use it as a READ_SOURCE source unless that same ID is separately present in
   reading_locations as a source_id.
+  A visual candidate may be promising when the required information is likely
+  encoded visually and is not stated clearly in text. Judge every candidate by
+  its explicit preview fields and current_gap. Candidate position does not
+  guarantee relevance or source type.
 - remaining_action_budget indicates how much reading budget remains.
 
 # Decision rules

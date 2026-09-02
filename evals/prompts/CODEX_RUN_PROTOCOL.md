@@ -19,7 +19,7 @@ A/B evaluation later uses independent API requests with fixed parameters.
 | Component | Prompt | Output Schema | Model inputs |
 | --- | --- | --- | --- |
 | Planner | `src/softdoc/prompts/planner_v0_20.txt` | `evals/prompts/schemas/planner_output.schema.json` | `evals/prompts/planner/model_inputs/planner_cases_v1.jsonl` |
-| Controller | `src/softdoc/prompts/controller_policy_v0_7.txt` | `evals/prompts/schemas/controller_output.schema.json` | `evals/prompts/controller/model_inputs/controller_cases_v1.jsonl` |
+| Controller | `src/softdoc/prompts/controller_policy_v0_8.txt` | `evals/prompts/schemas/controller_output.schema.json` | `evals/prompts/controller/model_inputs/controller_cases_v1.jsonl` |
 | Visual Reader | `src/softdoc/prompts/visual_reader_v0_4.txt` | `evals/prompts/schemas/visual_reader_output.schema.json` | `evals/prompts/visual_reader/model_inputs/visual_reader_cases_v1.jsonl` |
 | Checker | `src/softdoc/prompts/checker_v1_9.txt` | `evals/prompts/schemas/checker_output.schema.json` | `evals/prompts/checker/model_inputs/checker_cases_v1.jsonl` |
 | Answerer | `src/softdoc/prompts/answerer_v0_7.txt` | `evals/prompts/schemas/answerer_output.schema.json` | `evals/prompts/answerer/model_inputs/answerer_cases_v1.jsonl` |

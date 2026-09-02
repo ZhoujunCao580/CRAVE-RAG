@@ -1,0 +1,219 @@
+{
+  "schema_version": "crave-evaluation-protocol-v0.1",
+  "protocol_id": "mmlongbench-doc-reference-v0-1",
+  "frozen": true,
+  "benchmark": {
+    "dataset_id": "yubo2333/MMLongBench-Doc",
+    "dataset_role": "development_reference",
+    "split_policy": "full_corpus_no_split",
+    "clean_holdout": false,
+    "document_count": 135,
+    "question_count": 1091,
+    "annotation_artifact": {
+      "artifact_id": "mmlongbench-doc-current-parquet",
+      "uri": "hf://datasets/yubo2333/MMLongBench-Doc/data/train-00000-of-00001.parquet",
+      "revision": "current-snapshot-audited-2026-09-01",
+      "sha256": "bcdac3c96669634c34184814cede4fe57cf7ac0f98dde0e85936394f6a56a02d"
+    },
+    "source_revision": "mayubo2333/MMLongBench-Doc@d73f0dc0be7e0a2ff6a403d5fe65fcd96461f384",
+    "coverage_report_required": true,
+    "reporting_disclaimer": "The complete MMLongBench-Doc corpus is a development/reference benchmark used during system selection. It is not a clean holdout, and results must not be described as unseen-test performance."
+  },
+  "answer_scoring": {
+    "protocol": "mmlongbench_doc_v1_official",
+    "primary_metric_id": "official_v1_f1",
+    "reported_metric_ids": [
+      "official_v1_accuracy",
+      "official_v1_f1"
+    ],
+    "evaluator_artifacts": [
+      {
+        "artifact_id": "upstream-eval-score",
+        "uri": "https://raw.githubusercontent.com/mayubo2333/MMLongBench-Doc/d73f0dc0be7e0a2ff6a403d5fe65fcd96461f384/eval/eval_score.py",
+        "revision": "d73f0dc0be7e0a2ff6a403d5fe65fcd96461f384",
+        "sha256": "cafa268358b08521cfc9a805c67d86732d943677e4408c5751f336123d09631f"
+      },
+      {
+        "artifact_id": "upstream-extract-answer",
+        "uri": "https://raw.githubusercontent.com/mayubo2333/MMLongBench-Doc/d73f0dc0be7e0a2ff6a403d5fe65fcd96461f384/eval/extract_answer.py",
+        "revision": "d73f0dc0be7e0a2ff6a403d5fe65fcd96461f384",
+        "sha256": "fa6a747bd6a8e96fb6884eb7201663268a5df700ad71d85db3bc5e04a157722f"
+      },
+      {
+        "artifact_id": "upstream-extraction-prompt",
+        "uri": "https://raw.githubusercontent.com/mayubo2333/MMLongBench-Doc/d73f0dc0be7e0a2ff6a403d5fe65fcd96461f384/eval/prompt_for_answer_extraction.md",
+        "revision": "d73f0dc0be7e0a2ff6a403d5fe65fcd96461f384",
+        "sha256": "96a22c3003c22801f1f19717be45070b1d6b9ce76b42e171e044f63b641de659"
+      }
+    ],
+    "extractor_model": "gpt-4o-2024-08-06",
+    "extractor_temperature": 0.0,
+    "normalization_authority": "pinned_upstream_eval_score",
+    "comparability_note": "Use this pinned v1 protocol for comparison with published MMLongBench-Doc v1 results. Any semantic-judge or corrected-annotation result must be reported separately and must not be compared numerically with v1 scores."
+  },
+  "evidence_metrics": [
+    {
+      "metric_id": "gold_page_recall",
+      "direction": "higher",
+      "definition": "For answerable cases, fraction of unique 1-based Gold evidence pages represented by at least one accepted final Evidence item.",
+      "aggregation": "macro mean over answerable cases; also report page-level micro numerator and denominator"
+    },
+    {
+      "metric_id": "evidence_sufficiency_rate",
+      "direction": "higher",
+      "definition": "Fraction of cases whose final Checker state is ready and whose accepted Evidence is sufficient to answer every requested part under review.",
+      "aggregation": "macro mean with answerable and unanswerable slices"
+    },
+    {
+      "metric_id": "incorrect_evidence_admission_rate",
+      "direction": "lower",
+      "definition": "Fraction of accepted Evidence items judged unsupported, contradicted, or assigned to the wrong question during replay review.",
+      "aggregation": "incorrect accepted items divided by all accepted items; report zero-denominator count"
+    }
+  ],
+  "retrieval_metrics": [
+    {
+      "metric_id": "gold_page_recall_at_1",
+      "direction": "higher",
+      "definition": "Whether at least one top-1 candidate lies on a Gold evidence page.",
+      "aggregation": "macro mean over cases with Gold pages"
+    },
+    {
+      "metric_id": "gold_page_recall_at_5",
+      "direction": "higher",
+      "definition": "Whether at least one top-5 candidate lies on a Gold evidence page.",
+      "aggregation": "macro mean over cases with Gold pages"
+    },
+    {
+      "metric_id": "gold_page_recall_at_10",
+      "direction": "higher",
+      "definition": "Whether at least one top-10 candidate lies on a Gold evidence page.",
+      "aggregation": "macro mean over cases with Gold pages"
+    },
+    {
+      "metric_id": "gold_page_mrr",
+      "direction": "higher",
+      "definition": "Reciprocal rank of the first candidate on any Gold evidence page.",
+      "aggregation": "macro mean over cases with Gold pages; missing hit contributes zero"
+    },
+    {
+      "metric_id": "gold_page_ndcg_at_10",
+      "direction": "higher",
+      "definition": "nDCG@10 using binary relevance for candidates whose page is a Gold evidence page.",
+      "aggregation": "macro mean over cases with Gold pages"
+    },
+    {
+      "metric_id": "first_gold_candidate_batch",
+      "direction": "lower",
+      "definition": "First 1-based five-preview batch containing a candidate on a Gold evidence page.",
+      "aggregation": "median and p90 over successful cases; separately report no-hit rate"
+    },
+    {
+      "metric_id": "exact_anchor_success_rate",
+      "direction": "higher",
+      "definition": "Fraction of questions with a resolvable exact anchor for which the automatic exact read reaches the intended source or page.",
+      "aggregation": "successes divided by eligible exact-anchor cases"
+    }
+  ],
+  "reading_metrics": [
+    {
+      "metric_id": "read_source_count",
+      "direction": "lower",
+      "definition": "Number of explicit READ_SOURCE actions executed per case; automatic exact-anchor reads are reported separately.",
+      "aggregation": "mean, median, p90 and total"
+    },
+    {
+      "metric_id": "automatic_exact_read_count",
+      "direction": "descriptive",
+      "definition": "Number of Environment-initiated exact-anchor reads per case; these are not Controller decisions.",
+      "aggregation": "mean and total"
+    },
+    {
+      "metric_id": "adjacent_page_read_count",
+      "direction": "lower",
+      "definition": "Number of READ_ADJACENT_PAGE executions per case.",
+      "aggregation": "mean, median, p90 and total"
+    },
+    {
+      "metric_id": "relation_follow_count",
+      "direction": "lower",
+      "definition": "Number of confirmed or candidate relation navigation executions per case, also split by relation status.",
+      "aggregation": "mean and total by relation status and type"
+    },
+    {
+      "metric_id": "visual_model_call_count",
+      "direction": "lower",
+      "definition": "Number of retrieval-enrichment or full Visual Reader model calls per case, reported separately by purpose.",
+      "aggregation": "mean, median, p90 and total"
+    },
+    {
+      "metric_id": "duplicate_action_rate",
+      "direction": "lower",
+      "definition": "Fraction of executed actions that repeat the same normalized action and target without intervening state change.",
+      "aggregation": "duplicate executions divided by all executions"
+    },
+    {
+      "metric_id": "unfinished_case_rate",
+      "direction": "lower",
+      "definition": "Fraction of cases ending incomplete because of STOP, budget exhaustion, timeout, execution failure, or unresolved gap.",
+      "aggregation": "macro rate with terminal reason breakdown"
+    }
+  ],
+  "efficiency_metrics": [
+    {
+      "metric_id": "input_tokens",
+      "direction": "lower",
+      "definition": "Total model input tokens per case, split by component.",
+      "aggregation": "mean, median, p90 and total"
+    },
+    {
+      "metric_id": "output_tokens",
+      "direction": "lower",
+      "definition": "Total model output tokens per case, split by component.",
+      "aggregation": "mean, median, p90 and total"
+    },
+    {
+      "metric_id": "gpu_seconds",
+      "direction": "lower",
+      "definition": "Measured GPU-active wall time per case and component.",
+      "aggregation": "mean, median, p90 and total"
+    },
+    {
+      "metric_id": "wall_latency_seconds",
+      "direction": "lower",
+      "definition": "End-to-end elapsed wall time per case.",
+      "aggregation": "mean, median, p90 and total"
+    },
+    {
+      "metric_id": "estimated_cost_usd",
+      "direction": "lower",
+      "definition": "Cost derived from measured resource time and the price table frozen in the experiment snapshot.",
+      "aggregation": "mean and total; always report the price-table source"
+    }
+  ],
+  "runtime_defaults": {
+    "random_seed": 42,
+    "temperature": 0.0,
+    "context_length": 8192,
+    "action_budget": 7,
+    "candidate_batch_size": 5,
+    "request_timeout_seconds": 180.0,
+    "case_timeout_seconds": 1800.0,
+    "deterministic_algorithms": false
+  },
+  "required_experiment_bindings": [
+    "code_revision",
+    "dirty_worktree",
+    "prompt_manifest",
+    "text_model",
+    "visual_model",
+    "model_runtime",
+    "softdoc_pipeline",
+    "retrieval_config",
+    "controller_action_contract",
+    "corpus_audit",
+    "hardware",
+    "software_environment",
+    "price_table"
+  ]
+}

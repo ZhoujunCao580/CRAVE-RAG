@@ -52,10 +52,13 @@ from softdoc.reading_environment import (
     ReadingEnvironmentConfig,
 )
 from softdoc.retrieval import (
+    CandidateMergePolicy,
     DenseIndex,
     FileEmbeddingCache,
     HuggingFaceE5Encoder,
     SearchUnitBuilder,
+    SearchSessionConfig,
+    VisualDenseIndex,
 )
 
 
@@ -121,6 +124,25 @@ def build_parser() -> argparse.ArgumentParser:
     run_model.add_argument("--dense-model-path", type=Path)
     run_model.add_argument("--dense-device", choices=("auto", "cpu", "cuda"), default="auto")
     run_model.add_argument("--embedding-cache", type=Path)
+    run_model.add_argument(
+        "--visual-search-index",
+        type=Path,
+        help=(
+            "Completed visual embedding index. Enables the fixed mixed "
+            "candidate policy (text RRF plus visual retrieval)."
+        ),
+    )
+    run_model.add_argument("--visual-search-model")
+    run_model.add_argument(
+        "--visual-search-device",
+        choices=("cpu", "cuda"),
+        default="cuda",
+    )
+    run_model.add_argument(
+        "--visual-similarity-chunk-elements",
+        type=int,
+        default=16_000_000,
+    )
 
     teacher_data = subparsers.add_parser(
         "teacher-data",
@@ -327,6 +349,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         reader = ModelBackedReader(
             OllamaVisualReaderBackend(visual_client)
         )
+        if args.visual_search_index is not None and not args.dense:
+            raise ValueError("--visual-search-index requires --dense")
         search_service = None
         if args.dense:
             search_units = SearchUnitBuilder().build(document)
@@ -342,10 +366,37 @@ def main(argv: Sequence[str] | None = None) -> int:
                 else None
             )
             dense_index = DenseIndex(search_units, encoder, cache=cache)
+            visual_index = (
+                VisualDenseIndex(
+                    document,
+                    args.visual_search_index,
+                    model_name=args.visual_search_model,
+                    device=args.visual_search_device,
+                    similarity_chunk_elements=(
+                        args.visual_similarity_chunk_elements
+                    ),
+                )
+                if args.visual_search_index is not None
+                else None
+            )
+            search_config = (
+                SearchSessionConfig(
+                    merge_policy=(
+                        CandidateMergePolicy.FIXED_TEXT_VISUAL_QUOTA
+                    ),
+                    batch_size=5,
+                    text_quota=3,
+                    visual_quota=2,
+                )
+                if visual_index is not None
+                else None
+            )
             search_service = DocumentSearchService(
                 document,
                 search_units=search_units,
                 dense_backend=dense_index,
+                visual_backend=visual_index,
+                config=search_config,
             )
         runner = ModelBackedRunner(
             planner=planner,

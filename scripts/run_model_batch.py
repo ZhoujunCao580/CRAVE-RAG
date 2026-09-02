@@ -129,6 +129,21 @@ def build_case_command(case: dict[str, Any], args: argparse.Namespace, output: P
             command.extend(["--dense-model-path", str(args.dense_model_path)])
         if args.embedding_cache is not None:
             command.extend(["--embedding-cache", str(args.embedding_cache)])
+        if args.visual_search_index is not None:
+            command.extend(
+                [
+                    "--visual-search-index",
+                    str(args.visual_search_index),
+                    "--visual-search-device",
+                    args.visual_search_device,
+                    "--visual-similarity-chunk-elements",
+                    str(args.visual_similarity_chunk_elements),
+                ]
+            )
+            if args.visual_search_model is not None:
+                command.extend(
+                    ["--visual-search-model", args.visual_search_model]
+                )
     return command
 
 
@@ -160,6 +175,12 @@ def run_batch(
             "context_length": args.context_length,
             "action_budget": args.action_budget,
             "dense": args.dense,
+            "visual_search_index": (
+                str(args.visual_search_index)
+                if args.visual_search_index is not None
+                else None
+            ),
+            "visual_search_model": args.visual_search_model,
         },
         "cases": [],
     }
@@ -244,11 +265,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dense-model-path", type=Path)
     parser.add_argument("--dense-device", choices=("auto", "cpu", "cuda"), default="auto")
     parser.add_argument("--embedding-cache", type=Path)
+    parser.add_argument("--visual-search-index", type=Path)
+    parser.add_argument("--visual-search-model")
+    parser.add_argument(
+        "--visual-search-device", choices=("cpu", "cuda"), default="cuda"
+    )
+    parser.add_argument(
+        "--visual-similarity-chunk-elements",
+        type=int,
+        default=16_000_000,
+    )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.visual_search_index is not None and not args.dense:
+        raise ValueError("--visual-search-index requires --dense")
     cases = load_cases(args.cases, path_root=args.path_root.resolve())
     manifest = run_batch(cases=cases, args=args)
     print(
