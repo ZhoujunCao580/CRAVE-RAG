@@ -56,7 +56,7 @@ def main(argv: list[str] | None = None) -> int:
         "model": args.model,
         "selection": {
             "figures_and_charts": "all elements with a decodable visual asset",
-            "tables": "only visual-only tables without text or HTML",
+            "tables": "all tables with a decodable visual asset",
             "question_or_gold_conditioning": False,
             "content_hash_deduplication": True,
         },

@@ -257,9 +257,9 @@ def collect_visual_asset_inventory(
 ) -> tuple[list[VisualAssetRecord], list[SkippedVisualAsset]]:
     """Collect all question-independent visual retrieval candidates.
 
-    Figures and charts are included whenever they have a real image.  Tables
-    are included only when the image is their only reliable content, because a
-    structured/text table is already represented by the text retrieval routes.
+    Figures, charts, and tables are considered because structured table text
+    can be incomplete or lose visual grouping even when HTML is present.  The
+    collector still requires a real, decodable image before adding a record.
     Identical image bytes are embedded once later, while every Element mapping
     remains in the inventory.
     """
@@ -342,14 +342,10 @@ def collect_visual_asset_inventory(
 def is_visual_retrieval_candidate(element: Element) -> bool:
     if element.element_type in VISUAL_ELEMENT_TYPES:
         return True
-    if element.element_type != ElementType.TABLE:
-        return False
-    has_text = bool((element.text or "").strip())
-    has_structure = bool((element.html or "").strip())
-    return (
-        element.content_availability == ContentAvailability.VISUAL_ONLY
-        or not (has_text or has_structure)
-    )
+    # HTML is not proof that the table is fully searchable. OCR may concatenate
+    # labels or omit spatial grouping that remains visible in the image.
+    # Asset existence/decodability is checked by collect_visual_asset_inventory.
+    return element.element_type == ElementType.TABLE
 
 
 def resolve_softdoc_asset(softdoc_dir: Path, raw_path: Path | str) -> Path:
@@ -582,6 +578,15 @@ def _visual_preview_text(element: Element, captions: Sequence[str]) -> str:
         parts.append(descriptor.search_summary)
         if descriptor.keywords:
             parts.append("Keywords: " + ", ".join(descriptor.keywords))
+    if element.element_type == ElementType.TABLE and element.html:
+        # A visually retrieved table still needs a lightweight semantic cue for
+        # the Controller. Reuse parser text as a preview, while the Reader must
+        # inspect the original image before producing Evidence.
+        from softdoc.retrieval.units import html_to_text
+
+        table_text = html_to_text(element.html)
+        if table_text:
+            parts.append(table_text)
     unique: list[str] = []
     seen: set[str] = set()
     for part in parts:

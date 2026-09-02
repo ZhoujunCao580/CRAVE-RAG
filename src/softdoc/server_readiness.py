@@ -43,7 +43,7 @@ class ReadinessReport:
 
 
 _CORE_MODULES = ("numpy", "pydantic", "PIL", "pypdfium2", "softdoc")
-_EVAL_MODULES = _CORE_MODULES + ("torch", "transformers")
+_EVAL_MODULES = _CORE_MODULES + ("torch", "transformers", "sentence_transformers")
 _TRAIN_MODULES = _EVAL_MODULES + ("accelerate", "datasets", "peft")
 
 
@@ -115,5 +115,5 @@ def readiness_install_hint(profile: ReadinessProfile) -> str:
     if profile == "core":
         return 'python -m pip install -e ".[dev]"'
     if profile == "eval":
-        return 'python -m pip install -e ".[dev,dense]"'
-    return 'python -m pip install -e ".[dev,dense,train]"'
+        return 'python -m pip install -e ".[dev,dense,visual-retrieval]"'
+    return 'python -m pip install -e ".[dev,dense,visual-retrieval,train]"'

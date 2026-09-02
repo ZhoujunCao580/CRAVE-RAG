@@ -31,7 +31,8 @@ bash scripts/bootstrap_server.sh
 Profiles:
 
 - `core`: SoftDoc conversion, validation, and CPU tests.
-- `eval`: core plus PyTorch and Transformers for dense/model evaluation.
+- `eval`: core plus PyTorch, Transformers, and the visual-retrieval stack
+  (`sentence_transformers`) for dense/visual evaluation.
 - `train`: eval plus Accelerate, PEFT, Datasets, and Linux bitsandbytes.
 
 The bootstrap script is intentionally fail-fast. `softdoc doctor` reports a

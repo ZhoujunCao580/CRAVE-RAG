@@ -11,6 +11,7 @@ from softdoc.models import ContentAvailability, ElementType
 from softdoc.retrieval.visual_dense import (
     VISUAL_INDEX_SCHEMA_VERSION,
     VisualDenseIndex,
+    _visual_preview_text,
     fixed_text_visual_quota_ranking,
     is_visual_retrieval_candidate,
     resolve_softdoc_asset,
@@ -30,7 +31,7 @@ class _FakeVisualModel:
         return np.asarray([[0.75]], dtype=np.float32)
 
 
-def test_visual_selection_uses_real_figures_and_only_visual_only_tables(
+def test_visual_selection_keeps_structured_tables_eligible_for_visual_search(
     parsed_document,
 ) -> None:
     base = parsed_document.elements[0]
@@ -57,7 +58,8 @@ def test_visual_selection_uses_real_figures_and_only_visual_only_tables(
 
     assert is_visual_retrieval_candidate(figure)
     assert is_visual_retrieval_candidate(visual_table)
-    assert not is_visual_retrieval_candidate(structured_table)
+    assert is_visual_retrieval_candidate(structured_table)
+    assert "10" in _visual_preview_text(structured_table, [])
 
 
 def test_linux_can_resolve_windows_authored_asset_paths(tmp_path: Path) -> None:

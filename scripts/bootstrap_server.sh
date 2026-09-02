@@ -13,10 +13,10 @@ case "${PROFILE}" in
     python -m pip install -e ".[dev]"
     ;;
   eval)
-    python -m pip install -e ".[dev,dense]"
+    python -m pip install -e ".[dev,dense,visual-retrieval]"
     ;;
   train)
-    python -m pip install -e ".[dev,dense,train]"
+    python -m pip install -e ".[dev,dense,visual-retrieval,train]"
     ;;
   *)
     echo "CRAVE_PROFILE must be core, eval, or train" >&2
