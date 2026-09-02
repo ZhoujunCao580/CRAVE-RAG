@@ -13,6 +13,7 @@ dependencies = [
     "numpy>=1.26,<3",
     "pydantic>=2.5,<3",
     "Pillow>=9,<12",
+    "pypdf>=4,<7",
     "pypdfium2>=4.30,<6",
 ]
 
