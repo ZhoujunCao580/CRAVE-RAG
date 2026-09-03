@@ -21,7 +21,9 @@ dependencies = [
 dev = ["pytest>=7.4,<9"]
 dense = [
     "torch>=2.2",
-    "transformers>=4.40,<5",
+    # sentence-transformers 6.x (required by MultiVectorEncoder) uses the
+    # Transformers 5.x API.
+    "transformers>=5,<6",
 ]
 visual-retrieval = [
     "torch>=2.2",
