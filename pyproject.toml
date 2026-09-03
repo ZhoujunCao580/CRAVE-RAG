@@ -25,7 +25,9 @@ dense = [
 ]
 visual-retrieval = [
     "torch>=2.2",
-    "sentence-transformers[image]>=5.1,<7",
+    # MultiVectorEncoder (used by ColSmol visual retrieval) was introduced in
+    # sentence-transformers 6.0; older 5.x installs fail at runtime.
+    "sentence-transformers[image]>=6.0,<7",
 ]
 train = [
     "accelerate>=0.30,<2",
