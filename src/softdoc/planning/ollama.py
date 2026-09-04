@@ -10,6 +10,7 @@ from pydantic import Field, field_validator
 
 from softdoc.models import SoftDocModel
 from softdoc.planning.models import PlannerBackendResponse, PlannerDraft
+from softdoc.openai_compatible import OpenAICompatibleConfig, OpenAICompatibleError, OpenAICompatibleStructuredClient
 
 
 class OllamaPlannerError(RuntimeError):
@@ -133,4 +134,37 @@ class OllamaPlannerBackend:
             content=content,
             model=str(response.get("model") or self._config.model),
             metadata={key: response[key] for key in metadata_keys if key in response},
+        )
+
+
+class VLLMPlannerBackend:
+    """Planner implementation backed by vLLM's OpenAI-compatible endpoint."""
+
+    def __init__(self, config: OpenAICompatibleConfig, client: OpenAICompatibleStructuredClient | None = None) -> None:
+        self._config = config
+        self._client = client or OpenAICompatibleStructuredClient(config)
+
+    @property
+    def backend_name(self) -> str:
+        return "vllm-openai-compatible"
+
+    def generate(self, *, system_prompt: str, user_prompt: str) -> PlannerBackendResponse:
+        try:
+            self._client.generate(
+                component="planner_draft",
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                output_model=PlannerDraft,
+            )
+        except OpenAICompatibleError as exc:
+            raise OllamaPlannerError(str(exc)) from exc
+        response = self._client.last_response or {}
+        metadata = {}
+        usage = response.get("usage")
+        if isinstance(usage, dict):
+            metadata.update({f"usage_{key}": value for key, value in usage.items()})
+        return PlannerBackendResponse(
+            content=self._client.last_raw_content or "",
+            model=self._config.model,
+            metadata=metadata,
         )

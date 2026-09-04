@@ -45,6 +45,13 @@ experiments. Implemented contracts and workflows belong in
   next/switch/new search.
 - [ ] Report more than Top-k recall: include candidate batches, full reads, VLM
   calls, latency, and cost required to obtain sufficient Evidence.
+- [ ] **First experiment after the next server startup:** resume the 199 saved
+  step-7 `budget_exhausted` episodes once, with a total action limit of 12.
+  Preserve steps 1--7 exactly, never restart a question from step 0, and record
+  the first step at which each episode becomes `ready` (8, 9, 10, 11, 12, or
+  never). Report both incremental and cumulative rescues at each step before
+  choosing a new default action limit. This is a budget-horizon diagnostic,
+  not a new baseline score.
 - [ ] Replace the current action-count placeholder budget with configurable
   resource cost. Paging search results, reading text, reading a whole page, and
   inspecting a visual region must not be treated as equal-cost actions.

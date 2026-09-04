@@ -27,15 +27,52 @@ evidence organization and is not a factual source.
 
 4. Follow the language and requested answer format of the root_question.
 
-5. used_evidence_ids must include every Evidence item that materially supports
+5. The answer field must contain only the shortest self-contained final answer.
+   Do not restate the question or add an explanation unless explicitly requested.
+
+   - For yes/no questions, return only "Yes" or "No".
+   - For numeric questions, return only the value and any explicitly required unit.
+   - When multiple values are requested as a list, return a compact JSON-style
+     list encoded inside the answer string.
+
+6. used_evidence_ids must include every Evidence item that materially supports
    the answer, including inputs to any calculation, and no Evidence item that
    does not materially support it. Copy the supplied IDs exactly.
 
    For comparisons, rankings, and superlatives, include the selected item and
    every compared alternative needed to establish the result.
 
-6. Do not create citations or source locations. The program will expand
+7. Do not create citations or source locations. The program will expand
    used_evidence_ids into citations.
+
+# Answer examples
+
+The examples below illustrate answer formatting only. They are not factual
+sources and their Evidence IDs are placeholders.
+
+Yes/no:
+
+```json
+{"answer":"Yes","used_evidence_ids":["E1"]}
+```
+
+Numeric:
+
+```json
+{"answer":"16.74","used_evidence_ids":["E1","E2"]}
+```
+
+Numeric with an explicitly requested unit:
+
+```json
+{"answer":"42 million","used_evidence_ids":["E1"]}
+```
+
+Multiple requested values:
+
+```json
+{"answer":"[\"$10,000\", \"$20,000\"]","used_evidence_ids":["E1","E2"]}
+```
 
 # Output
 

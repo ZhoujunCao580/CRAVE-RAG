@@ -99,7 +99,7 @@ from softdoc.store import DocumentStore
 from softdoc.table_view import TableMaterializer, TableView
 
 
-READING_ENVIRONMENT_VERSION = "reading-environment-v0.2"
+READING_ENVIRONMENT_VERSION = "reading-environment-v0.3"
 
 
 class ReaderObservationDraft(SoftDocModel):
@@ -193,10 +193,55 @@ class ReadingRunResult(SoftDocModel):
     observation_store: ObservationStore
     action_trace: ActionTrace
     search_sessions: list[SearchSession] = Field(default_factory=list)
+    visible_search_batches: list[SearchBatch] = Field(default_factory=list)
+    visible_search_session_id: str | None = Field(default=None, min_length=1)
+    activated_question_ids: list[str] = Field(default_factory=list)
     controller_input_history: list[ControllerInput] = Field(default_factory=list)
     exact_lookup_results: list[ExactLookupResult] = Field(default_factory=list)
     diagnostics: list[EnvironmentDiagnostic] = Field(default_factory=list)
     answer: AnswerResult | None = None
+
+    @model_validator(mode="after")
+    def validate_resume_state(self) -> Self:
+        session_ids = [item.search_session_id for item in self.search_sessions]
+        if len(session_ids) != len(set(session_ids)):
+            raise ValueError("ReadingRunResult SearchSession IDs must be unique")
+        batch_ids = [
+            item.search_session_id for item in self.visible_search_batches
+        ]
+        if len(batch_ids) != len(set(batch_ids)):
+            raise ValueError("ReadingRunResult visible SearchBatch IDs must be unique")
+        unknown_batches = set(batch_ids).difference(session_ids)
+        if unknown_batches:
+            raise ValueError(
+                "ReadingRunResult visible batches reference missing sessions: "
+                + ", ".join(sorted(unknown_batches))
+            )
+        if self.visible_search_session_id is not None:
+            if self.visible_search_session_id not in session_ids:
+                raise ValueError("Visible SearchSession is missing from the registry")
+            if (
+                self.environment_version == READING_ENVIRONMENT_VERSION
+                and self.visible_search_session_id not in batch_ids
+            ):
+                raise ValueError("Visible SearchSession requires a visible SearchBatch")
+        if len(self.activated_question_ids) != len(
+            set(self.activated_question_ids)
+        ):
+            raise ValueError("Activated question IDs must be unique")
+        known_question_ids = {
+            self.root_question.question_id,
+            *[item.question_id for item in self.evidence_memory.questions],
+        }
+        unknown_questions = set(self.activated_question_ids).difference(
+            known_question_ids
+        )
+        if unknown_questions:
+            raise ValueError(
+                "Activated question IDs are not registered: "
+                + ", ".join(sorted(unknown_questions))
+            )
+        return self
 
 
 class DocumentSearchService:
@@ -370,6 +415,7 @@ class ReadingEnvironment:
         self._controller_inputs: list[ControllerInput] = []
         self._exact_results: list[ExactLookupResult] = []
         self._stop_reason: str | None = None
+        self._action_limit = self.config.action_budget
 
     def run(
         self,
@@ -380,15 +426,7 @@ class ReadingEnvironment:
     ) -> ReadingRunResult:
         # A ReadingEnvironment may be reused in tests or services.  Canonical
         # Document/search indexes are reusable; per-run state is not.
-        self._table_views = {}
-        self._sessions = {}
-        self._visible_batches = {}
-        self._visible_session_id = None
-        self._activated_question_ids = set()
-        self._diagnostics = []
-        self._controller_inputs = []
-        self._exact_results = []
-        self._stop_reason = None
+        self._reset_runtime_state()
         session_id = make_reading_session_id(root_question.question_id, run_key)
         memory = initialize_evidence_memory(
             reading_session_id=session_id,
@@ -404,11 +442,195 @@ class ReadingEnvironment:
             reading_session_id=session_id,
             root_question_id=root_question.question_id,
         )
+        return self._continue_run(
+            root_question=root_question,
+            memory=memory,
+            observations=observations,
+            trace=trace,
+            action_limit=self.config.action_budget,
+        )
+
+    def resume(
+        self,
+        previous: ReadingRunResult,
+        *,
+        additional_action_budget: int,
+    ) -> ReadingRunResult:
+        """Continue one budget-exhausted run without replaying prior model calls.
+
+        Model backends are stateless at this boundary: their next inputs are
+        rebuilt from the restored canonical reading state.  Legacy v0.2 runs
+        did not persist the small private visibility registry, so it is
+        reconstructed deterministically from SearchSession and ActionTrace.
+        """
+
+        if additional_action_budget < 1:
+            raise ValueError("additional_action_budget must be positive")
+        if previous.status != ReadingRunStatus.BUDGET_EXHAUSTED:
+            raise ValueError("Only budget_exhausted runs may be resumed")
+        if previous.answer is not None:
+            raise ValueError("A resumable run must not already contain an answer")
+        if previous.root_question.question_id != previous.evidence_memory.root_question_id:
+            raise ValueError("Resume Root Question does not match EvidenceMemory")
+        if previous.evidence_memory.root_status == EvidenceStatus.READY:
+            raise ValueError("A ready EvidenceMemory must not be resumed")
+        action_limit = len(previous.action_trace.entries) + additional_action_budget
+        if action_limit > 100:
+            raise ValueError("A resumed run may contain at most 100 actions")
+
+        self._restore_runtime_state(previous)
+        memory = previous.evidence_memory.model_copy(deep=True)
+        observations = previous.observation_store.model_copy(deep=True)
+        trace = previous.action_trace.model_copy(deep=True)
+        self._validate_state(observations, memory, trace)
+        return self._continue_run(
+            root_question=previous.root_question.model_copy(deep=True),
+            memory=memory,
+            observations=observations,
+            trace=trace,
+            action_limit=action_limit,
+        )
+
+    def _reset_runtime_state(self) -> None:
+        self._table_views = {}
+        self._sessions = {}
+        self._visible_batches = {}
+        self._visible_session_id = None
+        self._activated_question_ids = set()
+        self._diagnostics = []
+        self._controller_inputs = []
+        self._exact_results = []
+        self._stop_reason = None
+        self._action_limit = self.config.action_budget
+
+    def _restore_runtime_state(self, previous: ReadingRunResult) -> None:
+        self._reset_runtime_state()
+        if any(
+            session.document_id != self.document.document_id
+            for session in previous.search_sessions
+        ):
+            raise ValueError("Resume SearchSession belongs to another Document")
+        self._sessions = {
+            session.search_session_id: session.model_copy(deep=True)
+            for session in previous.search_sessions
+        }
+        if len(self._sessions) != len(previous.search_sessions):
+            raise ValueError("Resume SearchSession IDs must be unique")
+
+        if previous.visible_search_batches:
+            self._visible_batches = {
+                batch.search_session_id: batch.model_copy(deep=True)
+                for batch in previous.visible_search_batches
+            }
+            if len(self._visible_batches) != len(previous.visible_search_batches):
+                raise ValueError("Resume visible SearchBatch IDs must be unique")
+        else:
+            self._visible_batches = {
+                session_id: self._reconstruct_visible_batch(session)
+                for session_id, session in self._sessions.items()
+                if session.cursor > 0
+            }
+
+        visible_session_id = previous.visible_search_session_id
+        if visible_session_id is None:
+            visible_session_id = self._infer_visible_session_id(previous.action_trace)
+        if visible_session_id is not None:
+            if visible_session_id not in self._sessions:
+                raise ValueError("Resume visible SearchSession is missing")
+            if visible_session_id not in self._visible_batches:
+                raise ValueError("Resume visible SearchBatch is missing")
+        self._visible_session_id = visible_session_id
+
+        activated = previous.activated_question_ids or self._infer_activated_questions(
+            previous
+        )
+        known_question_ids = {
+            previous.root_question.question_id,
+            *[
+                question.question_id
+                for question in previous.evidence_memory.questions
+            ],
+        }
+        unknown_activated = set(activated).difference(known_question_ids)
+        if unknown_activated:
+            raise ValueError(
+                "Resume activated question IDs are unknown: "
+                + ", ".join(sorted(unknown_activated))
+            )
+        self._activated_question_ids = set(activated)
+        self._diagnostics = [
+            item.model_copy(deep=True)
+            for item in previous.diagnostics
+            if item.code != "action_budget_exhausted"
+        ]
+        self._controller_inputs = [
+            item.model_copy(deep=True)
+            for item in previous.controller_input_history
+        ]
+        self._exact_results = [
+            item.model_copy(deep=True)
+            for item in previous.exact_lookup_results
+        ]
+
+    def _reconstruct_visible_batch(self, session: SearchSession) -> SearchBatch:
+        size = session.config.batch_size
+        start = ((session.cursor - 1) // size) * size
+        visible_ids = session.shown_candidate_ids[start : session.cursor]
+        return SearchBatch(
+            search_session_id=session.search_session_id,
+            exact_anchor_matches=session.exact_anchor_matches,
+            unresolved_anchors=session.unresolved_anchors,
+            candidate_previews=[
+                self.search.navigator.get_preview(session, element_id)
+                for element_id in visible_ids
+            ],
+            next_cursor=session.cursor,
+            exhausted=session.exhausted,
+            retrieval_trace=session.retrieval_trace,
+        )
+
+    @staticmethod
+    def _infer_visible_session_id(trace: ActionTrace) -> str | None:
+        return next(
+            (
+                str(entry.metadata["search_session_id"])
+                for entry in reversed(trace.entries)
+                if entry.action_name == "SEARCH"
+                and entry.metadata.get("search_session_id")
+            ),
+            None,
+        )
+
+    @staticmethod
+    def _infer_activated_questions(previous: ReadingRunResult) -> list[str]:
+        activated: list[str] = []
+        for question_id in [
+            *[entry.question_id for entry in previous.action_trace.entries],
+            *[
+                item.current_gap.question_id
+                for item in previous.controller_input_history
+                if item.current_gap is not None
+            ],
+        ]:
+            if question_id not in activated:
+                activated.append(question_id)
+        return activated
+
+    def _continue_run(
+        self,
+        *,
+        root_question: RootQuestion,
+        memory: EvidenceMemory,
+        observations: ObservationStore,
+        trace: ActionTrace,
+        action_limit: int,
+    ) -> ReadingRunResult:
+        self._action_limit = action_limit
 
         while (
             memory.root_status != EvidenceStatus.READY
             and self._stop_reason is None
-            and len(trace.entries) < self.config.action_budget
+            and len(trace.entries) < action_limit
         ):
             target = memory.current_target
             if target is None:
@@ -480,6 +702,9 @@ class ReadingEnvironment:
             observation_store=observations,
             action_trace=trace,
             search_sessions=list(self._sessions.values()),
+            visible_search_batches=list(self._visible_batches.values()),
+            visible_search_session_id=self._visible_session_id,
+            activated_question_ids=sorted(self._activated_question_ids),
             controller_input_history=self._controller_inputs,
             exact_lookup_results=self._exact_results,
             diagnostics=self._diagnostics,
@@ -1185,7 +1410,7 @@ class ReadingEnvironment:
             search_sessions=self._sessions.values(),
             visible_search_batch=visible_batch,
             remaining_action_budget=(
-                self.config.action_budget - len(trace.entries)
+                self._action_limit - len(trace.entries)
             ),
             recent_action_limit=self.config.recent_action_limit,
         )

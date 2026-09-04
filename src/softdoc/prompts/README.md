@@ -11,7 +11,7 @@ data can bind to an immutable revision.
 | Visual Reader | `visual-reader-v0.4` | `visual_reader_v0_4.txt` |
 | Evidence Checker | `checker-v1.9` | `checker_v1_9.txt` |
 | Reading Controller | `controller-policy-v0.8` | `controller_policy_v0_8.txt` |
-| Answerer | `answerer-v0.7` | `answerer_v0_7.txt` |
+| Answerer | `answerer-v0.8` | `answerer_v0_8.txt` |
 
 The Python modules that define prompt versions and render dynamic user input
 remain stable compatibility APIs. `softdoc.prompt_registry` is the unified

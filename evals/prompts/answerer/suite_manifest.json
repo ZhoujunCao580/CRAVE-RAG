@@ -1,7 +1,7 @@
 {
   "suite_id": "answerer-dev-suite-v1",
   "case_set_version": "answerer-cases-v1",
-  "prompt_version_under_test": "answerer-v0.7",
+  "prompt_version_under_test": "answerer-v0.8",
   "case_count": 24,
   "model_input_file": "model_inputs/answerer_cases_v1.jsonl",
   "review_gold_file": "review_only/answerer_gold_v1.jsonl",

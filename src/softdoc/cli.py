@@ -9,7 +9,8 @@ from pathlib import Path
 from typing import Sequence
 
 from softdoc.adapters import MinerUAdapter
-from softdoc.controller_ollama import OllamaControllerBackend, OllamaControllerConfig
+from softdoc.controller_ollama import OllamaControllerBackend, OllamaControllerConfig, VLLMControllerBackend
+from softdoc.openai_compatible import OpenAICompatibleConfig, OpenAICompatibleStructuredClient
 from softdoc.external_data import (
     MMLongBenchDocAdapter,
     audit_external_dataset,
@@ -30,7 +31,7 @@ from softdoc.model_runner import (
     load_model_pipeline_run,
     write_model_pipeline_run,
 )
-from softdoc.planning import InitialPlanner, OllamaPlannerBackend, OllamaPlannerConfig
+from softdoc.planning import InitialPlanner, OllamaPlannerBackend, OllamaPlannerConfig, VLLMPlannerBackend
 from softdoc.pipeline import SoftDocPipeline
 from softdoc.prompt_registry import PromptComponent, get_prompt, prompt_manifest
 from softdoc.rule_audit import write_rule_coverage_reports
@@ -105,11 +106,22 @@ def build_parser() -> argparse.ArgumentParser:
     question_group.add_argument("--question-file", type=Path)
     run_model.add_argument("--output", type=Path, required=True)
     run_model.add_argument("--base-url", default="http://localhost:11434")
+    run_model.add_argument(
+        "--inference-backend",
+        choices=("ollama", "vllm"),
+        default="ollama",
+        help="Model service transport; vllm uses an OpenAI-compatible /v1 endpoint.",
+    )
     run_model.add_argument("--text-model", default="qwen3:8b")
     run_model.add_argument("--visual-model", default="qwen3-vl:4b")
     run_model.add_argument("--timeout", type=float, default=180.0)
     run_model.add_argument("--context-length", type=int, default=8192)
     run_model.add_argument("--action-budget", type=int, default=7)
+    run_model.add_argument("--planner-max-tokens", type=int, default=768)
+    run_model.add_argument("--controller-max-tokens", type=int, default=512)
+    run_model.add_argument("--reader-max-tokens", type=int, default=1536)
+    run_model.add_argument("--checker-max-tokens", type=int, default=1536)
+    run_model.add_argument("--answerer-max-tokens", type=int, default=768)
     run_model.add_argument("--run-key", default="model-v0")
     run_model.add_argument(
         "--question-id",
@@ -316,36 +328,27 @@ def main(argv: Sequence[str] | None = None) -> int:
             else args.question_file.read_text(encoding="utf-8")
         )
         document = load_document(args.document_dir)
-        common = {
-            "base_url": args.base_url,
-            "timeout_seconds": args.timeout,
-        }
-        planner = InitialPlanner(
-            OllamaPlannerBackend(
-                OllamaPlannerConfig(model=args.text_model, **common)
-            )
-        )
-        controller = OllamaControllerBackend(
-            OllamaControllerConfig(
-                model=args.text_model,
-                context_length=args.context_length,
-                **common,
-            )
-        )
-        text_client = OllamaStructuredClient(
-            OllamaModelConfig(
-                model=args.text_model,
-                context_length=args.context_length,
-                **common,
-            )
-        )
-        visual_client = OllamaStructuredClient(
-            OllamaModelConfig(
-                model=args.visual_model,
-                context_length=args.context_length,
-                **common,
-            )
-        )
+        common = {"base_url": args.base_url, "timeout_seconds": args.timeout}
+        if args.inference_backend == "vllm":
+            def vllm_config(max_tokens: int) -> OpenAICompatibleConfig:
+                return OpenAICompatibleConfig(
+                    model=args.text_model,
+                    base_url=args.base_url,
+                    timeout_seconds=args.timeout,
+                    max_tokens=max_tokens,
+                )
+
+            planner = InitialPlanner(VLLMPlannerBackend(vllm_config(args.planner_max_tokens)))
+            controller = VLLMControllerBackend(vllm_config(args.controller_max_tokens))
+            text_client = OpenAICompatibleStructuredClient(vllm_config(args.checker_max_tokens))
+            visual_client = OpenAICompatibleStructuredClient(vllm_config(args.reader_max_tokens))
+            answerer_client = OpenAICompatibleStructuredClient(vllm_config(args.answerer_max_tokens))
+        else:
+            planner = InitialPlanner(OllamaPlannerBackend(OllamaPlannerConfig(model=args.text_model, **common)))
+            controller = OllamaControllerBackend(OllamaControllerConfig(model=args.text_model, context_length=args.context_length, **common))
+            text_client = OllamaStructuredClient(OllamaModelConfig(model=args.text_model, context_length=args.context_length, **common))
+            visual_client = OllamaStructuredClient(OllamaModelConfig(model=args.visual_model, context_length=args.context_length, **common))
+            answerer_client = text_client
         reader = ModelBackedReader(
             OllamaVisualReaderBackend(visual_client)
         )
@@ -403,7 +406,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             controller=controller,
             reader=reader,
             checker=OllamaEvidenceCheckerBackend(text_client),
-            answerer=OllamaAnswererBackend(text_client),
+            answerer=OllamaAnswererBackend(answerer_client),
             environment_config=ReadingEnvironmentConfig(
                 action_budget=args.action_budget
             ),

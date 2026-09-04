@@ -152,7 +152,7 @@ def test_answer_result_accepts_multiple_calculation_inputs():
 
 
 def test_answerer_prompt_freezes_minimal_boundary():
-    assert ANSWERER_PROMPT_VERSION == "answerer-v0.7"
+    assert ANSWERER_PROMPT_VERSION == "answerer-v0.8"
     assert "question_graph only describes" in ANSWERER_SYSTEM_PROMPT
     assert "Use only the supplied Evidence statements" in ANSWERER_SYSTEM_PROMPT
     assert "directly supports every part" in ANSWERER_SYSTEM_PROMPT
@@ -164,6 +164,9 @@ def test_answerer_prompt_freezes_minimal_boundary():
     assert "every compared alternative needed to establish the result" in (
         ANSWERER_SYSTEM_PROMPT
     )
+    assert "shortest self-contained final answer" in ANSWERER_SYSTEM_PROMPT
+    assert 'return only "Yes" or "No"' in ANSWERER_SYSTEM_PROMPT
+    assert "compact JSON-style" in ANSWERER_SYSTEM_PROMPT
 
     prompt = answerer_user_prompt(_answer_input())
     output_shape = prompt.split("Return exactly this JSON shape:", 1)[1]

@@ -64,6 +64,15 @@ The v0 boundary is intentionally strict:
 - Relations whose other endpoint cannot be read by the current Environment are not exposed as actions;
 - cross-store references are validated after every action.
 
+`ReadingRunResult` is also the checkpoint boundary for a reading episode. In
+addition to Evidence, Observations, and the append-only action trace, v0.3
+persists search cursors, the currently visible candidate batches, the active
+search session, and the questions whose exact anchors have already been
+activated. A `budget_exhausted` result can therefore be resumed with a larger
+action limit without repeating prior model calls or rereading an automatic
+exact anchor. Legacy v0.2 results reconstruct the small visibility registry
+from their saved SearchSessions and ActionTrace before continuing.
+
 `scripts/audit_reading_environment_v0.py` is a small real-SoftDoc replay audit.
 Its scripted Teacher decisions replace unfinished learned components only to
 test orchestration and state transitions; the report is not an Agent accuracy

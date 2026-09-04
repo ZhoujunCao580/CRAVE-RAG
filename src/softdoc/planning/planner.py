@@ -56,6 +56,16 @@ class InitialPlanner:
             )
             try:
                 draft = self._validate_response(response.content, stripped_question)
+                if draft.original_question != stripped_question:
+                    warnings.append(
+                        PlannerWarning(
+                            code="planner_original_question_overridden",
+                            description=(
+                                "The model rewrote original_question; runtime preserved "
+                                "the program-owned user question instead."
+                            ),
+                        )
+                    )
                 break
             except PlannerOutputError as exc:
                 last_error = exc
@@ -77,9 +87,13 @@ class InitialPlanner:
             raise last_error or PlannerOutputError("Planner produced no valid plan")
 
         metadata = dict(response.metadata)
-        metadata["validation_attempts"] = len(warnings) + 1
+        metadata["validation_attempts"] = attempt
         return InitialPlan(
-            original_question=draft.original_question,
+            # The root question is program-owned input.  The model-facing draft
+            # retains the field for schema compatibility, but a harmless rewrite
+            # (for example spelling or whitespace normalization) must not abort an
+            # otherwise valid plan.
+            original_question=stripped_question,
             subquestions=draft.subquestions,
             planner_trace=PlannerTrace(
                 backend_name=self._backend.backend_name,
@@ -102,11 +116,6 @@ class InitialPlanner:
                 "Planner backend returned invalid strict JSON or an invalid plan: "
                 + str(exc.errors(include_url=False)[0].get("msg", "validation failed"))
             ) from exc
-
-        if draft.original_question != stripped_question:
-            raise PlannerOutputError(
-                "Planner output must preserve the original question verbatim"
-            )
 
         self._validate_plan_limits(draft)
         return draft

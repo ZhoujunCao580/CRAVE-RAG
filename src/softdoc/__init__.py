@@ -56,6 +56,7 @@ from softdoc.controller_ollama import (
     OllamaControllerError,
     OllamaControllerTransport,
     UrllibOllamaControllerTransport,
+    VLLMControllerBackend,
 )
 
 from softdoc.floating_sections import (

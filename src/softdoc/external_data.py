@@ -209,25 +209,60 @@ def audit_external_dataset(
         if question.document_id not in valid_document_ids:
             continue
         page_count = page_counts.get(question.document_id)
-        invalid_pages = [
-            page for page in question.evidence_pages if page < 1 or (
-                page_count is not None and page > page_count
-            )
-        ]
-        if invalid_pages:
+        zero_pages = [page for page in question.evidence_pages if page == 0]
+        if zero_pages and manifest.dataset_id == "mmlongbench-doc":
             issues.append(
                 ExternalDataAuditIssue(
-                    severity="error",
-                    code="evidence_page_out_of_range",
+                    severity="warning",
+                    code="ambiguous_evidence_page_zero",
                     message=(
-                        f"Evidence pages {invalid_pages} are outside the "
-                        f"1-based source-page range 1..{page_count}."
+                        "MMLongBench-Doc contains mixed page-numbering conventions; "
+                        "preserving Gold page 0 without silently converting it."
                     ),
                     document_id=question.document_id,
                     question_id=question.question_id,
                 )
             )
-            continue
+        invalid_pages = [
+            page
+            for page in question.evidence_pages
+            if page < 0
+            or (
+                page > 0
+                and page_count is not None
+                and page > page_count
+            )
+        ]
+        if invalid_pages:
+            if manifest.dataset_id == "mmlongbench-doc":
+                issues.append(
+                    ExternalDataAuditIssue(
+                        severity="warning",
+                        code="non_physical_evidence_page_reference",
+                        message=(
+                            f"MMLongBench-Doc Gold pages {invalid_pages} are outside "
+                            f"the physical range 1..{page_count}; preserving the raw "
+                            "annotation because this benchmark also uses printed page "
+                            "labels and contains known delimiter errors."
+                        ),
+                        document_id=question.document_id,
+                        question_id=question.question_id,
+                    )
+                )
+            else:
+                issues.append(
+                    ExternalDataAuditIssue(
+                        severity="error",
+                        code="evidence_page_out_of_range",
+                        message=(
+                            f"Evidence pages {invalid_pages} are outside the "
+                            f"1-based source-page range 1..{page_count}."
+                        ),
+                        document_id=question.document_id,
+                        question_id=question.question_id,
+                    )
+                )
+                continue
         audited_questions += 1
 
     status = "failed" if any(item.severity == "error" for item in issues) else "passed"
@@ -454,7 +489,15 @@ def _audit_softdoc(
     ]:
         if raw_path is None:
             continue
-        asset = raw_path if raw_path.is_absolute() else softdoc_dir / raw_path
+        # A serialized SoftDoc is portable across operating systems.  Pathlib
+        # on Linux treats a Windows-authored backslash as a literal character,
+        # so normalize stored relative asset paths before auditing them.
+        portable_path = Path(str(raw_path).replace("\\", "/"))
+        asset = (
+            portable_path
+            if portable_path.is_absolute()
+            else softdoc_dir / portable_path
+        )
         if not asset.is_file():
             missing_assets.add(asset)
     for asset in sorted(missing_assets, key=str):

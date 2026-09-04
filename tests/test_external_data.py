@@ -109,6 +109,134 @@ def test_external_audit_fails_loudly_for_missing_corpus(tmp_path: Path) -> None:
     assert report.audited_document_count == 0
 
 
+def test_external_audit_accepts_windows_authored_relative_asset_paths(
+    parsed_document,
+    tmp_path: Path,
+) -> None:
+    source_dir = tmp_path / "source-pages"
+    source_dir.mkdir()
+    for page in parsed_document.pages:
+        Image.new("RGB", (16, 16), "white").save(
+            source_dir / f"page_{page.page_number:04d}.png"
+        )
+    softdoc_dir = tmp_path / "softdoc"
+    write_document(parsed_document, softdoc_dir, render_overlays=False)
+    document_json = softdoc_dir / "document.json"
+    payload = json.loads(document_json.read_text(encoding="utf-8"))
+    assets_dir = softdoc_dir / "assets"
+    assets_dir.mkdir(exist_ok=True)
+    Image.new("RGB", (16, 16), "white").save(assets_dir / "page.png")
+    payload["pages"][0]["image_path"] = "assets\\page.png"
+    document_json.write_text(json.dumps(payload), encoding="utf-8")
+    manifest_path = tmp_path / "manifest.json"
+    manifest = ExternalDatasetManifest(
+        dataset_id="portable-fixture",
+        adapter="fixture-v0",
+        documents=[
+            ExternalDocument(
+                document_id="doc-1",
+                source_kind="image_directory",
+                source_path=source_dir.relative_to(tmp_path),
+                softdoc_dir=softdoc_dir.relative_to(tmp_path),
+            )
+        ],
+        questions=[],
+    )
+
+    report = audit_external_dataset(manifest, manifest_path=manifest_path)
+
+    assert report.status == "passed"
+    assert not [issue for issue in report.issues if issue.code == "missing_softdoc_asset"]
+
+
+def test_mmlongbench_page_zero_is_preserved_as_warning(
+    parsed_document,
+    tmp_path: Path,
+) -> None:
+    source_dir = tmp_path / "source-pages"
+    source_dir.mkdir()
+    for page in parsed_document.pages:
+        Image.new("RGB", (16, 16), "white").save(
+            source_dir / f"page_{page.page_number:04d}.png"
+        )
+    softdoc_dir = tmp_path / "softdoc"
+    write_document(parsed_document, softdoc_dir, render_overlays=False)
+    manifest_path = tmp_path / "manifest.json"
+    manifest = ExternalDatasetManifest(
+        dataset_id="mmlongbench-doc",
+        adapter="mmlongbench-doc-v0.1",
+        documents=[
+            ExternalDocument(
+                document_id="doc-1",
+                source_kind="image_directory",
+                source_path=source_dir.relative_to(tmp_path),
+                softdoc_dir=softdoc_dir.relative_to(tmp_path),
+            )
+        ],
+        questions=[
+            ExternalQuestion(
+                case_id="Q189",
+                question_id="mmlongbench-doc:Q189",
+                document_id="doc-1",
+                question="How many datasets are used?",
+                evidence_pages=[0],
+            )
+        ],
+    )
+
+    report = audit_external_dataset(manifest, manifest_path=manifest_path)
+
+    assert report.status == "passed"
+    assert report.audited_question_count == 1
+    assert [issue.code for issue in report.issues] == [
+        "ambiguous_evidence_page_zero"
+    ]
+
+
+def test_mmlongbench_non_physical_gold_page_is_preserved_as_warning(
+    parsed_document,
+    tmp_path: Path,
+) -> None:
+    source_dir = tmp_path / "source-pages"
+    source_dir.mkdir()
+    for page in parsed_document.pages:
+        Image.new("RGB", (16, 16), "white").save(
+            source_dir / f"page_{page.page_number:04d}.png"
+        )
+    softdoc_dir = tmp_path / "softdoc"
+    write_document(parsed_document, softdoc_dir, render_overlays=False)
+    manifest_path = tmp_path / "manifest.json"
+    manifest = ExternalDatasetManifest(
+        dataset_id="mmlongbench-doc",
+        adapter="mmlongbench-doc-v0.1",
+        documents=[
+            ExternalDocument(
+                document_id="doc-1",
+                source_kind="image_directory",
+                source_path=source_dir.relative_to(tmp_path),
+                softdoc_dir=softdoc_dir.relative_to(tmp_path),
+            )
+        ],
+        questions=[
+            ExternalQuestion(
+                case_id="Q705",
+                question_id="mmlongbench-doc:Q705",
+                document_id="doc-1",
+                question="Which pages contain the result?",
+                evidence_pages=[1418],
+            )
+        ],
+    )
+
+    report = audit_external_dataset(manifest, manifest_path=manifest_path)
+
+    assert report.status == "passed"
+    assert report.audited_question_count == 1
+    assert [issue.code for issue in report.issues] == [
+        "non_physical_evidence_page_reference"
+    ]
+
+
 def test_mmlongbench_adapter_maps_origin_softdoc_and_keeps_gold_out(
     tmp_path: Path,
 ) -> None:

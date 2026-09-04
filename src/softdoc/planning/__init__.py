@@ -14,6 +14,7 @@ from softdoc.planning.ollama import (
     OllamaPlannerBackend,
     OllamaPlannerConfig,
     OllamaPlannerError,
+    VLLMPlannerBackend,
 )
 from softdoc.planning.planner import InitialPlanner, PlannerOutputError
 from softdoc.planning.prompt import (
@@ -38,6 +39,7 @@ __all__ = [
     "OllamaPlannerBackend",
     "OllamaPlannerConfig",
     "OllamaPlannerError",
+    "VLLMPlannerBackend",
     "build_initial_planner_prompt",
     "build_initial_planner_system_prompt",
     "build_initial_planner_user_prompt",

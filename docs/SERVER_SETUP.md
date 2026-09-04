@@ -78,10 +78,12 @@ For a single manually transferred SoftDoc, also validate it directly:
 softdoc validate /workspace/data/softdoc/example
 ```
 
-The current production adapter speaks the Ollama `/api/chat` protocol. A plain
-vLLM OpenAI-compatible endpoint is not interchangeable yet; it needs a separate
-backend adapter. Start with an Ollama-compatible endpoint and verify its model
-names independently before running CRAVE-RAG.
+The runner supports both the Ollama `/api/chat` protocol and a vLLM-style
+OpenAI-compatible `/v1/chat/completions` endpoint. Select the latter with
+`--inference-backend vllm`, pass the `/v1` base URL, and verify schema-bound
+text and image requests before starting a batch. The OpenAI-compatible backend
+uses the same frozen Planner, Controller, Reader, Checker, and Answerer
+contracts; it changes serving transport, not the reading state machine.
 
 ## 4. Prompt evaluation
 
@@ -121,8 +123,19 @@ softdoc run-model /workspace/data/softdoc/example \
   --visual-search-device cuda
 ```
 
-The default transport is Ollama-compatible HTTP. The core runner itself uses
-injectable backend protocols, so a later vLLM or hosted-API adapter does not
+For a vLLM endpoint, use the same command with:
+
+```bash
+softdoc run-model /workspace/data/softdoc/example \
+  --question "What evidence supports the reported conclusion?" \
+  --output /workspace/runs/example-vllm \
+  --inference-backend vllm \
+  --base-url http://127.0.0.1:8000/v1 \
+  --text-model Qwen/Qwen3.5-27B
+```
+
+The default transport remains Ollama-compatible HTTP. The core runner uses
+injectable backend protocols, so adding another hosted transport does not
 require changing the reading state machine.
 
 First run one question. Only after its `run_manifest.json`, stage-call JSONL,
@@ -160,6 +173,13 @@ the command returns a nonzero exit code if any case failed. Per-case process
 logs are stored under `_logs/` instead of bloating the manifest. Use a new
 output directory for every rerun; existing nonempty outputs are never
 overwritten.
+
+For throughput experiments against vLLM, `scripts/run_model_batch.py` also
+supports `--execution-mode persistent --workers 2` (or 4 after a two-worker
+smoke test). Persistent mode loads retrieval models once, groups questions by
+document, reuses document search services, records per-stage latency and peak
+GPU memory, and prevents two identical live batches from starting
+accidentally.
 
 ## 5. Teacher data and SFT
 
@@ -237,3 +257,24 @@ script for these artifacts. Do not commit credentials or copyrighted corpora.
 6. Run the small batch with a fresh output directory.
 7. Review Controller and Checker decisions before exporting any SFT rows.
 8. Train a tiny smoke adapter before committing to a long QLoRA run.
+
+## 8. Next server experiment: action-budget horizon
+
+The first experiment after the next server startup is not a fresh benchmark
+run. Resume the 199 preserved episodes that stopped at the seven-action limit
+and allow each episode to continue through at most step 12. The saved first
+seven actions, EvidenceMemory, ObservationStore, SearchSession cursors, visible
+candidate batch, and exact-anchor activation state are the checkpoint; do not
+ask the models to regenerate them.
+
+For each episode record `first_ready_step` as 8, 9, 10, 11, 12, or null. From
+that single continuation run, derive how many additional episodes are rescued
+at step 8, steps 9--10, and steps 11--12. Keep non-ready failure types separate
+because a larger action budget cannot by itself repair repeated reads,
+retrieval misses, rejected Checker deltas, or premature `STOP` decisions.
+
+Before the full continuation, run one real checkpoint through one additional
+action and confirm that the old trace is byte-for-byte unchanged and the next
+Controller input reports the correct remaining budget. This local smoke check
+has already passed with Qwen; repeat it on the server model and production
+retrieval configuration before processing all 199 episodes.

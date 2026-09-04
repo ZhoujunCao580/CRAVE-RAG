@@ -21,7 +21,7 @@ Generator conversation must use only the materialized `model_inputs/` packet.
 | Visual Reader | `visual-reader-v0.4` | 35 cases: 25 real-image regressions and 10 controlled boundaries | [visual_reader](visual_reader/README.md) |
 | Checker | `checker-v1.9` | 26 synthetic state-transition cases, including limitation-only reading | [checker](checker/README.md) |
 | Controller | `controller-policy-v0.8` | 28 historical v0.6 split cases: 20 synthetic decisions and 8 historical real trajectory steps | [controller](controller/README.md) |
-| Answerer | `answerer-v0.7` | 24 English cases: 14 regressions and 10 new boundaries | [answerer](answerer/README.md) |
+| Answerer | `answerer-v0.8` | 24 English cases: 14 regressions and 10 new boundaries | [answerer](answerer/README.md) |
 | End to end | multiple | real trajectory replay is not frozen yet | [integration](integration/README.md) |
 
 ## Preparation and evaluation order

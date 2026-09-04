@@ -176,6 +176,7 @@ def test_model_runner_records_every_executed_stage_and_writes_artifacts(tmp_path
     ]
     assert run.reading_run.answer is not None
     assert run.reading_run.answer.answer == "Revenue in 2023 was 12 million."
+    assert all(item.elapsed_seconds is not None for item in run.stage_calls)
     assert [item.component for item in run.stage_calls] == [
         "planner",
         "controller",
@@ -198,6 +199,10 @@ def test_model_runner_records_every_executed_stage_and_writes_artifacts(tmp_path
     output = tmp_path / "run"
     write_model_pipeline_run(run, output)
     assert (output / "planner.json").is_file()
+    assert (output / "planner_calls.jsonl").is_file()
+    assert (output / "candidate_batches.jsonl").is_file()
+    assert (output / "action_trace.json").is_file()
+    assert (output / "evidence_deltas.jsonl").is_file()
     assert len((output / "controller_calls.jsonl").read_text().splitlines()) == 2
     assert len((output / "reader_calls.jsonl").read_text().splitlines()) == 1
     assert len((output / "checker_calls.jsonl").read_text().splitlines()) == 1

@@ -623,6 +623,163 @@ def test_next_candidate_batch_remains_in_one_search_session(tmp_path: Path) -> N
     assert controller.inputs[2].visible_search_view.search_session_id == session.search_session_id
 
 
+def test_budget_exhausted_run_resumes_search_cursor_without_replaying(
+    tmp_path: Path,
+) -> None:
+    document = _document(
+        tmp_path,
+        page_element_specs=[
+            [
+                {
+                    "element_id": "paragraph:1",
+                    "element_type": ElementType.PARAGRAPH,
+                    "text": "needle candidate one",
+                },
+                {
+                    "element_id": "paragraph:2",
+                    "element_type": ElementType.PARAGRAPH,
+                    "text": "needle candidate two",
+                },
+                {
+                    "element_id": "paragraph:3",
+                    "element_type": ElementType.PARAGRAPH,
+                    "text": "needle candidate three",
+                },
+            ]
+        ],
+    )
+    first = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=QueueController(
+            [{"action": "SEARCH", "operation": "new", "query": "needle"}]
+        ),
+        reader=DeterministicContentReader(),
+        checker=PredicateChecker(lambda _text: True),
+        answerer=EvidenceAnswerer(),
+        config=ReadingEnvironmentConfig(
+            action_budget=1,
+            search=SearchSessionConfig(batch_size=1),
+        ),
+    ).run(
+        root_question=RootQuestion(
+            question_id="root:resume-search",
+            text="Which candidate contains needle?",
+        )
+    )
+
+    assert first.status == ReadingRunStatus.BUDGET_EXHAUSTED
+    assert len(first.action_trace.entries) == 1
+    assert first.search_sessions[0].cursor == 1
+    first_candidate = first.visible_search_batches[0].candidate_previews[0].element_id
+
+    def next_batch(controller_input: ControllerInput) -> dict[str, Any]:
+        assert controller_input.remaining_action_budget == 2
+        assert controller_input.visible_search_view is not None
+        assert (
+            controller_input.visible_search_view.candidate_previews[0].element_id
+            == first_candidate
+        )
+        return {
+            "action": "SEARCH",
+            "operation": "next",
+            "search_session_id": (
+                controller_input.visible_search_view.search_session_id
+            ),
+        }
+
+    def read_second_batch(controller_input: ControllerInput) -> dict[str, Any]:
+        assert controller_input.remaining_action_budget == 1
+        assert controller_input.visible_search_view is not None
+        candidate = controller_input.visible_search_view.candidate_previews[0]
+        assert candidate.element_id != first_candidate
+        return {
+            "action": "READ_SOURCE",
+            "source_ids": [candidate.element_id],
+            "local_problem": "Read the next candidate.",
+        }
+
+    resumed_controller = QueueController([next_batch, read_second_batch])
+    resumed = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=resumed_controller,
+        reader=DeterministicContentReader(),
+        checker=PredicateChecker(lambda _text: True),
+        answerer=EvidenceAnswerer(),
+        config=ReadingEnvironmentConfig(
+            action_budget=1,
+            search=SearchSessionConfig(batch_size=1),
+        ),
+    ).resume(first, additional_action_budget=2)
+
+    assert resumed.status == ReadingRunStatus.READY
+    assert [item.step_index for item in resumed.action_trace.entries] == [0, 1, 2]
+    assert [item.action_name for item in resumed.action_trace.entries] == [
+        "SEARCH",
+        "SEARCH",
+        "READ_SOURCE",
+    ]
+    assert resumed.search_sessions[0].cursor == 2
+    assert len(resumed.controller_input_history) == 3
+    assert resumed.answer is not None
+
+
+def test_legacy_budget_checkpoint_does_not_repeat_exact_anchor(
+    tmp_path: Path,
+) -> None:
+    document = _document(tmp_path, page_element_specs=[[]])
+    first = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=RejectingController(),
+        reader=PageTeacherReader({"page:1": "The requested answer is not shown."}),
+        checker=PredicateChecker(lambda _text: False),
+        answerer=EvidenceAnswerer(),
+        config=ReadingEnvironmentConfig(action_budget=1),
+    ).run(
+        root_question=RootQuestion(
+            question_id="root:legacy-resume",
+            text="What appears on Page 1?",
+        )
+    )
+    assert first.status == ReadingRunStatus.BUDGET_EXHAUSTED
+    assert [item.action_name for item in first.action_trace.entries] == [
+        "READ_SOURCE"
+    ]
+
+    legacy_payload = first.model_dump(mode="json")
+    legacy_payload["environment_version"] = "reading-environment-v0.2"
+    legacy_payload.pop("visible_search_batches")
+    legacy_payload.pop("visible_search_session_id")
+    legacy_payload.pop("activated_question_ids")
+    legacy = type(first).model_validate(legacy_payload)
+    resumed = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=QueueController(
+            [
+                {
+                    "action": "STOP",
+                    "reason": "The resumed test intentionally stops here.",
+                }
+            ]
+        ),
+        reader=PageTeacherReader(
+            {"page:1": "This must not be read again after resume."}
+        ),
+        checker=PredicateChecker(lambda _text: False),
+        answerer=EvidenceAnswerer(),
+    ).resume(legacy, additional_action_budget=1)
+
+    assert resumed.status == ReadingRunStatus.STOPPED_INCOMPLETE
+    assert [item.action_name for item in resumed.action_trace.entries] == [
+        "READ_SOURCE",
+        "STOP",
+    ]
+    assert len(resumed.observation_store.read_records) == 1
+
+
 def test_validated_initial_plan_maps_into_runtime_question_order(tmp_path: Path) -> None:
     document = _document(
         tmp_path,

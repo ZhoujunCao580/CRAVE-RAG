@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import time
 from typing import Any, Protocol
 
 from pydantic import Field, model_validator
@@ -45,6 +46,7 @@ class StageCallRecord(SoftDocModel):
     output: dict[str, Any]
     succeeded: bool = True
     action_id: str | None = Field(default=None, min_length=1)
+    elapsed_seconds: float | None = Field(default=None, ge=0)
 
 
 class ModelPipelineRun(SoftDocModel):
@@ -86,7 +88,9 @@ class _RecordingController:
         self.records = records
 
     def decide(self, controller_input: ControllerInput) -> ControllerAction | dict[str, Any]:
+        started = time.perf_counter()
         output = self.backend.decide(controller_input)
+        elapsed = time.perf_counter() - started
         output_dict = (
             output.model_dump(mode="json")
             if isinstance(output, SoftDocModel)
@@ -98,6 +102,7 @@ class _RecordingController:
                 call_index=_next_index(self.records, "controller"),
                 input=controller_input.model_dump(mode="json"),
                 output=output_dict,
+                elapsed_seconds=elapsed,
             )
         )
         return output
@@ -117,6 +122,7 @@ class _RecordingReader:
             "inputs": [item.model_dump(mode="json") for item in context.inputs],
         }
         try:
+            started = time.perf_counter()
             output = self.backend.read(context)
         except Exception as exc:
             self.records.append(
@@ -127,6 +133,7 @@ class _RecordingReader:
                     output={"error_type": type(exc).__name__, "error": str(exc)},
                     succeeded=False,
                     action_id=context.action_id,
+                    elapsed_seconds=time.perf_counter() - started,
                 )
             )
             raise
@@ -137,6 +144,7 @@ class _RecordingReader:
                 input=input_payload,
                 output=output.model_dump(mode="json"),
                 action_id=context.action_id,
+                elapsed_seconds=time.perf_counter() - started,
             )
         )
         return output
@@ -154,6 +162,7 @@ class _RecordingChecker:
     def check(self, checker_input: EvidenceCheckInput) -> EvidenceCheckResult:
         input_payload = checker_input.model_dump(mode="json")
         try:
+            started = time.perf_counter()
             output = self.backend.check(checker_input)
         except Exception as exc:
             self.records.append(
@@ -164,6 +173,7 @@ class _RecordingChecker:
                     output={"error_type": type(exc).__name__, "error": str(exc)},
                     succeeded=False,
                     action_id=checker_input.action_id,
+                    elapsed_seconds=time.perf_counter() - started,
                 )
             )
             raise
@@ -174,6 +184,7 @@ class _RecordingChecker:
                 input=input_payload,
                 output=output.model_dump(mode="json"),
                 action_id=checker_input.action_id,
+                elapsed_seconds=time.perf_counter() - started,
             )
         )
         return output
@@ -187,6 +198,7 @@ class _RecordingAnswerer:
     def answer(self, answer_input: AnswerInput) -> AnswerResult:
         input_payload = answer_input.model_dump(mode="json")
         try:
+            started = time.perf_counter()
             output = self.backend.answer(answer_input)
         except Exception as exc:
             self.records.append(
@@ -196,6 +208,7 @@ class _RecordingAnswerer:
                     input=input_payload,
                     output={"error_type": type(exc).__name__, "error": str(exc)},
                     succeeded=False,
+                    elapsed_seconds=time.perf_counter() - started,
                 )
             )
             raise
@@ -205,6 +218,7 @@ class _RecordingAnswerer:
                 call_index=_next_index(self.records, "answerer"),
                 input=input_payload,
                 output=output.model_dump(mode="json"),
+                elapsed_seconds=time.perf_counter() - started,
             )
         )
         return output
@@ -243,13 +257,16 @@ class ModelBackedRunner:
         normalized_question = question.strip()
         if not normalized_question:
             raise ValueError("The model-backed run question must not be blank")
+        planner_started = time.perf_counter()
         plan = self.planner.create_plan(normalized_question)
+        planner_elapsed = time.perf_counter() - planner_started
         records = [
             StageCallRecord(
                 component="planner",
                 call_index=0,
                 input={"question": normalized_question},
                 output=plan.model_dump(mode="json"),
+                elapsed_seconds=planner_elapsed,
             )
         ]
         environment = ReadingEnvironment(
@@ -295,6 +312,10 @@ def write_model_pipeline_run(run: ModelPipelineRun, output_dir: Path) -> None:
         calls_by_component.setdefault(record.component, []).append(record)
 
     _write_json(output_dir / "planner.json", run.plan.model_dump(mode="json"))
+    _write_jsonl(
+        output_dir / "planner_calls.jsonl",
+        [item.model_dump(mode="json") for item in calls_by_component.get("planner", [])],
+    )
     _write_json(
         output_dir / "reading_run.json",
         run.reading_run.model_dump(mode="json"),
@@ -304,6 +325,39 @@ def write_model_pipeline_run(run: ModelPipelineRun, output_dir: Path) -> None:
             output_dir / f"{component}_calls.jsonl",
             [item.model_dump(mode="json") for item in calls_by_component.get(component, [])],
         )
+    _write_json(
+        output_dir / "action_trace.json",
+        run.reading_run.action_trace.model_dump(mode="json"),
+    )
+    _write_jsonl(
+        output_dir / "candidate_batches.jsonl",
+        [
+            {
+                "controller_input_index": index,
+                "current_gap": controller_input.current_gap.model_dump(mode="json"),
+                "visible_search_view": controller_input.visible_search_view.model_dump(
+                    mode="json"
+                ),
+            }
+            for index, controller_input in enumerate(
+                run.reading_run.controller_input_history
+            )
+            if controller_input.visible_search_view is not None
+        ],
+    )
+    _write_jsonl(
+        output_dir / "evidence_deltas.jsonl",
+        [
+            {
+                "checker_call_index": item.call_index,
+                "action_id": item.action_id,
+                "evidence_updates": item.output.get("evidence_updates"),
+                "current_target_status": item.output.get("current_target_status"),
+                "root_status": item.output.get("root_status"),
+            }
+            for item in calls_by_component.get("checker", [])
+        ],
+    )
 
     manifest = {
         "pipeline_version": run.pipeline_version,
@@ -318,9 +372,16 @@ def write_model_pipeline_run(run: ModelPipelineRun, output_dir: Path) -> None:
             for component, records in sorted(calls_by_component.items())
         },
         "stage_call_order": [
-            {"component": record.component, "call_index": record.call_index}
+            {
+                "component": record.component,
+                "call_index": record.call_index,
+                "elapsed_seconds": record.elapsed_seconds,
+            }
             for record in run.stage_calls
         ],
+        "model_call_elapsed_seconds": sum(
+            record.elapsed_seconds or 0.0 for record in run.stage_calls
+        ),
         "answer": (
             run.reading_run.answer.model_dump(mode="json")
             if run.reading_run.answer is not None
@@ -341,12 +402,22 @@ def load_model_pipeline_run(input_dir: Path) -> ModelPipelineRun:
     reading_run = ReadingRunResult.model_validate_json(
         (input_dir / "reading_run.json").read_text(encoding="utf-8")
     )
+    manifest_order = manifest.get("stage_call_order") or []
+    planner_order = next(
+        (
+            item
+            for item in manifest_order
+            if item.get("component") == "planner" and item.get("call_index") == 0
+        ),
+        {},
+    )
     loaded_records = [
         StageCallRecord(
             component="planner",
             call_index=0,
             input={"question": manifest["question"]},
             output=plan.model_dump(mode="json"),
+            elapsed_seconds=planner_order.get("elapsed_seconds"),
         )
     ]
     for component in ("controller", "reader", "checker", "answerer"):

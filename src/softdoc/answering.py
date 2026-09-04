@@ -18,7 +18,7 @@ from softdoc.prompts import load_prompt_text
 from softdoc.reading_state import EvidenceMemory, EvidenceStatus, RootQuestion
 
 
-ANSWERER_PROMPT_VERSION = "answerer-v0.7"
+ANSWERER_PROMPT_VERSION = "answerer-v0.8"
 
 
 def _unique_nonblank(values: list[str], *, label: str) -> list[str]:
@@ -200,7 +200,7 @@ def validate_answer_result(
     return result
 
 
-ANSWERER_SYSTEM_PROMPT = load_prompt_text("answerer_v0_7.txt")
+ANSWERER_SYSTEM_PROMPT = load_prompt_text("answerer_v0_8.txt")
 
 
 def answerer_user_prompt(answer_input: AnswerInput) -> str:

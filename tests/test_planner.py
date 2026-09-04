@@ -212,13 +212,19 @@ def test_tool_actions_and_early_answer_fields_are_rejected(
         InitialPlanner(backend).create_plan(question)
 
 
-def test_original_question_must_be_preserved_verbatim() -> None:
+def test_original_question_is_preserved_by_runtime_when_model_rewrites_it() -> None:
     backend = MockPlannerBackend(
         _plan("A rewritten question", [_subquestion("Q1", "What is required?")])
     )
 
-    with pytest.raises(PlannerOutputError, match="verbatim"):
-        InitialPlanner(backend).create_plan("The original question")
+    plan = InitialPlanner(backend).create_plan("The original question")
+
+    assert plan.original_question == "The original question"
+    assert plan.subquestions[0].text == "What is required?"
+    assert plan.planner_trace.metadata["validation_attempts"] == 1
+    assert [warning.code for warning in plan.planner_trace.warnings] == [
+        "planner_original_question_overridden"
+    ]
 
 
 def test_configured_subquestion_limit_is_enforced() -> None:

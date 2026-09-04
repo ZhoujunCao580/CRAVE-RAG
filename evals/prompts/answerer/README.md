@@ -1,7 +1,7 @@
 # Answerer suite inventory
 
-- Canonical Prompt: `src/softdoc/prompts/answerer_v0_7.txt`
-- Registry version: `answerer-v0.7`
+- Canonical Prompt: `src/softdoc/prompts/answerer_v0_8.txt`
+- Registry version: `answerer-v0.8`
 - Current source and runner: `scripts/evaluate_answerer_mock.py`
 - Frozen suite: 24 English synthetic evidence-package cases
   - 14 existing contract regressions;
@@ -18,7 +18,9 @@ conversation may read only the model-visible file, the Prompt, and the output
 Schema. It must not read `review_only/`.
 
 All current questions are in English. Case `08_language` checks that the
-Answerer follows an explicit one-English-sentence response instruction.
+Answerer follows the language requested by the root question. The canonical
+Prompt now also requires the shortest self-contained answer and gives generic
+yes/no, numeric, unit-bearing, and list-format examples.
 
 The added cases cover percentage points versus relative percentage change,
 unit conversion, rounding, exclusion, yes/no comparison, temporal scope,

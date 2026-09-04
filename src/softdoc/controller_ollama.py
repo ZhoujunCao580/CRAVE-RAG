@@ -18,6 +18,11 @@ from softdoc.controller_prompt import (
     build_controller_user_prompt,
 )
 from softdoc.models import SoftDocModel
+from softdoc.openai_compatible import (
+    OpenAICompatibleConfig,
+    OpenAICompatibleError,
+    OpenAICompatibleStructuredClient,
+)
 
 
 class OllamaControllerError(RuntimeError):
@@ -180,4 +185,41 @@ class OllamaControllerBackend:
     def decide(self, controller_input: ControllerInput) -> ControllerAction:
         """Implement the ReadingEnvironment ControllerBackend protocol."""
 
+        return self.generate(controller_input).action
+
+
+class VLLMControllerBackend:
+    """Controller backend for vLLM (or any OpenAI-compatible chat server)."""
+
+    def __init__(
+        self,
+        config: OpenAICompatibleConfig,
+        client: OpenAICompatibleStructuredClient | None = None,
+    ) -> None:
+        self._config = config
+        self._client = client or OpenAICompatibleStructuredClient(config)
+
+    @property
+    def backend_name(self) -> str:
+        return "vllm-openai-compatible"
+
+    def generate(self, controller_input: ControllerInput) -> ControllerGeneration:
+        try:
+            action = self._client.generate(
+                component="controller_action",
+                system_prompt=CONTROLLER_SYSTEM_PROMPT,
+                user_prompt=build_controller_user_prompt(controller_input),
+                output_model=_ACTION_ADAPTER,
+            )
+        except OpenAICompatibleError as exc:
+            raise OllamaControllerError(str(exc), raw_content=exc.raw_content) from exc
+        validated = validate_controller_action(action, controller_input)
+        return ControllerGeneration(
+            raw_content=validated.model_dump_json(),
+            action=validated,
+            model=self._config.model,
+            metadata={"transport": "openai-compatible", "base_url": self._config.base_url},
+        )
+
+    def decide(self, controller_input: ControllerInput) -> ControllerAction:
         return self.generate(controller_input).action

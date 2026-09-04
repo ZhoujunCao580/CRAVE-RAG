@@ -44,7 +44,7 @@ def test_registry_text_comes_from_central_versioned_prompt_assets() -> None:
         "controller_policy_v0_8.txt"
     )
     assert get_prompt("answerer").canonical_text == load_prompt_text(
-        "answerer_v0_7.txt"
+        "answerer_v0_8.txt"
     )
     assert "<ROOT_QUESTION>" in get_prompt("planner").canonical_text
     assert get_prompt("planner").prompt_kind == "system_and_user_prompt"
@@ -68,7 +68,7 @@ def test_prompt_directory_contains_only_current_prompt_assets() -> None:
         "visual_reader_v0_4.txt",
         "checker_v1_9.txt",
         "controller_policy_v0_8.txt",
-        "answerer_v0_7.txt",
+        "answerer_v0_8.txt",
     }
     assert not (PROMPT_DIRECTORY / "archive").exists()
 
