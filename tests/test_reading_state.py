@@ -5,13 +5,15 @@ from softdoc.ids import action_id, evidence_id, observation_id, read_input_id
 from softdoc.models import Relation, RelationEvidence, RelationSource, RelationStatus, RelationType
 from softdoc.reading_state import (
     ActionExecutionStatus, ActionTrace, ActionTraceEntry, CurrentTarget,
-    EvidenceAddition, EvidenceCheckInput, EvidenceCheckResult, EvidenceItem,
+    CheckerObservationAssessment, EvidenceAddition, EvidenceCheckDecision,
+    EvidenceCheckInput, EvidenceCheckResult, EvidenceItem,
     EvidenceMemory, EvidenceRemoval, EvidenceReplacement, EvidenceStatus,
     EvidenceUpdates, ExplorationSourceHandle, ExplorationStateBuilder,
     ObservationAssessment, ObservationLimitation, ObservationSourceRef,
     ObservationStore, QuestionState, QuestionStatus, ReadInput, ReadRecord,
     ReaderKind, ReadingSourceType, ReadRepresentation, RootQuestion,
     StoredObservation, apply_evidence_check_result, initialize_evidence_memory,
+    materialize_evidence_check_decision,
     register_deferred_question, select_next_runnable_question,
 )
 
@@ -119,6 +121,88 @@ def test_observation_store_round_trip_and_joint_grounding():
     )
     assert ObservationStore.model_validate_json(store.model_dump_json()) == store
     assert [source.input_id for source in store.observations[0].sources] == ["I1", "I2"]
+
+
+def test_checker_decision_derives_used_for_evidence_from_final_delta() -> None:
+    observations = [
+        _observation(f"obs:{index}", text=text)
+        for index, text in enumerate(
+            [
+                "The BI list includes ORACLE and IBM.",
+                "The structured DB list includes ORACLE and IBM.",
+                "The intersection is ORACLE and IBM.",
+            ],
+            start=1,
+        )
+    ]
+    checker_input = EvidenceCheckInput(
+        action_id="action:read",
+        root_question=RootQuestion(
+            question_id="root:1", text="Which companies are in both lists?"
+        ),
+        evidence_memory=_memory(),
+        observations=observations,
+    )
+    decision = EvidenceCheckDecision(
+        action_id="action:read",
+        observation_assessments=[
+            CheckerObservationAssessment(
+                observation_id=item.observation_id,
+                assessment="Assessed for relevance and grounding.",
+            )
+            for item in observations
+        ],
+        evidence_updates=EvidenceUpdates(
+            add=[
+                EvidenceAddition(
+                    statement="ORACLE and IBM appear in both lists.",
+                    observation_ids=["obs:3"],
+                    supports_question_ids=["Q2"],
+                )
+            ]
+        ),
+        current_target_status=QuestionStatus.SATISFIED,
+        root_status=EvidenceStatus.READY,
+        remaining_gap_description=None,
+    )
+
+    result = materialize_evidence_check_decision(checker_input, decision)
+
+    assert [item.used_for_evidence for item in result.observation_assessments] == [
+        False,
+        False,
+        True,
+    ]
+    updated = apply_evidence_check_result(checker_input, result)
+    assert updated.evidence[-1].observation_ids == ["obs:3"]
+
+
+def test_checker_decision_rejects_bad_delta_before_deriving_provenance() -> None:
+    checker_input = _checker_input()
+    decision = EvidenceCheckDecision(
+        action_id="action:read",
+        observation_assessments=[
+            CheckerObservationAssessment(
+                observation_id="obs:1",
+                assessment="The observation is relevant.",
+            )
+        ],
+        evidence_updates=EvidenceUpdates(
+            add=[
+                EvidenceAddition(
+                    statement="Unsupported provenance.",
+                    observation_ids=["obs:missing"],
+                    supports_question_ids=["Q2"],
+                )
+            ]
+        ),
+        current_target_status=QuestionStatus.INCOMPLETE,
+        root_status=EvidenceStatus.INCOMPLETE,
+        remaining_gap_description="A grounded value is still missing.",
+    )
+
+    with pytest.raises(ValueError, match="unavailable Observations"):
+        materialize_evidence_check_decision(checker_input, decision)
 
 
 def test_limitation_and_observation_must_reference_same_action_input():
@@ -331,11 +415,44 @@ def test_exhausted_plan_returns_to_root_for_deferred_planning_or_direct_reading(
     updated = apply_evidence_check_result(_checker_input(), result)
     assert updated.current_target == CurrentTarget(
         question_id="root:1",
-        gap_description=(
-            "Determine what evidence is still missing to answer the Root Question: "
-            "How did revenue change from 2022 to 2023?"
+        gap_description="How did revenue change from 2022 to 2023?",
+    )
+
+
+def test_checker_accepts_state_only_root_finalization_after_completed_plan():
+    memory = EvidenceMemory(
+        reading_session_id="reading:root-finalize",
+        root_question_id="root:1",
+        questions=[
+            QuestionState(
+                question_id="Q1",
+                text="Find A.",
+                status=QuestionStatus.SATISFIED,
+            )
+        ],
+        evidence=[
+            EvidenceItem(
+                evidence_id="evidence:q1",
+                statement="A is 72%.",
+                observation_ids=["obs:prior:q1"],
+                supports_question_ids=["Q1"],
+            )
+        ],
+        current_target=CurrentTarget(
+            question_id="root:1",
+            gap_description="What is A?",
         ),
     )
+
+    checker_input = EvidenceCheckInput(
+        action_id="action:root-finalization",
+        root_question=RootQuestion(question_id="root:1", text="What is A?"),
+        evidence_memory=memory,
+        observations=[],
+        limitations=[],
+    )
+
+    assert checker_input.evidence_memory.current_target.question_id == "root:1"
 
 
 def test_checker_gap_is_present_only_for_an_incomplete_current_target():

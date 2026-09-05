@@ -14,6 +14,8 @@ from softdoc.model_runner import ModelPipelineRun, StageCallRecord, load_model_p
 from softdoc.models import SoftDocModel
 from softdoc.prompt_registry import PromptComponent, get_prompt
 from softdoc.reading_state import (
+    CheckerObservationAssessment,
+    EvidenceCheckDecision,
     EvidenceCheckInput,
     EvidenceCheckResult,
     apply_evidence_check_result,
@@ -406,6 +408,20 @@ def build_checker_sft_examples(
                 )
             result = EvidenceCheckResult.model_validate(record.output)
         apply_evidence_check_result(checker_input, result)
+        decision = EvidenceCheckDecision(
+            action_id=result.action_id,
+            observation_assessments=[
+                CheckerObservationAssessment(
+                    observation_id=item.observation_id,
+                    assessment=item.assessment,
+                )
+                for item in result.observation_assessments
+            ],
+            evidence_updates=result.evidence_updates,
+            current_target_status=result.current_target_status,
+            root_status=result.root_status,
+            remaining_gap_description=result.remaining_gap_description,
+        )
         examples.append(
             SFTExample(
                 example_id=(
@@ -418,7 +434,7 @@ def build_checker_sft_examples(
                     ensure_ascii=False,
                     separators=(",", ":"),
                 ),
-                target=result.model_dump(mode="json"),
+                target=decision.model_dump(mode="json"),
             )
         )
     return examples

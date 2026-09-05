@@ -1,5 +1,27 @@
 {
   "$defs": {
+    "CheckerObservationAssessment": {
+      "additionalProperties": false,
+      "description": "Model-authored assessment without duplicated Evidence provenance.",
+      "properties": {
+        "observation_id": {
+          "minLength": 1,
+          "title": "Observation Id",
+          "type": "string"
+        },
+        "assessment": {
+          "minLength": 1,
+          "title": "Assessment",
+          "type": "string"
+        }
+      },
+      "required": [
+        "observation_id",
+        "assessment"
+      ],
+      "title": "CheckerObservationAssessment",
+      "type": "object"
+    },
     "EvidenceAddition": {
       "additionalProperties": false,
       "description": "New Evidence content; the program assigns its stable evidence_id.",
@@ -131,32 +153,6 @@
       "title": "EvidenceUpdates",
       "type": "object"
     },
-    "ObservationAssessment": {
-      "additionalProperties": false,
-      "properties": {
-        "observation_id": {
-          "minLength": 1,
-          "title": "Observation Id",
-          "type": "string"
-        },
-        "used_for_evidence": {
-          "title": "Used For Evidence",
-          "type": "boolean"
-        },
-        "assessment": {
-          "minLength": 1,
-          "title": "Assessment",
-          "type": "string"
-        }
-      },
-      "required": [
-        "observation_id",
-        "used_for_evidence",
-        "assessment"
-      ],
-      "title": "ObservationAssessment",
-      "type": "object"
-    },
     "QuestionStatus": {
       "enum": [
         "incomplete",
@@ -167,7 +163,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "Validated Checker delta; this is not another canonical store.",
+  "description": "Model-facing Checker delta.\n\n``used_for_evidence`` is deliberately absent.  The Environment derives it\nafter atomically applying the Evidence delta and materializes a canonical\n:class:`EvidenceCheckResult` for feedback and persisted runtime state.",
   "properties": {
     "action_id": {
       "minLength": 1,
@@ -176,7 +172,7 @@
     },
     "observation_assessments": {
       "items": {
-        "$ref": "#/$defs/ObservationAssessment"
+        "$ref": "#/$defs/CheckerObservationAssessment"
       },
       "title": "Observation Assessments",
       "type": "array"
@@ -209,6 +205,6 @@
     "current_target_status",
     "root_status"
   ],
-  "title": "EvidenceCheckResult",
+  "title": "EvidenceCheckDecision",
   "type": "object"
 }

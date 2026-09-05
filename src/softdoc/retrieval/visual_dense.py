@@ -569,15 +569,17 @@ def _confirmed_captions(document: Document) -> dict[str, list[str]]:
 
 
 def _visual_preview_text(element: Element, captions: Sequence[str]) -> str:
+    descriptor = visual_retrieval_descriptor(element)
+    if descriptor is not None:
+        # The descriptor already received the trusted label/caption context when
+        # it was generated.  Keep the Controller-facing preview compact instead
+        # of repeating that context and the retrieval-only keyword list.
+        return " ".join(descriptor.search_summary.split())
+
     parts: list[str] = []
     if element.reference_label:
         parts.append(" ".join(element.reference_label.split()))
     parts.extend(" ".join(text.split()) for text in captions if text.strip())
-    descriptor = visual_retrieval_descriptor(element)
-    if descriptor is not None:
-        parts.append(descriptor.search_summary)
-        if descriptor.keywords:
-            parts.append("Keywords: " + ", ".join(descriptor.keywords))
     if element.element_type == ElementType.TABLE and element.html:
         # A visually retrieved table still needs a lightweight semantic cue for
         # the Controller. Reuse parser text as a preview, while the Reader must

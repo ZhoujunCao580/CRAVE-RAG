@@ -11,14 +11,12 @@
       "items": {
         "type": "string"
       },
-      "minItems": 1,
       "title": "Used Evidence Ids",
       "type": "array"
     }
   },
   "required": [
-    "answer",
-    "used_evidence_ids"
+    "answer"
   ],
   "title": "AnswerResult",
   "type": "object"

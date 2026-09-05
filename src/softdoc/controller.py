@@ -35,8 +35,8 @@ from softdoc.retrieval.models import AnchorTargetType, SearchBatch, SearchSessio
 from softdoc.retrieval.units import html_to_text
 
 
-CONTROLLER_INPUT_VERSION = "controller-input-v0.3"
-CONTROLLER_ACTION_VERSION = "controller-action-v0.2"
+CONTROLLER_INPUT_VERSION = "controller-input-v0.4"
+CONTROLLER_ACTION_VERSION = "controller-action-v0.3"
 
 _RELATION_ENDPOINT_PREVIEW_LIMIT = 240
 
@@ -81,6 +81,11 @@ class ControllerReadingLocation(SoftDocModel):
     source_id: str = Field(min_length=1)
     source_type: ReadingSourceType
     page_id: str = Field(min_length=1)
+    # Optional defaults keep persisted v0.3 ControllerInput artifacts readable.
+    # Newly built v0.4 inputs always populate the physical page number when the
+    # canonical Page is present in relation_sources.
+    physical_page_number: int | None = Field(default=None, ge=1)
+    display_page_label: str | None = None
 
 
 class ControllerLimitation(SoftDocModel):
@@ -403,6 +408,7 @@ class ControllerActionName(str, Enum):
     FOLLOW_RELATION = "FOLLOW_RELATION"
     EXPLORE_CANDIDATE_RELATION = "EXPLORE_CANDIDATE_RELATION"
     READ_ADJACENT_PAGE = "READ_ADJACENT_PAGE"
+    READ_PAGE_CONTEXT = "READ_PAGE_CONTEXT"
     STOP = "STOP"
 
 
@@ -472,6 +478,21 @@ class ControllerReadAdjacentPageAction(SoftDocModel):
     local_problem: str = Field(min_length=1)
 
 
+class ControllerReadPageContextAction(SoftDocModel):
+    """Read a visible page itself or one physical page beside it.
+
+    Offset zero preserves the most recently opened source on the base page as
+    an additional Reader input when possible.  This gives a visual Reader both
+    whole-page context and the focused crop without exposing Page hierarchy as
+    a Controller Relation.
+    """
+
+    action: Literal[ControllerActionName.READ_PAGE_CONTEXT]
+    base_page_id: str = Field(min_length=1)
+    offset: int = Field(ge=-1, le=1)
+    local_problem: str = Field(min_length=1)
+
+
 class ControllerStopAction(SoftDocModel):
     """Stop with incomplete Evidence when no justified route remains."""
 
@@ -485,6 +506,7 @@ ControllerAction: TypeAlias = Annotated[
     | ControllerFollowRelationAction
     | ControllerExploreCandidateRelationAction
     | ControllerReadAdjacentPageAction
+    | ControllerReadPageContextAction
     | ControllerStopAction,
     Field(discriminator="action"),
 ]
@@ -535,6 +557,9 @@ class ControllerInputBuilder:
         }
         if len(sources_by_id) != len(source_items):
             raise ValueError("Controller relation source IDs must be unique")
+        pages_by_id = {
+            item.page_id: item for item in source_items if isinstance(item, Page)
+        }
         readable_ids = (
             set(readable_source_ids) if readable_source_ids is not None else None
         )
@@ -570,12 +595,19 @@ class ControllerInputBuilder:
                 source_type = handle.source_type
                 if source_id in seen_locations or page_id is None:
                     continue
+                page = pages_by_id.get(page_id)
                 seen_locations.add(source_id)
                 locations.append(
                     ControllerReadingLocation(
                         source_id=source_id,
                         source_type=source_type,
                         page_id=page_id,
+                        physical_page_number=(
+                            page.page_number if page is not None else None
+                        ),
+                        display_page_label=(
+                            page.display_page_label if page is not None else None
+                        ),
                     )
                 )
 
@@ -594,6 +626,12 @@ class ControllerInputBuilder:
         if focus is not None:
             for relation in relations:
                 if focus.source_id not in {relation.source_id, relation.target_id}:
+                    continue
+                # CONTAINS is canonical hierarchy/provenance, not a semantic
+                # navigation choice.  Page location is exposed directly in
+                # reading_locations instead of requiring the Controller to
+                # follow an opaque Element -> Page relation.
+                if relation.relation_type == RelationType.CONTAINS:
                     continue
                 related_source_preview = (
                     relation.target_id
@@ -852,6 +890,17 @@ def validate_controller_action(
         if action.relation_id not in visible_ids:
             raise ValueError(
                 "EXPLORE_CANDIDATE_RELATION requires a visible candidate Relation"
+            )
+        return action
+
+    if isinstance(action, ControllerReadPageContextAction):
+        visible_page_ids = {
+            item.page_id for item in controller_input.reading_locations
+        }
+        if action.base_page_id not in visible_page_ids:
+            raise ValueError(
+                "READ_PAGE_CONTEXT requires a base page visible in "
+                "reading_locations"
             )
         return action
 

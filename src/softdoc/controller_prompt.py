@@ -9,10 +9,10 @@ from softdoc.prompts import load_prompt_text
 
 # Frozen after the first Controller policy review. Semantic changes require a
 # new version and evaluation; do not patch this prompt for individual cases.
-CONTROLLER_PROMPT_VERSION = "controller-policy-v0.8"
+CONTROLLER_PROMPT_VERSION = "controller-policy-v0.10"
 
 
-CONTROLLER_SYSTEM_PROMPT = load_prompt_text("controller_policy_v0_8.txt")
+CONTROLLER_SYSTEM_PROMPT = load_prompt_text("controller_policy_v0_10.txt")
 
 
 def build_controller_user_prompt(controller_input: ControllerInput) -> str:

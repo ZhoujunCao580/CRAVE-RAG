@@ -67,8 +67,8 @@ def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
 
 def materialize() -> None:
     cases = build_cases()
-    if len(cases) != 26:
-        raise ValueError(f"Expected 26 Checker cases, found {len(cases)}")
+    if len(cases) != 27:
+        raise ValueError(f"Expected 27 Checker cases, found {len(cases)}")
     case_ids = [case.case_id for case in cases]
     if len(case_ids) != len(set(case_ids)):
         raise ValueError("Checker case IDs must be unique")
@@ -94,6 +94,7 @@ def materialize() -> None:
             "gold_is_not_model_visible": True,
             "c11_c12_form_a_two_turn_regression": True,
             "c21_preserves_single_current_target_updates": True,
+            "c27_covers_state_only_root_finalization": True,
             "real_reader_to_checker_packets_still_required": True,
             "unseen_real_holdout_still_required": True,
         },
@@ -106,4 +107,4 @@ def materialize() -> None:
 
 if __name__ == "__main__":
     materialize()
-    print(f"Wrote 26 Checker cases under {SUITE_ROOT.resolve()}")
+    print(f"Wrote 27 Checker cases under {SUITE_ROOT.resolve()}")

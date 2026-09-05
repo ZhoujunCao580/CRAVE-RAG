@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from html.parser import HTMLParser
 
 from softdoc.ids import stable_digest
 from softdoc.models import ContentAvailability, Document, Element, ElementType
+from softdoc.table_fragments import FRAGMENT_METADATA_KEY
 from softdoc.retrieval.models import (
     SearchUnit,
     SearchUnitBuildResult,
@@ -28,6 +30,7 @@ class SearchUnitBuilder:
 
     def build(self, document: Document) -> SearchUnitBuildResult:
         pages = {page.page_id: page for page in document.pages}
+        table_headers = _table_header_context(document)
         ordered = sorted(
             document.elements,
             key=lambda element: (
@@ -43,6 +46,9 @@ class SearchUnitBuilder:
         for element in ordered:
             try:
                 body, context, visual_descriptor_id = _searchable_content(element)
+                table_header_cells, table_header_source_id, table_is_continuation = (
+                    table_headers.get(element.element_id, ([], None, False))
+                )
                 display_label = _display_label(element)
                 if not body:
                     generated_visual = bool(
@@ -91,6 +97,10 @@ class SearchUnitBuilder:
                     ]
                     if visual_descriptor_id is not None:
                         unit_id_parts.extend([visual_descriptor_id, search_text])
+                    if table_header_cells:
+                        unit_id_parts.extend(
+                            [table_header_cells, table_header_source_id, table_is_continuation]
+                        )
                     unit_id = "search-unit:" + stable_digest(*unit_id_parts)
                     units.append(
                         SearchUnit(
@@ -120,6 +130,9 @@ class SearchUnitBuilder:
                                 or ContentAvailability.UNAVAILABLE
                             ),
                             visual_descriptor_id=visual_descriptor_id,
+                            table_header_cells=table_header_cells,
+                            table_header_source_element_id=table_header_source_id,
+                            table_is_continuation=table_is_continuation,
                             index_version=self.config.index_version,
                         )
                     )
@@ -294,6 +307,147 @@ def html_to_text(value: str) -> str:
     parser.feed(value)
     parser.close()
     return _normalize_text("".join(parser.parts))
+
+
+@dataclass(frozen=True)
+class _ParsedTable:
+    rows: list[list[str]]
+    header_rows: list[list[str]]
+
+
+class _TableStructureHTMLParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.rows: list[list[str]] = []
+        self.header_rows: list[list[str]] = []
+        self._row: list[str] | None = None
+        self._cell_parts: list[str] | None = None
+        self._row_has_header = False
+
+    def handle_starttag(
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]],
+    ) -> None:
+        folded = tag.casefold()
+        if folded == "tr":
+            self._row = []
+            self._row_has_header = False
+        elif folded in {"td", "th"}:
+            if self._row is None:
+                self._row = []
+            self._cell_parts = []
+            if folded == "th":
+                self._row_has_header = True
+        elif folded == "br" and self._cell_parts is not None:
+            self._cell_parts.append(" ")
+
+    def handle_data(self, data: str) -> None:
+        if self._cell_parts is not None:
+            self._cell_parts.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        folded = tag.casefold()
+        if folded in {"td", "th"} and self._cell_parts is not None:
+            assert self._row is not None
+            self._row.append(_normalize_text("".join(self._cell_parts)))
+            self._cell_parts = None
+        elif folded == "tr" and self._row is not None:
+            row = [cell for cell in self._row if cell]
+            if row:
+                self.rows.append(row)
+                if self._row_has_header:
+                    self.header_rows.append(row)
+            self._row = None
+            self._row_has_header = False
+
+
+def _parse_table_structure(html: str) -> _ParsedTable:
+    if not html.strip():
+        return _ParsedTable(rows=[], header_rows=[])
+    parser = _TableStructureHTMLParser()
+    parser.feed(html)
+    parser.close()
+    return _ParsedTable(rows=parser.rows, header_rows=parser.header_rows)
+
+
+def _table_header_context(
+    document: Document,
+) -> dict[str, tuple[list[str], str | None, bool]]:
+    """Return compact headers, inheriting them across confirmed table fragments."""
+
+    tables = {
+        element.element_id: element
+        for element in document.elements
+        if element.element_type == ElementType.TABLE
+    }
+    parsed = {
+        element_id: _parse_table_structure(element.html or "")
+        for element_id, element in tables.items()
+    }
+    groups: dict[str, list[Element]] = {}
+    for element in tables.values():
+        metadata = element.metadata.get(FRAGMENT_METADATA_KEY)
+        if (
+            isinstance(metadata, dict)
+            and metadata.get("status") == "confirmed"
+            and isinstance(metadata.get("group_id"), str)
+        ):
+            groups.setdefault(metadata["group_id"], []).append(element)
+
+    inherited: dict[str, tuple[list[str], str | None, bool]] = {}
+    for fragments in groups.values():
+        ordered = sorted(
+            fragments,
+            key=lambda item: int(
+                item.metadata[FRAGMENT_METADATA_KEY].get("fragment_index", 0)
+            ),
+        )
+        source = ordered[0]
+        headers = _best_table_headers(parsed[source.element_id], allow_inferred=True)
+        source_id = source.element_id if headers else None
+        for index, element in enumerate(ordered):
+            own = _best_table_headers(
+                parsed[element.element_id],
+                allow_inferred=index == 0,
+            )
+            inherited[element.element_id] = (
+                own or headers,
+                element.element_id if own else source_id,
+                index > 0,
+            )
+
+    result: dict[str, tuple[list[str], str | None, bool]] = {}
+    for element_id, table in parsed.items():
+        if element_id in inherited:
+            result[element_id] = inherited[element_id]
+            continue
+        headers = _best_table_headers(table, allow_inferred=True)
+        result[element_id] = (
+            headers,
+            element_id if headers else None,
+            False,
+        )
+    return result
+
+
+def _best_table_headers(table: _ParsedTable, *, allow_inferred: bool) -> list[str]:
+    if table.header_rows:
+        width = max(len(row) for row in table.header_rows)
+        headers: list[str] = []
+        for column in range(width):
+            parts = [
+                row[column]
+                for row in table.header_rows
+                if column < len(row) and row[column]
+            ]
+            headers.append(" / ".join(dict.fromkeys(parts)))
+        return headers
+    if allow_inferred and len(table.rows) >= 2 and len(table.rows[0]) >= 2:
+        first = table.rows[0]
+        if any(re.search(r"[A-Za-z\u3400-\u9fff]", cell) for cell in first):
+            return first
+    return []
 
 
 def _normalize_text(value: str) -> str:

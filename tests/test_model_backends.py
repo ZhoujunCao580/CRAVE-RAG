@@ -224,7 +224,7 @@ def test_checker_and_answerer_backends_use_their_frozen_schemas() -> None:
             "message": {
                 "content": (
                     '{"action_id":"action:1","observation_assessments":['
-                    '{"observation_id":"obs:1","used_for_evidence":true,'
+                    '{"observation_id":"obs:1",'
                     '"assessment":"Direct support."}],"evidence_updates":{'
                     '"add":[{"statement":"Revenue was 12 million.",'
                     '"observation_ids":["obs:1"],'
@@ -242,7 +242,8 @@ def test_checker_and_answerer_backends_use_their_frozen_schemas() -> None:
     )
     result = checker.check(checker_input)
     assert result.root_status.value == "ready"
-    assert checker_transport.calls[0][1]["format"]["title"] == "EvidenceCheckResult"
+    assert result.observation_assessments[0].used_for_evidence is True
+    assert checker_transport.calls[0][1]["format"]["title"] == "EvidenceCheckDecision"
 
     answer_input = AnswerInput(
         reading_session_id="reading:1",

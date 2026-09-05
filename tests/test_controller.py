@@ -17,6 +17,7 @@ from softdoc.controller import (
     ControllerGap,
     ControllerInput,
     ControllerReadAdjacentPageAction,
+    ControllerReadPageContextAction,
     ControllerReadSourceAction,
     ControllerReadingLocation,
     ControllerRelationEndpointPreview,
@@ -85,6 +86,8 @@ def _input(**changes: object) -> ControllerInput:
                 source_id="element:table:1",
                 source_type=ReadingSourceType.ELEMENT,
                 page_id="page:opaque",
+                physical_page_number=18,
+                display_page_label="12",
             )
         ],
         "recent_actions": [
@@ -143,11 +146,13 @@ def _endpoint(
 
 def test_controller_input_version_and_round_trip() -> None:
     value = _input()
-    assert CONTROLLER_INPUT_VERSION == "controller-input-v0.3"
-    assert CONTROLLER_ACTION_VERSION == "controller-action-v0.2"
+    assert CONTROLLER_INPUT_VERSION == "controller-input-v0.4"
+    assert CONTROLLER_ACTION_VERSION == "controller-action-v0.3"
     restored = ControllerInput.model_validate_json(value.model_dump_json())
     assert restored == value
     assert restored.recent_actions[0].execution_status == "succeeded"
+    assert restored.reading_locations[0].physical_page_number == 18
+    assert restored.reading_locations[0].display_page_label == "12"
 
 
 def test_relation_endpoint_preview_is_deterministic_and_uses_table_content() -> None:
@@ -303,6 +308,7 @@ def test_frozen_action_names_exclude_deferred_region_and_plan_actions() -> None:
         "FOLLOW_RELATION",
         "EXPLORE_CANDIDATE_RELATION",
         "READ_ADJACENT_PAGE",
+        "READ_PAGE_CONTEXT",
         "STOP",
     }
 
@@ -468,6 +474,42 @@ def test_read_adjacent_page_uses_one_action_with_a_direction() -> None:
                 "from_page_id": "page:hidden",
                 "direction": "next",
                 "local_problem": "Check the next page.",
+            },
+            _input(),
+        )
+
+
+def test_read_page_context_uses_visible_base_page_and_bounded_offset() -> None:
+    action = validate_controller_action(
+        {
+            "action": "READ_PAGE_CONTEXT",
+            "base_page_id": "page:opaque",
+            "offset": 0,
+            "local_problem": "Read the chart together with its page legend.",
+        },
+        _input(),
+    )
+    assert isinstance(action, ControllerReadPageContextAction)
+    assert action.offset == 0
+
+    with pytest.raises(ValueError, match="base page visible"):
+        validate_controller_action(
+            {
+                "action": "READ_PAGE_CONTEXT",
+                "base_page_id": "page:hidden",
+                "offset": 1,
+                "local_problem": "Check the following page.",
+            },
+            _input(),
+        )
+
+    with pytest.raises(ValidationError, match="less than or equal to 1"):
+        validate_controller_action(
+            {
+                "action": "READ_PAGE_CONTEXT",
+                "base_page_id": "page:opaque",
+                "offset": 2,
+                "local_problem": "Skip too far.",
             },
             _input(),
         )

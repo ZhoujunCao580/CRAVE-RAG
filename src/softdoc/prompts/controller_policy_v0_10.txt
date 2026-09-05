@@ -30,7 +30,9 @@ and current_gap is present.
   uncertainty, incomplete grounding, or failed reading. Any verification must
   remain focused on the current gap.
 - reading_locations are sources that have already been opened. Their page_id
-  may be used for adjacent-page reading.
+  may be used as READ_PAGE_CONTEXT.base_page_id. physical_page_number is the 1-based
+  PDF page order used for navigation. display_page_label, when present, is the
+  printed label visible in the document; do not confuse it with physical order.
 - recent_actions show recent attempts, execution status, Reader limitations,
   and Checker assessments. Avoid meaningless repetition.
 - confirmed_relations are accepted document-structure links that may be
@@ -48,6 +50,11 @@ and current_gap is present.
   copy its target_id. A CandidatePreview page_id is location metadata; do not
   use it as a READ_SOURCE source unless that same ID is separately present in
   reading_locations as a source_id.
+  For a Figure or Chart with generated visual retrieval metadata,
+  matched_snippet contains its compact search_summary. This summary is only a
+  retrieval and source-selection clue: it may omit answer-bearing visual detail
+  and must not be treated as an Observation or Evidence. READ the source before
+  using facts from it.
   A visual candidate may be promising when the required information is likely
   encoded visually and is not stated clearly in text. Judge every candidate by
   its explicit preview fields and current_gap. Candidate position does not
@@ -63,13 +70,13 @@ and current_gap is present.
    - the accepted Evidence,
    - the relevance of visible CandidatePreviews,
    - the reliability and usefulness of visible Relations,
-   - adjacent-page context,
+   - current-page or adjacent-page context,
    - recent failed or unproductive actions,
    - expected reading cost,
    - and the remaining budget.
 
 3. A visible CandidatePreview, confirmed Relation, candidate Relation,
-   adjacent page, or existing SearchSession may each be the best next route.
+   page-context route, or existing SearchSession may each be the best next route.
    Do not follow a fixed action priority. Choose the option most likely to
    produce useful new Evidence for the current gap.
 
@@ -83,7 +90,7 @@ and current_gap is present.
    unproductive, prefer it over a similarly relevant candidate Relation or
    redundant new search.
 
-4. If a visible CandidatePreview, Relation, adjacent page, or existing
+4. If a visible CandidatePreview, Relation, page-context route, or existing
    SearchSession directly addresses current_gap and has not already failed, use
    it instead of starting a new search for the same information.
 
@@ -167,16 +174,21 @@ not include explanations, Markdown, reasoning, or additional keys.
   "local_problem": "what to check without assuming the relation is true"
 }
 
-## Read an adjacent physical page
+## Read the current page or one adjacent physical page
 
 {
-  "action": "READ_ADJACENT_PAGE",
-  "from_page_id": "a page_id present in reading_locations",
-  "direction": "next",
-  "local_problem": "the information expected on the adjacent page"
+  "action": "READ_PAGE_CONTEXT",
+  "base_page_id": "a page_id present in reading_locations",
+  "offset": 0,
+  "local_problem": "the missing context expected from the whole page"
 }
 
-For a previous page, direction must be "previous".
+Use offset 0 for the current physical page, -1 for the previous physical page,
+or 1 for the next physical page. When offset is 0, the Environment also supplies
+the most recently opened source on that page when available, so the Reader can
+compare its focused crop with the whole-page context. Use this action only when
+the current gap or recent Reader limitation identifies missing page-level
+context; do not read a whole page routinely when the focused source is enough.
 
 ## Stop with incomplete Evidence when no justified route remains
 

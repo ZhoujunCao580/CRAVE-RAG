@@ -49,6 +49,7 @@ class RetrievalSource(str, Enum):
 class SnippetSource(str, Enum):
     SEARCH_UNIT_TEXT = "search_unit.search_text"
     VISUAL_METADATA = "visual_candidate.preview_text"
+    TABLE_PREVIEW = "search_unit.table_preview"
 
 
 class CandidateSelectionRoute(str, Enum):
@@ -187,6 +188,9 @@ class SearchUnit(SoftDocModel):
     element_type: ElementType
     content_availability: ContentAvailability
     visual_descriptor_id: str | None = Field(default=None, min_length=1)
+    table_header_cells: list[str] = Field(default_factory=list)
+    table_header_source_element_id: str | None = Field(default=None, min_length=1)
+    table_is_continuation: bool = False
     index_version: str = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -216,6 +220,15 @@ class SearchUnit(SoftDocModel):
                 raise ValueError(
                     "SearchUnit content search range must select content_text"
                 )
+        has_table_metadata = bool(
+            self.table_header_cells
+            or self.table_header_source_element_id
+            or self.table_is_continuation
+        )
+        if has_table_metadata and self.element_type != ElementType.TABLE:
+            raise ValueError("Table preview metadata is valid only for Table units")
+        if self.table_header_cells and not self.table_header_source_element_id:
+            raise ValueError("Table headers require their source Element ID")
         return self
 
 
@@ -504,6 +517,7 @@ class CandidateMergePolicy(str, Enum):
 class SearchSessionConfig(SoftDocModel):
     batch_size: int = Field(default=5, ge=1)
     snippet_max_chars: int = Field(default=320, ge=40)
+    table_preview_max_chars: int = Field(default=640, ge=80)
     snippet_context_chars: int = Field(default=80, ge=0)
     merge_policy: CandidateMergePolicy = CandidateMergePolicy.WEIGHTED_RRF
     rrf_k: int = Field(default=20, ge=1)
@@ -564,6 +578,8 @@ class SessionCandidate(SoftDocModel):
     visual_rank: int | None = Field(default=None, ge=1)
     visual_score: float | None = None
     visual_preview_text: str | None = None
+    table_preview_text: str | None = None
+    table_preview_search_unit_id: str | None = None
     selection_route: CandidateSelectionRoute | None = None
 
     @model_validator(mode="after")
@@ -618,6 +634,12 @@ class SessionCandidate(SoftDocModel):
             )
         ):
             raise ValueError("Visual metadata requires the visual_dense source")
+        if (self.table_preview_text is None) != (
+            self.table_preview_search_unit_id is None
+        ):
+            raise ValueError("Table preview text and SearchUnit ID must appear together")
+        if self.table_preview_text is not None and self.element_type != ElementType.TABLE:
+            raise ValueError("Table previews are valid only for Table candidates")
         if self.selection_route == CandidateSelectionRoute.TEXT and not any(
             source in self.matched_by
             for source in (RetrievalSource.BM25, RetrievalSource.DENSE)
@@ -659,7 +681,10 @@ class CandidatePreview(SoftDocModel):
 
     @model_validator(mode="after")
     def validate_snippet_range(self) -> Self:
-        if self.snippet_source == SnippetSource.SEARCH_UNIT_TEXT:
+        if self.snippet_source in {
+            SnippetSource.SEARCH_UNIT_TEXT,
+            SnippetSource.TABLE_PREVIEW,
+        }:
             if (
                 self.matched_search_unit_id is None
                 or self.snippet_source_id != self.matched_search_unit_id

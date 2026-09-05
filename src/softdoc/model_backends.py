@@ -31,12 +31,14 @@ from softdoc.reading_environment import (
     ReaderOutput,
 )
 from softdoc.reading_state import (
+    EvidenceCheckDecision,
     EvidenceCheckInput,
     EvidenceCheckResult,
     ObservationLimitation,
     ObservationSourceRef,
     ReaderKind,
     ReadRepresentation,
+    materialize_evidence_check_decision,
 )
 from softdoc.visual_reading import (
     VISUAL_READER_SYSTEM_PROMPT,
@@ -249,12 +251,13 @@ class OllamaEvidenceCheckerBackend:
         self.client = client
 
     def check(self, checker_input: EvidenceCheckInput) -> EvidenceCheckResult:
-        return self.client.generate(
+        decision = self.client.generate(
             component="checker",
             system_prompt=CHECKER_SYSTEM_PROMPT,
             user_prompt=checker_input.model_dump_json(indent=2),
-            output_model=EvidenceCheckResult,
+            output_model=EvidenceCheckDecision,
         )
+        return materialize_evidence_check_decision(checker_input, decision)
 
 
 class OllamaAnswererBackend:

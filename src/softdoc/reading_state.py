@@ -553,6 +553,9 @@ class EvidenceCheckInput(SoftDocModel):
 
     The Checker receives the full current EvidenceMemory.  Only its output is a
     delta, so using a delta never hides existing Evidence from the Checker.
+    Most invocations follow one read.  After the final planned SubQuestion is
+    satisfied, the Environment may also invoke the Checker with no new read so
+    it can judge the Root from the complete accepted Evidence set.
     """
 
     action_id: str = Field(min_length=1)
@@ -564,9 +567,21 @@ class EvidenceCheckInput(SoftDocModel):
     @model_validator(mode="after")
     def validate_context(self) -> Self:
         if not self.observations and not self.limitations:
-            raise ValueError(
-                "Checker input requires at least one Observation or limitation"
+            target = self.evidence_memory.current_target
+            is_root_finalization = (
+                bool(self.evidence_memory.questions)
+                and target is not None
+                and target.question_id == self.root_question.question_id
+                and all(
+                    item.status == QuestionStatus.SATISFIED
+                    for item in self.evidence_memory.questions
+                )
             )
+            if not is_root_finalization:
+                raise ValueError(
+                    "Checker input requires at least one Observation or limitation "
+                    "unless it is finalizing the Root after a completed plan"
+                )
         if self.evidence_memory.root_question_id != self.root_question.question_id:
             raise ValueError("Checker Root question must match EvidenceMemory")
         observation_ids = [item.observation_id for item in self.observations]
@@ -579,6 +594,13 @@ class EvidenceCheckInput(SoftDocModel):
 class ObservationAssessment(SoftDocModel):
     observation_id: str = Field(min_length=1)
     used_for_evidence: bool
+    assessment: str = Field(min_length=1)
+
+
+class CheckerObservationAssessment(SoftDocModel):
+    """Model-authored assessment without duplicated Evidence provenance."""
+
+    observation_id: str = Field(min_length=1)
     assessment: str = Field(min_length=1)
 
 
@@ -662,9 +684,47 @@ class EvidenceCheckResult(SoftDocModel):
         return self
 
 
-def apply_evidence_check_result(
+class EvidenceCheckDecision(SoftDocModel):
+    """Model-facing Checker delta.
+
+    ``used_for_evidence`` is deliberately absent.  The Environment derives it
+    after atomically applying the Evidence delta and materializes a canonical
+    :class:`EvidenceCheckResult` for feedback and persisted runtime state.
+    """
+
+    action_id: str = Field(min_length=1)
+    observation_assessments: list[CheckerObservationAssessment] = Field(
+        default_factory=list
+    )
+    evidence_updates: EvidenceUpdates = Field(default_factory=EvidenceUpdates)
+    current_target_status: QuestionStatus
+    root_status: EvidenceStatus
+    remaining_gap_description: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def validate_decision(self) -> Self:
+        assessment_ids = [item.observation_id for item in self.observation_assessments]
+        _unique_nonblank(assessment_ids, label="Checker assessment Observation IDs")
+        if self.current_target_status == QuestionStatus.INCOMPLETE:
+            if self.remaining_gap_description is None:
+                raise ValueError(
+                    "An incomplete current target requires a remaining gap description"
+                )
+        elif self.remaining_gap_description is not None:
+            raise ValueError(
+                "A satisfied current target must not describe another gap"
+            )
+        if (
+            self.root_status == EvidenceStatus.READY
+            and self.current_target_status != QuestionStatus.SATISFIED
+        ):
+            raise ValueError("A ready Root requires a satisfied current target")
+        return self
+
+
+def _apply_evidence_check_update(
     checker_input: EvidenceCheckInput,
-    result: EvidenceCheckResult,
+    result: EvidenceCheckResult | EvidenceCheckDecision,
 ) -> EvidenceMemory:
     """Apply one Checker delta to a copy and return a fully validated memory.
 
@@ -831,10 +891,7 @@ def apply_evidence_check_result(
         else:
             next_target = CurrentTarget(
                 question_id=root_question_id,
-                gap_description=(
-                    "Determine what evidence is still missing to answer the Root "
-                    f"Question: {checker_input.root_question.text}"
-                ),
+                gap_description=checker_input.root_question.text,
             )
 
     next_memory = EvidenceMemory(
@@ -846,6 +903,16 @@ def apply_evidence_check_result(
         current_target=next_target,
     )
 
+    return next_memory
+
+
+def apply_evidence_check_result(
+    checker_input: EvidenceCheckInput,
+    result: EvidenceCheckResult,
+) -> EvidenceMemory:
+    """Apply an already materialized Checker result with provenance checking."""
+
+    next_memory = _apply_evidence_check_update(checker_input, result)
     used_observation_ids = {
         observation_id
         for item in next_memory.evidence
@@ -859,6 +926,41 @@ def apply_evidence_check_result(
                 f"for {assessment.observation_id}"
             )
     return next_memory
+
+
+def materialize_evidence_check_decision(
+    checker_input: EvidenceCheckInput,
+    decision: EvidenceCheckDecision,
+) -> EvidenceCheckResult:
+    """Derive assessment provenance from the atomically resulting Evidence set."""
+
+    next_memory = _apply_evidence_check_update(checker_input, decision)
+    used_observation_ids = {
+        observation_id
+        for item in next_memory.evidence
+        for observation_id in item.observation_ids
+    }
+    result = EvidenceCheckResult(
+        action_id=decision.action_id,
+        observation_assessments=[
+            ObservationAssessment(
+                observation_id=item.observation_id,
+                used_for_evidence=item.observation_id in used_observation_ids,
+                assessment=item.assessment,
+            )
+            for item in decision.observation_assessments
+        ],
+        evidence_updates=decision.evidence_updates,
+        current_target_status=decision.current_target_status,
+        root_status=decision.root_status,
+        remaining_gap_description=decision.remaining_gap_description,
+    )
+    # Keep one authoritative invariant check for both model-backed and scripted
+    # Checker implementations.
+    validated_memory = apply_evidence_check_result(checker_input, result)
+    if validated_memory != next_memory:  # pragma: no cover - defensive guard
+        raise AssertionError("Checker decision materialization changed EvidenceMemory")
+    return result
 
 
 class ActionExecutionStatus(str, Enum):

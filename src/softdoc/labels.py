@@ -22,7 +22,7 @@ _SUBREFERENCE = r"[A-Za-z](?:\s*[-\u2012\u2013\u2014]\s*[A-Za-z])?"
 LABEL_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
     "figure": (
         re.compile(
-            rf"(?:Figure|Fig\.?)\s*(?P<base>[0-9]+)"
+            rf"(?:Figure|Fig\.?)\s*(?P<base>[0-9]+|(?-i:[IVXLCDM]+))"
             rf"(?:\s*(?:\(\s*(?P<paren_sub>{_SUBREFERENCE})\s*\)"
             rf"|(?P<suffix_sub>{_SUBREFERENCE})))?(?![A-Za-z0-9_])",
             re.IGNORECASE,
@@ -36,7 +36,7 @@ LABEL_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
     ),
     "table": (
         re.compile(
-            rf"Table\s*(?P<base>[0-9]+)"
+            rf"Table\s*(?P<base>[0-9]+|(?-i:[IVXLCDM]+))"
             rf"(?:\s*(?:\(\s*(?P<paren_sub>{_SUBREFERENCE})\s*\)"
             rf"|(?P<suffix_sub>{_SUBREFERENCE})))?(?![A-Za-z0-9_])",
             re.IGNORECASE,
@@ -51,7 +51,11 @@ LABEL_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
     "section": (
         re.compile(
             r"^\s*(?P<base>[0-9]+(?:\.[0-9]+)*)"
-            r"(?=$|[^\d.]|\.(?!\d))"
+            r"(?=$|[^\d.]|\.(?!\d))",
+        ),
+        re.compile(
+            r"^\s*(?P<base>[IVXLCDM]+)(?=$|\s|[:.\-])",
+            re.IGNORECASE,
         ),
         re.compile(r"第\s*(?P<base>[0-9]+(?:\.[0-9]+)*)\s*节"),
     ),

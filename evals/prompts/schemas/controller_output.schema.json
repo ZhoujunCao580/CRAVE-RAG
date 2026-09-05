@@ -93,6 +93,41 @@
       "title": "ControllerReadAdjacentPageAction",
       "type": "object"
     },
+    "ControllerReadPageContextAction": {
+      "additionalProperties": false,
+      "description": "Read a visible page itself or one physical page beside it.\n\nOffset zero preserves the most recently opened source on the base page as\nan additional Reader input when possible.  This gives a visual Reader both\nwhole-page context and the focused crop without exposing Page hierarchy as\na Controller Relation.",
+      "properties": {
+        "action": {
+          "const": "READ_PAGE_CONTEXT",
+          "title": "Action",
+          "type": "string"
+        },
+        "base_page_id": {
+          "minLength": 1,
+          "title": "Base Page Id",
+          "type": "string"
+        },
+        "offset": {
+          "maximum": 1,
+          "minimum": -1,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "local_problem": {
+          "minLength": 1,
+          "title": "Local Problem",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "base_page_id",
+        "offset",
+        "local_problem"
+      ],
+      "title": "ControllerReadPageContextAction",
+      "type": "object"
+    },
     "ControllerReadSourceAction": {
       "additionalProperties": false,
       "properties": {
@@ -205,6 +240,7 @@
       "EXPLORE_CANDIDATE_RELATION": "#/$defs/ControllerExploreCandidateRelationAction",
       "FOLLOW_RELATION": "#/$defs/ControllerFollowRelationAction",
       "READ_ADJACENT_PAGE": "#/$defs/ControllerReadAdjacentPageAction",
+      "READ_PAGE_CONTEXT": "#/$defs/ControllerReadPageContextAction",
       "READ_SOURCE": "#/$defs/ControllerReadSourceAction",
       "SEARCH": "#/$defs/ControllerSearchAction",
       "STOP": "#/$defs/ControllerStopAction"
@@ -226,6 +262,9 @@
     },
     {
       "$ref": "#/$defs/ControllerReadAdjacentPageAction"
+    },
+    {
+      "$ref": "#/$defs/ControllerReadPageContextAction"
     },
     {
       "$ref": "#/$defs/ControllerStopAction"

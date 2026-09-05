@@ -298,6 +298,9 @@ def test_model_runner_records_every_executed_stage_and_writes_artifacts(tmp_path
     checker_examples = load_sft_jsonl(checker_dataset_dir / "checker_sft.jsonl")
     assert checker_examples[0].component.value == "checker"
     assert checker_examples[0].target["root_status"] == "ready"
+    assert "used_for_evidence" not in checker_examples[0].target[
+        "observation_assessments"
+    ][0]
     checker_message_records = load_openai_messages_sft_jsonl(
         checker_dataset_dir / "checker_sft_messages.jsonl"
     )

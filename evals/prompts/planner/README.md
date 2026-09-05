@@ -1,7 +1,7 @@
 # Planner suite inventory
 
-- Canonical Prompt: `src/softdoc/prompts/planner_v0_20.txt`
-- Registry version: `planner-v0.20`
+- Canonical Prompt: `src/softdoc/prompts/planner_v0_21.txt`
+- Registry version: `planner-v0.21`
 - Compact source: `scripts/evaluate_planner_mock.py` (6 synthetic cases; inputs
   and expected constraints are inline)
 - Historical v0.18 runs and proposal reports were removed after materializing
@@ -31,3 +31,8 @@ authoritative in `suite_manifest.json` and this README.
 
 Still needed before formal testing: approve the remaining dev labels and select
 a new unseen real holdout separately.
+
+Q7 is a focused semantic-closure regression for v0.21. Acceptable plans may
+remain empty or use alternative operands, but every emitted SubQuestion set
+must preserve the requested percentage, population denominator, and 2018 scope,
+and must be sufficient to derive the Root without another unstated fact.

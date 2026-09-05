@@ -1,13 +1,13 @@
 {
   "suite_id": "checker-dev-suite-v1",
   "case_set_version": "checker-cases-v1",
-  "prompt_version_under_test": "checker-v1.9",
-  "case_count": 26,
+  "prompt_version_under_test": "checker-v2.1",
+  "case_count": 27,
   "model_input_file": "model_inputs/checker_cases_v1.jsonl",
   "review_gold_file": "review_only/checker_gold_v1.jsonl",
   "split_counts": {
     "contract_regression": 20,
-    "controlled_boundary": 6
+    "controlled_boundary": 7
   },
   "category_counts": {
     "conflict": 3,
@@ -25,6 +25,7 @@
     "remove_invalidated_evidence": 1,
     "root_after_plan_partial": 1,
     "root_after_plan_ready": 1,
+    "state_only_root_finalization": 1,
     "subquestion": 2,
     "useful": 1,
     "wrong_observation": 2
@@ -34,6 +35,7 @@
     "gold_is_not_model_visible": true,
     "c11_c12_form_a_two_turn_regression": true,
     "c21_preserves_single_current_target_updates": true,
+    "c27_covers_state_only_root_finalization": true,
     "real_reader_to_checker_packets_still_required": true,
     "unseen_real_holdout_still_required": true
   }

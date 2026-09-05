@@ -14,7 +14,7 @@ def _record(**updates):
     payload = {
         "example_id": "example:1",
         "component": "controller",
-        "prompt_version": "controller-policy-v0.8",
+        "prompt_version": "controller-policy-v0.10",
         "input_text": '{"current_gap":{"description":"Find revenue"}}',
         "target": {"action": "STOP", "reason": "No justified route remains."},
     }
@@ -73,5 +73,5 @@ def test_repository_training_example_is_valid() -> None:
     )
     assert len(examples) == 2
     planner = next(item for item in examples if item.component.value == "planner")
-    assert planner.prompt_version == "planner-v0.20"
+    assert planner.prompt_version == "planner-v0.21"
     assert json.loads(planner.target_text())["subquestions"] == []

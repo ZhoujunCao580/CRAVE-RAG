@@ -8,6 +8,7 @@ from softdoc.retrieval import (
     AnchorResolution,
     AnchorResolutionStatus,
     AnchorTargetType,
+    BM25Index,
     BM25ElementCandidate,
     BM25SearchResult,
     CandidateMergePolicy,
@@ -201,6 +202,142 @@ def _visual() -> VisualSearchResult:
         total_candidates=len(candidates),
         candidates=candidates,
     )
+
+
+def _table_search_units() -> SearchUnitBuildResult:
+    content = (
+        "Sitemap #\tType\tIssue\tDescription\tIssues count\n"
+        "videositemap.xml\tWarnings\tURLs not accessible\tHTTP status error\t159\n"
+        "videositemap.xml\tWarnings\tURLs unreachable\tConnection error\t1732\n"
+        "videositemap.xml\tWarnings\tURLs timedout\tRequest timeout\t504"
+    )
+    unit = SearchUnit(
+        search_unit_id="unit:table",
+        document_id=DOCUMENT_ID,
+        element_id="element:table",
+        part_index=0,
+        part_count=1,
+        search_text=content,
+        content_text=content,
+        content_search_char_start=0,
+        content_search_char_end=len(content),
+        source_char_start=0,
+        source_char_end=len(content),
+        page_id="page:table",
+        page_index=0,
+        page_number=1,
+        reading_order=0,
+        element_type=ElementType.TABLE,
+        content_availability=ContentAvailability.MIXED,
+        table_header_cells=[
+            "Sitemap #",
+            "Type",
+            "Issue",
+            "Description",
+            "Issues count",
+        ],
+        table_header_source_element_id="element:table",
+        index_version=INDEX_VERSION,
+    )
+    return SearchUnitBuildResult(
+        document_id=DOCUMENT_ID,
+        index_version=INDEX_VERSION,
+        config=SearchUnitConfig(index_version=INDEX_VERSION),
+        units=[unit],
+    )
+
+
+def test_table_preview_keeps_headers_and_selects_query_relevant_row() -> None:
+    units = _table_search_units()
+    unit = units.units[0]
+    start = unit.search_text.index("Issues")
+    bm25 = BM25SearchResult(
+        subquestion_id="Q1",
+        document_id=DOCUMENT_ID,
+        index_version=INDEX_VERSION,
+        total_search_units=1,
+        total_candidates=1,
+        candidates=[
+            BM25ElementCandidate(
+                element_id=unit.element_id,
+                bm25_score=1.0,
+                bm25_rank=1,
+                matched_search_unit_id=unit.search_unit_id,
+                matched_part=0,
+                matched_terms=["issues"],
+                matched_offsets=[
+                    MatchedOffset(term="issues", start=start, end=start + 6)
+                ],
+                page_id=unit.page_id,
+                page_number=unit.page_number,
+                element_type=unit.element_type,
+            )
+        ],
+    )
+    session = SearchSessionBuilder().create(
+        subquestion=SubQuestionInput(
+            subquestion_id="Q1",
+            text="How many questions are there about URL timeout issues?",
+        ),
+        search_units=units,
+        bm25=bm25,
+    )
+
+    _, batch = SearchSessionNavigator(units).next_batch(session)
+    preview = batch.candidate_previews[0]
+
+    assert preview.snippet_source == SnippetSource.TABLE_PREVIEW
+    assert "Columns: Sitemap # | Type | Issue | Description | Issues count" in (
+        preview.matched_snippet
+    )
+    assert "URLs timedout" in preview.matched_snippet
+    assert "504" in preview.matched_snippet
+
+
+def test_table_preview_preserves_rightmost_value_after_long_description() -> None:
+    units = _table_search_units()
+    unit = units.units[0]
+    long_content = unit.content_text.replace(
+        "Request timeout",
+        "When we tested a sample of the URLs, some were not accessible to "
+        "Googlebot because repeated network timeouts prevented retrieval for a "
+        "long explanatory reason that should be compacted",
+    )
+    units = units.model_copy(
+        update={
+            "units": [
+                unit.model_copy(
+                    update={
+                        "search_text": long_content,
+                        "content_text": long_content,
+                        "content_search_char_end": len(long_content),
+                        "source_char_end": len(long_content),
+                    }
+                )
+            ]
+        }
+    )
+    bm25 = BM25Index(units).search(
+        SubQuestionInput(
+            subquestion_id="Q1",
+            text="How many questions are there about URL timeout issues?",
+        )
+    )
+    session = SearchSessionBuilder().create(
+        subquestion=SubQuestionInput(
+            subquestion_id="Q1",
+            text="How many questions are there about URL timeout issues?",
+        ),
+        search_units=units,
+        bm25=bm25,
+    )
+
+    _, batch = SearchSessionNavigator(units).next_batch(session)
+    preview = batch.candidate_previews[0]
+
+    assert "URLs timedout" in preview.matched_snippet
+    assert "Issues count=504" in preview.matched_snippet
+    assert len(preview.matched_snippet) <= 640
 
 
 def test_session_keeps_exact_separate_and_merges_retrieval_sources() -> None:

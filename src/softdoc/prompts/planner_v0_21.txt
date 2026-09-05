@@ -53,6 +53,14 @@ Choose one of these plan shapes:
    selected entity is needed to request a different fact or property, create a
    dependent plan.
 
+   Before emitting a decomposition, verify semantic closure: the SubQuestion
+   answers, taken together, must be sufficient to recover exactly the factual
+   result requested by the Root without another unstated factual input. Preserve
+   the Root's units, denominator, population or entity scope, time scope, and
+   statistical meaning. A mathematically related quantity is not interchangeable
+   with the requested quantity unless the plan also obtains every fact needed
+   for that conversion.
+
 6. If the Root asks for a reported metric by name but does not state its
    formula, treat that metric as one factual result. Do not invent a formula or
    hidden operands. Return an empty plan unless the Root independently requires

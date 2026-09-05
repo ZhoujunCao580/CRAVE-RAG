@@ -1,7 +1,7 @@
 # Controller suite inventory
 
-- Canonical Prompt: `src/softdoc/prompts/controller_policy_v0_8.txt`
-- Registry version: `controller-policy-v0.8`
+- Canonical Prompt: `src/softdoc/prompts/controller_policy_v0_10.txt`
+- Registry version: `controller-policy-v0.10`
 - Current source and runner: `scripts/evaluate_controller_mock.py`
 - Materialized suite: 28 Controller decisions
   - 15 existing contract regressions;
@@ -35,6 +35,8 @@ Controller decision.
 
 Still needed before formal testing:
 
+- materialize Q171/Q708 page-context decisions and a negative case where the
+  focused crop is already sufficient;
 - add real ControllerInput snapshots after Checker updates EvidenceMemory;
 - reserve real trajectories from unseen documents for holdout.
 

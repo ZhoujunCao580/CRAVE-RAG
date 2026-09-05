@@ -6,11 +6,11 @@ data can bind to an immutable revision.
 
 | Component | Version | File |
 | --- | --- | --- |
-| Planner | `planner-v0.20` | `planner_v0_20.txt` |
+| Planner | `planner-v0.21` | `planner_v0_21.txt` |
 | Visual Retrieval | `visual-retrieval-v0.1` | `visual_retrieval_v0_1.txt` |
 | Visual Reader | `visual-reader-v0.4` | `visual_reader_v0_4.txt` |
-| Evidence Checker | `checker-v1.9` | `checker_v1_9.txt` |
-| Reading Controller | `controller-policy-v0.8` | `controller_policy_v0_8.txt` |
+| Evidence Checker | `checker-v2.1` | `checker_v2_1.txt` |
+| Reading Controller | `controller-policy-v0.10` | `controller_policy_v0_10.txt` |
 | Answerer | `answerer-v0.8` | `answerer_v0_8.txt` |
 
 The Python modules that define prompt versions and render dynamic user input

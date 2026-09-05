@@ -74,7 +74,7 @@ After validation, the program adds `planner_trace` and stores an `InitialPlan`:
   "planner_trace": {
     "backend_name": "ollama",
     "model": "qwen3:8b",
-    "prompt_version": "planner-v0.20",
+    "prompt_version": "planner-v0.21",
     "warnings": [],
     "metadata": {}
   }
@@ -212,9 +212,11 @@ failed reads. The canonical stored form for this example is:
 
 ## 4. Evidence Checker
 
-The Checker receives the complete current Evidence Memory plus only the new
-Observations and limitations produced by one read action. It returns a delta;
-the program applies that delta atomically.
+The Checker normally receives the complete current Evidence Memory plus only
+the new Observations and limitations produced by one read action. After the
+last planned SubQuestion is satisfied, it may instead receive a state-only
+Root-finalization input with empty Observations and limitations. It returns a
+delta; the program applies that delta atomically.
 
 Input:
 
@@ -267,7 +269,7 @@ Input:
 }
 ```
 
-Output:
+Model output (`EvidenceCheckDecision`):
 
 ```json
 {
@@ -275,7 +277,6 @@ Output:
   "observation_assessments": [
     {
       "observation_id": "observation:1",
-      "used_for_evidence": true,
       "assessment": "The observation directly and reliably supplies the missing 2022 value."
     }
   ],
@@ -296,6 +297,12 @@ Output:
 }
 ```
 
+The model does not output `used_for_evidence`. The program first applies the
+Evidence delta atomically, then derives that audit flag from the
+`observation_ids` referenced by the resulting Evidence set and materializes an
+`EvidenceCheckResult` for persisted feedback. This prevents a redundant model
+field from disagreeing with the actual Evidence delta.
+
 The program, not the model, assigns the Evidence ID and activates the next
 runnable question. Evidence may support either a planned SubQuestion or the
 Root Question. With an empty plan, `questions` is empty,
@@ -303,9 +310,11 @@ Root Question. With an empty plan, `questions` is empty,
 uses `supports_question_ids: ["root:1"]`.
 
 Completing all planned SubQuestions does not by itself guarantee that the Root
-is answerable. The Checker evaluates the complete Evidence set against the
-Root. If the Root is still incomplete after all planned nodes are satisfied,
-the program makes the Root the next current target.
+is answerable. The program makes the Root the next current target, copies the
+Root Question text as its initial gap, and immediately asks the Checker to
+evaluate the complete accepted Evidence without inventing another read. If the
+Root is still incomplete, the Checker's specific remaining gap becomes the
+Controller's next working target.
 
 ## 5. Controller
 
@@ -535,6 +544,7 @@ Planner
   -> Controller action
   -> Reader
   -> Evidence Checker
+  -> state-only Root finalization when the last SubQuestion completes
   -> Controller action (repeat while incomplete)
   -> Answerer (only when ready)
 ```
@@ -584,11 +594,13 @@ environment executed.
 Checker supervision uses the same separation. `checker_review.json` labels
 each recorded Checker call and may attach a corrected `replacement_output`
 without mutating the raw run. Before export, the corrected or original
-`EvidenceCheckResult` is applied to its recorded `EvidenceCheckInput` using the
-normal atomic state-transition validator. The separate export contains:
+canonical `EvidenceCheckResult` is applied to its recorded `EvidenceCheckInput`
+using the normal atomic state-transition validator. The exporter then removes
+the program-derived audit boolean and emits the model-facing
+`EvidenceCheckDecision`. The separate export contains:
 
 ```text
-checker_sft.jsonl      accepted EvidenceCheckInput -> EvidenceCheckResult examples
+checker_sft.jsonl      accepted EvidenceCheckInput -> EvidenceCheckDecision examples
 checker_sft_messages.jsonl
                        the same examples as system/user/assistant messages
 dataset_info.json      LLaMA-Factory dataset registration

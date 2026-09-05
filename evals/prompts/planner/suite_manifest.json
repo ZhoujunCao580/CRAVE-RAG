@@ -1,7 +1,7 @@
 {
   "suite_id": "planner-dev-suite-v1",
   "case_set_version": "planner-cases-v1",
-  "prompt_version_under_test": "planner-v0.20",
+  "prompt_version_under_test": "planner-v0.21",
   "case_count": 49,
   "model_input_file": "model_inputs/planner_cases_v1.jsonl",
   "review_gold_file": "review_only/planner_gold_v1.jsonl",

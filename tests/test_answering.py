@@ -151,6 +151,18 @@ def test_answer_result_accepts_multiple_calculation_inputs():
     assert validate_answer_result(_answer_input(), result) is result
 
 
+def test_answer_result_allows_evidence_free_not_answerable_fallback():
+    result = AnswerResult(answer="Not answerable", used_evidence_ids=[])
+
+    assert result.answer == "Not answerable"
+    assert result.used_evidence_ids == []
+
+
+def test_answer_result_rejects_evidence_free_substantive_answer():
+    with pytest.raises(ValidationError, match="must reference at least one Evidence"):
+        AnswerResult(answer="42", used_evidence_ids=[])
+
+
 def test_answerer_prompt_freezes_minimal_boundary():
     assert ANSWERER_PROMPT_VERSION == "answerer-v0.8"
     assert "question_graph only describes" in ANSWERER_SYSTEM_PROMPT

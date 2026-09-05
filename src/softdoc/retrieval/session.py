@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from difflib import SequenceMatcher
+import re
 
 from softdoc.ids import stable_digest
+from softdoc.models import ElementType
 from softdoc.retrieval.models import (
     AnchorResolutionStatus,
     BM25ElementCandidate,
@@ -30,6 +33,7 @@ from softdoc.retrieval.models import (
     VisualElementCandidate,
     VisualSearchResult,
 )
+from softdoc.retrieval.tokenization import bm25_token_spans
 
 
 class SearchSessionBuilder:
@@ -161,6 +165,7 @@ class SearchSessionBuilder:
         catalog = [
             _session_candidate(
                 element_id=element_id,
+                query_text=subquestion.text,
                 bm25=bm25_by_id.get(element_id),
                 dense=dense_by_id.get(element_id),
                 visual=visual_by_id.get(element_id),
@@ -553,6 +558,7 @@ def _fixed_text_visual_ids(
 def _session_candidate(
     *,
     element_id: str,
+    query_text: str,
     bm25: BM25ElementCandidate | None,
     dense: DenseElementCandidate | None,
     visual: VisualElementCandidate | None,
@@ -616,6 +622,18 @@ def _session_candidate(
         section_path = visual.section_path
         display_label = visual.display_label
         content_availability = visual.content_availability
+    table_preview_text = None
+    table_preview_search_unit_id = None
+    if element_type == ElementType.TABLE:
+        table_preview_text, table_preview_search_unit_id = _table_preview(
+            query_text=query_text,
+            units=[
+                unit
+                for unit in units_by_id.values()
+                if unit.element_id == element_id
+            ],
+            display_label=display_label,
+        )
     return SessionCandidate(
         element_id=element_id,
         element_type=element_type,
@@ -649,6 +667,8 @@ def _session_candidate(
         visual_rank=visual.visual_rank if visual is not None else None,
         visual_score=visual.visual_score if visual is not None else None,
         visual_preview_text=(visual.preview_text if visual is not None else None),
+        table_preview_text=table_preview_text,
+        table_preview_search_unit_id=table_preview_search_unit_id,
         selection_route=selection_route,
     )
 
@@ -788,6 +808,39 @@ def _candidate_preview(
         config,
         units_by_id,
     )
+    if candidate.table_preview_text and candidate.table_preview_search_unit_id:
+        text = candidate.table_preview_text
+        start, end = _snippet_window(
+            text=text,
+            anchor_start=0,
+            anchor_end=min(len(text), config.table_preview_max_chars),
+            max_chars=config.table_preview_max_chars,
+            context_chars=config.snippet_context_chars,
+        )
+        return CandidatePreview(
+            element_id=candidate.element_id,
+            element_type=candidate.element_type,
+            page_id=candidate.page_id,
+            page_number=candidate.page_number,
+            section_path=candidate.section_path,
+            display_label=candidate.display_label,
+            matched_snippet=text[start:end],
+            snippet_char_start=start,
+            snippet_char_end=end,
+            snippet_truncated=start > 0 or end < len(text),
+            snippet_source=SnippetSource.TABLE_PREVIEW,
+            snippet_source_id=candidate.table_preview_search_unit_id,
+            matched_search_unit_id=candidate.table_preview_search_unit_id,
+            visual_asset_id=candidate.visual_asset_id,
+            matched_by=candidate.matched_by,
+            preview_source=preview_source,
+            match_scope=match_scope,
+            bm25_rank=candidate.bm25_rank,
+            dense_rank=candidate.dense_rank,
+            visual_rank=candidate.visual_rank,
+            rrf_score=candidate.rrf_score,
+            content_availability=candidate.content_availability,
+        )
     if preview_source == RetrievalSource.VISUAL_DENSE:
         text = candidate.visual_preview_text or ""
         start, end = _snippet_window(
@@ -868,6 +921,175 @@ def _candidate_preview(
         rrf_score=candidate.rrf_score,
         content_availability=candidate.content_availability,
     )
+
+
+_TABLE_QUERY_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "by",
+        "for",
+        "from",
+        "how",
+        "in",
+        "is",
+        "many",
+        "of",
+        "on",
+        "the",
+        "there",
+        "to",
+        "what",
+        "which",
+        "with",
+    }
+)
+
+
+def _table_preview(
+    *,
+    query_text: str,
+    units: list[SearchUnit],
+    display_label: str | None,
+) -> tuple[str | None, str | None]:
+    """Build a row-aware, query-conditioned preview from Table SearchUnits."""
+
+    if not units:
+        return None, None
+    ordered = sorted(units, key=lambda unit: (unit.part_index, unit.search_unit_id))
+    header_cells = next(
+        (unit.table_header_cells for unit in ordered if unit.table_header_cells),
+        [],
+    )
+    header_source = next(
+        (
+            unit.table_header_source_element_id
+            for unit in ordered
+            if unit.table_header_source_element_id
+        ),
+        None,
+    )
+    continuation = any(unit.table_is_continuation for unit in ordered)
+    rows: list[tuple[list[str], SearchUnit]] = []
+    seen: set[tuple[str, ...]] = set()
+    normalized_headers = tuple(cell.casefold() for cell in header_cells)
+    for unit in ordered:
+        for raw_line in unit.content_text.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("Visual search summary:") or line.startswith(
+                "Visual retrieval keywords:"
+            ):
+                continue
+            cells = [
+                cell.strip()
+                for cell in re.split(r"\t+|\s+\|\s+", line)
+                if cell.strip()
+            ]
+            if not cells:
+                continue
+            key = tuple(cell.casefold() for cell in cells)
+            if key == normalized_headers or key in seen:
+                continue
+            seen.add(key)
+            rows.append((cells, unit))
+    if not rows and not header_cells:
+        return None, None
+
+    query_terms = [
+        span.term
+        for span in bm25_token_spans(query_text)
+        if len(span.term) > 1 and span.term not in _TABLE_QUERY_STOPWORDS
+    ]
+    scored = [
+        (_row_relevance(query_terms, cells), index, cells, unit)
+        for index, (cells, unit) in enumerate(rows)
+    ]
+    best = max(scored, default=None, key=lambda item: (item[0], -item[1]))
+    selected_indexes: list[int] = []
+    selected_unit = ordered[0]
+    if best is not None:
+        _, best_index, _, selected_unit = best
+        selected_indexes = [best_index]
+        if best_index > 0:
+            selected_indexes.insert(0, best_index - 1)
+        if best_index + 1 < len(rows):
+            selected_indexes.append(best_index + 1)
+
+    lines: list[str] = []
+    if display_label:
+        lines.append(f"Table: {display_label}")
+    if continuation:
+        suffix = f"; headers inherited from {header_source}" if header_source else ""
+        lines.append(f"Continued table{suffix}")
+    if header_cells:
+        lines.append("Columns: " + " | ".join(header_cells))
+    else:
+        lines.append("Columns: unavailable")
+    output_indexes = (
+        [best[1], *[index for index in selected_indexes if index != best[1]]]
+        if best is not None
+        else []
+    )
+    for index in output_indexes:
+        cells, _ = rows[index]
+        prefix = "Matched row" if index == best[1] else "Adjacent row"
+        lines.append(f"{prefix}: " + _format_table_row(header_cells, cells))
+
+    other_labels = []
+    for index, (cells, _) in enumerate(rows):
+        if index in selected_indexes or not cells:
+            continue
+        label = cells[0]
+        if label and label.casefold() not in {item.casefold() for item in other_labels}:
+            other_labels.append(label)
+        if len(other_labels) >= 6:
+            break
+    if other_labels:
+        lines.append("Other row labels: " + "; ".join(other_labels))
+    return "\n".join(lines), selected_unit.search_unit_id
+
+
+def _format_table_row(headers: list[str], cells: list[str]) -> str:
+    compact_cells = [_compact_table_cell(cell) for cell in cells]
+    if headers and len(headers) == len(cells):
+        return " | ".join(
+            f"{header}={cell}" for header, cell in zip(headers, compact_cells)
+        )
+    return " | ".join(compact_cells)
+
+
+def _compact_table_cell(value: str, *, max_chars: int = 96) -> str:
+    normalized = " ".join(value.split())
+    if len(normalized) <= max_chars:
+        return normalized
+    shortened = normalized[: max_chars - 1].rstrip()
+    boundary = shortened.rfind(" ")
+    if boundary >= max_chars // 2:
+        shortened = shortened[:boundary]
+    return shortened.rstrip(" ,;:") + "…"
+
+
+def _row_relevance(query_terms: list[str], cells: list[str]) -> float:
+    row_terms = list(dict.fromkeys(span.term for span in bm25_token_spans(" ".join(cells))))
+    score = 0.0
+    for query in set(query_terms):
+        best = 0.0
+        for term in row_terms:
+            if query == term:
+                best = max(best, 3.0)
+            elif len(query) >= 4 and (query in term or term in query):
+                best = max(best, 2.0)
+            elif len(query) >= 5 and len(term) >= 5:
+                ratio = SequenceMatcher(None, query, term).ratio()
+                if ratio >= 0.82:
+                    best = max(best, 1.5 * ratio)
+        score += best
+    return score
 
 
 def _preview_choice(

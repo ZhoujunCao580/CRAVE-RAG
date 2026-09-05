@@ -38,10 +38,10 @@ def test_registry_text_comes_from_central_versioned_prompt_assets() -> None:
         "visual_retrieval_v0_1.txt"
     ).removesuffix("\n")
     assert get_prompt("checker").canonical_text == load_prompt_text(
-        "checker_v1_9.txt"
+        "checker_v2_1.txt"
     ).removesuffix("\n")
     assert get_prompt("controller").canonical_text == load_prompt_text(
-        "controller_policy_v0_8.txt"
+        "controller_policy_v0_10.txt"
     )
     assert get_prompt("answerer").canonical_text == load_prompt_text(
         "answerer_v0_8.txt"
@@ -63,11 +63,11 @@ def test_prompt_directory_contains_only_current_prompt_assets() -> None:
     current = {path.name for path in PROMPT_DIRECTORY.glob("*.txt")}
 
     assert current == {
-        "planner_v0_20.txt",
+        "planner_v0_21.txt",
         "visual_retrieval_v0_1.txt",
         "visual_reader_v0_4.txt",
-        "checker_v1_9.txt",
-        "controller_policy_v0_8.txt",
+        "checker_v2_1.txt",
+        "controller_policy_v0_10.txt",
         "answerer_v0_8.txt",
     }
     assert not (PROMPT_DIRECTORY / "archive").exists()

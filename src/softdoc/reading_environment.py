@@ -32,6 +32,7 @@ from softdoc.controller import (
     ControllerLimitation,
     ControllerObservationAssessment,
     ControllerReadAdjacentPageAction,
+    ControllerReadPageContextAction,
     ControllerReadSourceAction,
     ControllerSearchAction,
     ControllerSearchOperation,
@@ -68,6 +69,7 @@ from softdoc.reading_state import (
     ObservationSourceRef,
     ObservationStore,
     QuestionState,
+    QuestionStatus,
     ReadInput,
     ReadRecord,
     ReaderKind,
@@ -99,7 +101,7 @@ from softdoc.store import DocumentStore
 from softdoc.table_view import TableMaterializer, TableView
 
 
-READING_ENVIRONMENT_VERSION = "reading-environment-v0.3"
+READING_ENVIRONMENT_VERSION = "reading-environment-v0.4"
 
 
 class ReaderObservationDraft(SoftDocModel):
@@ -468,7 +470,10 @@ class ReadingEnvironment:
             raise ValueError("additional_action_budget must be positive")
         if previous.status != ReadingRunStatus.BUDGET_EXHAUSTED:
             raise ValueError("Only budget_exhausted runs may be resumed")
-        if previous.answer is not None:
+        if previous.answer is not None and not (
+            previous.answer.answer == "Not answerable"
+            and previous.answer.used_evidence_ids == []
+        ):
             raise ValueError("A resumable run must not already contain an answer")
         if previous.root_question.question_id != previous.evidence_memory.root_question_id:
             raise ValueError("Resume Root Question does not match EvidenceMemory")
@@ -678,8 +683,16 @@ class ReadingEnvironment:
             status = ReadingRunStatus.READY
         elif self._stop_reason is not None:
             status = ReadingRunStatus.STOPPED_INCOMPLETE
+            answer = AnswerResult(
+                answer="Not answerable",
+                used_evidence_ids=[],
+            )
         else:
             status = ReadingRunStatus.BUDGET_EXHAUSTED
+            answer = AnswerResult(
+                answer="Not answerable",
+                used_evidence_ids=[],
+            )
             self._diagnostics.append(
                 EnvironmentDiagnostic(
                     code="action_budget_exhausted",
@@ -896,6 +909,44 @@ class ReadingEnvironment:
                 trace=trace,
                 metadata={"relation_id": relation.relation_id},
             )
+        if isinstance(action, ControllerReadPageContextAction):
+            target_page = self._page_at_offset(action.base_page_id, action.offset)
+            if target_page is None:
+                return observations, memory, self._append_failed_action(
+                    trace=trace,
+                    memory=memory,
+                    action_name=action.action.value,
+                    target_ids=[action.base_page_id],
+                    description="The requested page-context offset does not exist.",
+                    metadata={
+                        "base_page_id": action.base_page_id,
+                        "offset": action.offset,
+                    },
+                )
+            source_ids = [target_page.page_id]
+            if action.offset == 0:
+                focused_source_id = self._latest_opened_element_on_page(
+                    trace, action.base_page_id
+                )
+                if focused_source_id is not None:
+                    source_ids.append(focused_source_id)
+            return self._execute_read(
+                source_ids=source_ids,
+                local_problem=action.local_problem,
+                action_name=action.action.value,
+                root_question=root_question,
+                memory=memory,
+                observations=observations,
+                trace=trace,
+                metadata={
+                    "base_page_id": action.base_page_id,
+                    "offset": action.offset,
+                    "focused_source_id": (
+                        source_ids[1] if len(source_ids) == 2 else None
+                    ),
+                },
+            )
+
         assert isinstance(action, ControllerReadAdjacentPageAction)
         adjacent = self._adjacent_page(action.from_page_id, action.direction)
         if adjacent is None:
@@ -1103,6 +1154,7 @@ class ReadingEnvironment:
                     )
 
         next_memory = memory
+        check_succeeded = False
         if stored:
             checker_input = EvidenceCheckInput(
                 action_id=current_action_id,
@@ -1114,6 +1166,7 @@ class ReadingEnvironment:
             try:
                 check_result = self.checker.check(checker_input)
                 next_memory = apply_evidence_check_result(checker_input, check_result)
+                check_succeeded = True
                 feedback = self._feedback(
                     reader_output.limitations,
                     check_result.observation_assessments,
@@ -1160,7 +1213,72 @@ class ReadingEnvironment:
                 entries=[*trace.entries, entry],
             )
 
+            if check_succeeded and self._needs_root_finalization(
+                previous_memory=memory,
+                next_memory=next_memory,
+                root_question=root_question,
+            ):
+                next_memory = self._finalize_root_from_evidence(
+                    root_question=root_question,
+                    memory=next_memory,
+                    triggering_action_id=current_action_id,
+                )
+
         return next_observations, next_memory, next_trace
+
+    @staticmethod
+    def _needs_root_finalization(
+        *,
+        previous_memory: EvidenceMemory,
+        next_memory: EvidenceMemory,
+        root_question: RootQuestion,
+    ) -> bool:
+        previous_target = previous_memory.current_target
+        next_target = next_memory.current_target
+        return (
+            previous_target is not None
+            and previous_target.question_id != root_question.question_id
+            and next_memory.root_status == EvidenceStatus.INCOMPLETE
+            and next_target is not None
+            and next_target.question_id == root_question.question_id
+            and next_target.gap_description == root_question.text
+            and bool(next_memory.questions)
+            and all(
+                item.status == QuestionStatus.SATISFIED
+                for item in next_memory.questions
+            )
+        )
+
+    def _finalize_root_from_evidence(
+        self,
+        *,
+        root_question: RootQuestion,
+        memory: EvidenceMemory,
+        triggering_action_id: str,
+    ) -> EvidenceMemory:
+        """Ask the Checker to judge Root sufficiency without inventing a read."""
+
+        finalization_action_id = f"{triggering_action_id}:root-finalization"
+        checker_input = EvidenceCheckInput(
+            action_id=finalization_action_id,
+            root_question=root_question,
+            evidence_memory=memory,
+            observations=[],
+            limitations=[],
+        )
+        try:
+            check_result = self.checker.check(checker_input)
+            return apply_evidence_check_result(checker_input, check_result)
+        except Exception as exc:
+            self._diagnostics.append(
+                EnvironmentDiagnostic(
+                    code="root_finalization_rejected",
+                    description=str(exc),
+                    action_id=finalization_action_id,
+                    question_id=root_question.question_id,
+                )
+            )
+            return memory
 
     def _feedback(
         self,
@@ -1344,6 +1462,30 @@ class ReadingEnvironment:
             (item for item in self.document.pages if item.page_index == target_index),
             None,
         )
+
+    def _page_at_offset(self, page_id: str, offset: int) -> Page | None:
+        page = self.store.get_page(page_id)
+        target_index = page.page_index + offset
+        return next(
+            (item for item in self.document.pages if item.page_index == target_index),
+            None,
+        )
+
+    @staticmethod
+    def _latest_opened_element_on_page(
+        trace: ActionTrace, page_id: str
+    ) -> str | None:
+        for entry in reversed(trace.entries):
+            handle = entry.primary_target
+            if (
+                handle is not None
+                and handle.page_id == page_id
+                and handle.element_id is not None
+                and entry.execution_status
+                in {ActionExecutionStatus.SUCCEEDED, ActionExecutionStatus.DEGRADED}
+            ):
+                return handle.element_id
+        return None
 
     def _append_failed_action(
         self,

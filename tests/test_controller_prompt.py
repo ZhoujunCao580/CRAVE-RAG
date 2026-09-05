@@ -15,7 +15,7 @@ from softdoc.reading_state import EvidenceStatus, RootQuestion
 
 
 def test_controller_prompt_is_frozen_to_current_action_contract() -> None:
-    assert CONTROLLER_PROMPT_VERSION == "controller-policy-v0.8"
+    assert CONTROLLER_PROMPT_VERSION == "controller-policy-v0.10"
     assert "Treat ControllerInput as read-only" in CONTROLLER_SYSTEM_PROMPT
     assert "using only IDs supplied\nin ControllerInput" in CONTROLLER_SYSTEM_PROMPT
     assert "Return only the action JSON matching the provided Schema" in (
@@ -26,7 +26,7 @@ def test_controller_prompt_is_frozen_to_current_action_contract() -> None:
         "READ_SOURCE",
         "FOLLOW_RELATION",
         "EXPLORE_CANDIDATE_RELATION",
-        "READ_ADJACENT_PAGE",
+        "READ_PAGE_CONTEXT",
         "STOP",
     ):
         assert action_name in CONTROLLER_SYSTEM_PROMPT
@@ -57,6 +57,14 @@ def test_controller_prompt_uses_flexible_route_selection_and_scoped_recheck() ->
     assert "navigation clue, not\n  Evidence" in CONTROLLER_SYSTEM_PROMPT
     assert "existing routes are irrelevant, exhausted" in CONTROLLER_SYSTEM_PROMPT
     assert "specific recoverable failure" in CONTROLLER_SYSTEM_PROMPT
+
+
+def test_controller_prompt_scopes_page_context_to_a_visible_page_and_real_need() -> None:
+    assert '"action": "READ_PAGE_CONTEXT"' in CONTROLLER_SYSTEM_PROMPT
+    assert '"offset": 0' in CONTROLLER_SYSTEM_PROMPT
+    assert "-1 for the previous physical page" in CONTROLLER_SYSTEM_PROMPT
+    assert "1 for the next physical page" in CONTROLLER_SYSTEM_PROMPT
+    assert "do not read a whole page routinely" in CONTROLLER_SYSTEM_PROMPT
 
 
 def test_controller_user_prompt_is_only_validated_input_json() -> None:
@@ -90,6 +98,12 @@ def test_controller_prompt_maps_preview_handles_without_exposing_page_as_source(
     assert (
         "Candidate position does not\n  guarantee relevance or source type."
         in CONTROLLER_SYSTEM_PROMPT
+    )
+    assert "matched_snippet contains its compact search_summary" in (
+        CONTROLLER_SYSTEM_PROMPT
+    )
+    assert "must not be treated as an Observation or Evidence" in (
+        CONTROLLER_SYSTEM_PROMPT
     )
 
 

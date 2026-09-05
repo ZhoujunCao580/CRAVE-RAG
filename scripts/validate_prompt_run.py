@@ -12,7 +12,7 @@ from pydantic import TypeAdapter, ValidationError
 from softdoc.answering import AnswerResult
 from softdoc.controller import ControllerAction
 from softdoc.planning.models import PlannerDraft
-from softdoc.reading_state import EvidenceCheckResult
+from softdoc.reading_state import EvidenceCheckDecision
 from softdoc.visual_reading import VisualReadResult
 
 
@@ -20,7 +20,7 @@ OUTPUT_ADAPTERS: dict[str, TypeAdapter[Any]] = {
     "planner": TypeAdapter(PlannerDraft),
     "controller": TypeAdapter(ControllerAction),
     "visual_reader": TypeAdapter(VisualReadResult),
-    "checker": TypeAdapter(EvidenceCheckResult),
+    "checker": TypeAdapter(EvidenceCheckDecision),
     "answerer": TypeAdapter(AnswerResult),
 }
 

@@ -224,6 +224,45 @@ def test_table_without_html_falls_back_to_own_text(parsed_document) -> None:
     assert "Fallback textual table content" in unit.search_text
 
 
+def test_continued_table_without_own_headers_inherits_confirmed_fragment_headers(
+    parsed_document,
+) -> None:
+    document = parsed_document.model_copy(deep=True)
+    source = next(
+        item for item in document.elements if item.element_type == ElementType.TABLE
+    )
+    source.html = (
+        "<table><tr><th>Issue</th><th>Count</th></tr>"
+        "<tr><td>URLs not accessible</td><td>159</td></tr></table>"
+    )
+    source.metadata["cross_page_table_fragment"] = {
+        "status": "confirmed",
+        "group_id": "table-group:test",
+        "fragment_index": 0,
+    }
+    target_page = document.pages[-1]
+    target = source.model_copy(deep=True)
+    target.element_id = source.element_id + ":continuation"
+    target.page_id = target_page.page_id
+    target.page_number = target_page.page_number
+    target.html = "<table><tr><td>URLs timed out</td><td>504</td></tr></table>"
+    target.metadata["cross_page_table_fragment"] = {
+        "status": "confirmed",
+        "group_id": "table-group:test",
+        "fragment_index": 1,
+    }
+    document.elements.append(target)
+
+    units = _units_for(SearchUnitBuilder().build(document), target.element_id)
+
+    assert units
+    assert all(unit.table_header_cells == ["Issue", "Count"] for unit in units)
+    assert all(
+        unit.table_header_source_element_id == source.element_id for unit in units
+    )
+    assert all(unit.table_is_continuation for unit in units)
+
+
 def test_relations_do_not_merge_distinct_elements(parsed_document) -> None:
     result = SearchUnitBuilder().build(parsed_document)
 

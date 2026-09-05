@@ -131,7 +131,7 @@ class AnswerResult(SoftDocModel):
     """Minimal model-owned final answer plus the Evidence it actually used."""
 
     answer: str = Field(min_length=1)
-    used_evidence_ids: list[str] = Field(min_length=1)
+    used_evidence_ids: list[str] = Field(default_factory=list)
 
     @field_validator("answer")
     @classmethod
@@ -145,6 +145,14 @@ class AnswerResult(SoftDocModel):
     @classmethod
     def validate_used_evidence(cls, value: list[str]) -> list[str]:
         return _unique_nonblank(value, label="Used Evidence IDs")
+
+    @model_validator(mode="after")
+    def require_evidence_for_answered_questions(self) -> Self:
+        if self.answer != "Not answerable" and not self.used_evidence_ids:
+            raise ValueError(
+                "A substantive answer must reference at least one Evidence item"
+            )
+        return self
 
 
 class AnswerInputBuilder:

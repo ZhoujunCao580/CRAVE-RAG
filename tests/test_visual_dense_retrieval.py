@@ -18,6 +18,10 @@ from softdoc.retrieval.visual_dense import (
     weighted_rrf_three_route_ranking,
 )
 from softdoc.retrieval import SubQuestionInput
+from softdoc.visual_retrieval import (
+    VISUAL_RETRIEVAL_METADATA_KEY,
+    VisualRetrievalDescriptor,
+)
 
 
 class _FakeVisualModel:
@@ -60,6 +64,38 @@ def test_visual_selection_keeps_structured_tables_eligible_for_visual_search(
     assert is_visual_retrieval_candidate(visual_table)
     assert is_visual_retrieval_candidate(structured_table)
     assert "10" in _visual_preview_text(structured_table, [])
+
+
+def test_descriptor_summary_is_the_controller_preview_without_repeated_context(
+    parsed_document,
+) -> None:
+    figure = next(
+        item
+        for item in parsed_document.elements
+        if item.element_type == ElementType.FIGURE
+    ).model_copy(deep=True)
+    figure.reference_label = "Figure 9"
+    descriptor = VisualRetrievalDescriptor(
+        descriptor_id="descriptor:figure-9",
+        element_id=figure.element_id,
+        visual_asset_id="visual:figure-9",
+        visual_asset_sha256="0" * 64,
+        generator_model="test-vlm",
+        prompt_version="visual-retrieval-v0.1",
+        search_summary="A map of San Francisco Bay showing several piers.",
+        keywords=["San Francisco Bay", "map", "piers"],
+    )
+    figure.summary = descriptor.search_summary
+    figure.keywords = descriptor.keywords
+    figure.metadata[VISUAL_RETRIEVAL_METADATA_KEY] = descriptor.model_dump(
+        mode="json"
+    )
+
+    preview = _visual_preview_text(figure, ["Figure 9. Waterfront map"])
+
+    assert preview == descriptor.search_summary
+    assert "Keywords:" not in preview
+    assert "Waterfront map" not in preview
 
 
 def test_linux_can_resolve_windows_authored_asset_paths(tmp_path: Path) -> None:

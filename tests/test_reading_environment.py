@@ -36,6 +36,7 @@ from softdoc.reading_state import (
     EvidenceStatus,
     EvidenceUpdates,
     ObservationAssessment,
+    ObservationLimitation,
     ObservationSourceRef,
     QuestionState,
     QuestionStatus,
@@ -131,6 +132,62 @@ class PredicateChecker:
         )
 
 
+class StateOnlyRootFinalizingChecker:
+    """Complete a SubQuestion first, then judge Root from existing Evidence."""
+
+    def __init__(self, root_gap: str | None = None) -> None:
+        self.inputs: list[EvidenceCheckInput] = []
+        self.root_gap = root_gap
+
+    def check(self, checker_input: EvidenceCheckInput) -> EvidenceCheckResult:
+        self.inputs.append(checker_input)
+        target = checker_input.evidence_memory.current_target
+        assert target is not None
+        if checker_input.observations:
+            observation = checker_input.observations[0]
+            return EvidenceCheckResult(
+                action_id=checker_input.action_id,
+                observation_assessments=[
+                    ObservationAssessment(
+                        observation_id=observation.observation_id,
+                        used_for_evidence=True,
+                        assessment="The Observation resolves the SubQuestion.",
+                    )
+                ],
+                evidence_updates=EvidenceUpdates(
+                    add=[
+                        EvidenceAddition(
+                            statement=observation.text,
+                            observation_ids=[observation.observation_id],
+                            supports_question_ids=[target.question_id],
+                        )
+                    ]
+                ),
+                current_target_status=QuestionStatus.SATISFIED,
+                root_status=EvidenceStatus.INCOMPLETE,
+                remaining_gap_description=None,
+            )
+        assert target.question_id == checker_input.root_question.question_id
+        assert target.gap_description == checker_input.root_question.text
+        if self.root_gap is not None:
+            return EvidenceCheckResult(
+                action_id=checker_input.action_id,
+                observation_assessments=[],
+                evidence_updates=EvidenceUpdates(),
+                current_target_status=QuestionStatus.INCOMPLETE,
+                root_status=EvidenceStatus.INCOMPLETE,
+                remaining_gap_description=self.root_gap,
+            )
+        return EvidenceCheckResult(
+            action_id=checker_input.action_id,
+            observation_assessments=[],
+            evidence_updates=EvidenceUpdates(),
+            current_target_status=QuestionStatus.SATISFIED,
+            root_status=EvidenceStatus.READY,
+            remaining_gap_description=None,
+        )
+
+
 class EvidenceAnswerer:
     def answer(self, answer_input: AnswerInput) -> AnswerResult:
         return AnswerResult(
@@ -163,6 +220,38 @@ class PageTeacherReader:
                     ],
                 )
         return self.fallback.read(context)
+
+
+class PageContextRecordingReader:
+    """Record real Reader inputs and require context after one focused read."""
+
+    def __init__(self) -> None:
+        self.contexts: list[ReaderContext] = []
+
+    def read(self, context: ReaderContext) -> ReaderOutput:
+        self.contexts.append(context)
+        if len(self.contexts) == 1:
+            return ReaderOutput(
+                reader_kind=ReaderKind.VISUAL,
+                limitations=[
+                    ObservationLimitation(
+                        description="The focused crop lacks the page legend.",
+                        input_ids=[item.input_id for item in context.inputs],
+                    )
+                ],
+            )
+        return ReaderOutput(
+            reader_kind=ReaderKind.PAGE,
+            observations=[
+                ReaderObservationDraft(
+                    text="ANSWER: the whole-page context resolves the legend.",
+                    sources=[
+                        ObservationSourceRef(input_id=item.input_id)
+                        for item in context.inputs
+                    ],
+                )
+            ],
+        )
 
 
 def _provenance(owner: str) -> Provenance:
@@ -352,6 +441,13 @@ def test_ordinal_page_anchor_auto_reads_physical_page(tmp_path: Path) -> None:
 
 def test_ordinal_exact_read_can_recover_on_adjacent_page(tmp_path: Path) -> None:
     document = _document(tmp_path, page_element_specs=[[], [], []])
+    document.pages[1] = document.pages[1].model_copy(
+        update={
+            "display_page_label": "1",
+            "display_page_label_confidence": 0.95,
+            "page_label_aliases": ["1"],
+        }
+    )
     controller = QueueController(
         [
             {
@@ -390,8 +486,199 @@ def test_ordinal_exact_read_can_recover_on_adjacent_page(tmp_path: Path) -> None
     assert result.action_trace.entries[0].target_ids == ["page:2"]
     assert result.action_trace.entries[1].target_ids == ["page:3"]
     assert controller.inputs[0].reading_locations[0].page_id == "page:2"
+    assert controller.inputs[0].reading_locations[0].physical_page_number == 2
+    assert controller.inputs[0].reading_locations[0].display_page_label == "1"
     assert result.answer is not None
     assert "2023-07" in result.answer.answer
+
+
+def test_read_page_context_zero_supplies_whole_page_and_latest_visual_crop(
+    tmp_path: Path,
+) -> None:
+    document = _document(
+        tmp_path,
+        page_element_specs=[
+            [
+                {
+                    "element_id": "figure:1",
+                    "element_type": ElementType.FIGURE,
+                    "reference_label": "Figure 1",
+                    "visual": True,
+                }
+            ]
+        ],
+    )
+    controller = QueueController(
+        [
+            {
+                "action": "READ_PAGE_CONTEXT",
+                "base_page_id": "page:1",
+                "offset": 0,
+                "local_problem": "Read the chart together with its page legend.",
+            }
+        ]
+    )
+    reader = PageContextRecordingReader()
+
+    result = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=controller,
+        reader=reader,
+        checker=PredicateChecker(lambda text: "ANSWER:" in text),
+        answerer=EvidenceAnswerer(),
+    ).run(
+        root_question=RootQuestion(
+            question_id="root:page-context",
+            text="According to Figure 1 and its legend, what is the answer?",
+        )
+    )
+
+    assert result.status == ReadingRunStatus.READY
+    assert [item.action_name for item in result.action_trace.entries] == [
+        "READ_SOURCE",
+        "READ_PAGE_CONTEXT",
+    ]
+    context_inputs = reader.contexts[1].inputs
+    assert [item.representation for item in context_inputs] == [
+        ReadRepresentation.PAGE_VISUAL,
+        ReadRepresentation.ELEMENT_VISUAL,
+    ]
+    assert [item.source_id for item in context_inputs] == ["page:1", "figure:1"]
+    assert all(item.visual_asset_path.is_file() for item in context_inputs)
+    assert result.action_trace.entries[-1].metadata["focused_source_id"] == "figure:1"
+
+
+def test_read_page_context_offset_reads_only_target_physical_page(
+    tmp_path: Path,
+) -> None:
+    document = _document(
+        tmp_path,
+        page_element_specs=[
+            [
+                {
+                    "element_id": "figure:1",
+                    "element_type": ElementType.FIGURE,
+                    "reference_label": "Figure 1",
+                    "visual": True,
+                }
+            ],
+            [],
+        ],
+    )
+    controller = QueueController(
+        [
+            {
+                "action": "READ_PAGE_CONTEXT",
+                "base_page_id": "page:1",
+                "offset": 1,
+                "local_problem": "Check the following physical page.",
+            }
+        ]
+    )
+    reader = PageContextRecordingReader()
+
+    result = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=controller,
+        reader=reader,
+        checker=PredicateChecker(lambda text: "ANSWER:" in text),
+        answerer=EvidenceAnswerer(),
+    ).run(
+        root_question=RootQuestion(
+            question_id="root:next-page-context",
+            text="What context follows Figure 1?",
+        )
+    )
+
+    assert result.status == ReadingRunStatus.READY
+    context_inputs = reader.contexts[1].inputs
+    assert len(context_inputs) == 1
+    assert context_inputs[0].source_id == "page:2"
+    assert context_inputs[0].representation == ReadRepresentation.PAGE_VISUAL
+
+
+def test_controller_hides_contains_relation_and_exposes_page_location(
+    tmp_path: Path,
+) -> None:
+    contains = _relation(
+        "rel:contains",
+        "page:1",
+        "paragraph:lead",
+        RelationType.CONTAINS,
+        RelationStatus.CONFIRMED,
+    )
+    document = _document(
+        tmp_path,
+        page_element_specs=[
+            [
+                {
+                    "element_id": "paragraph:lead",
+                    "element_type": ElementType.PARAGRAPH,
+                    "text": "entry clue, but not the answer",
+                }
+            ],
+            [
+                {
+                    "element_id": "paragraph:next",
+                    "element_type": ElementType.PARAGRAPH,
+                    "text": "ANSWER: 42",
+                }
+            ],
+        ],
+        relations=[contains],
+    )
+    document.pages[0] = document.pages[0].model_copy(
+        update={
+            "display_page_label": "i",
+            "display_page_label_confidence": 0.95,
+            "page_label_aliases": ["i"],
+        }
+    )
+    controller = QueueController(
+        [
+            {"action": "SEARCH", "operation": "new", "query": "entry clue"},
+            {
+                "action": "READ_SOURCE",
+                "source_ids": ["paragraph:lead"],
+                "local_problem": "Find the requested value.",
+            },
+            {
+                "action": "READ_ADJACENT_PAGE",
+                "from_page_id": "page:1",
+                "direction": "next",
+                "local_problem": "Check the next physical page.",
+            },
+        ]
+    )
+
+    result = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=controller,
+        reader=PageTeacherReader({"page:2": "ANSWER: 42"}),
+        checker=PredicateChecker(lambda text: "ANSWER:" in text),
+        answerer=EvidenceAnswerer(),
+    ).run(
+        root_question=RootQuestion(
+            question_id="root:hidden-contains",
+            text="What is the requested value?",
+        )
+    )
+
+    state_after_read = controller.inputs[2]
+    assert state_after_read.confirmed_relations == []
+    assert state_after_read.candidate_relations == []
+    location = next(
+        item
+        for item in state_after_read.reading_locations
+        if item.source_id == "paragraph:lead"
+    )
+    assert location.page_id == "page:1"
+    assert location.physical_page_number == 1
+    assert location.display_page_label == "i"
+    assert result.status == ReadingRunStatus.READY
 
 
 def test_irrelevant_table_observation_then_candidate_relation_is_explored(
@@ -564,6 +851,90 @@ def test_program_advances_two_exact_subquestions_and_answerer_combines(
     assert "12 million" in result.answer.answer
 
 
+def test_completed_plan_triggers_state_only_root_finalization(tmp_path: Path) -> None:
+    document = _document(tmp_path, page_element_specs=[[]])
+    checker = StateOnlyRootFinalizingChecker()
+    result = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=RejectingController(),
+        reader=PageTeacherReader({"page:1": "ANSWER: revenue was 12 million."}),
+        checker=checker,
+        answerer=EvidenceAnswerer(),
+    ).run(
+        root_question=RootQuestion(
+            question_id="root:finalize",
+            text="What was revenue?",
+        ),
+        questions=[
+            QuestionState(
+                question_id="Q1",
+                text="What was revenue on Page 1?",
+            )
+        ],
+    )
+
+    assert result.status == ReadingRunStatus.READY
+    assert len(result.action_trace.entries) == 1
+    assert len(checker.inputs) == 2
+    root_input = checker.inputs[1]
+    assert root_input.observations == []
+    assert root_input.limitations == []
+    assert root_input.evidence_memory.current_target is not None
+    assert root_input.evidence_memory.current_target.question_id == "root:finalize"
+    assert root_input.evidence_memory.current_target.gap_description == (
+        "What was revenue?"
+    )
+    assert result.answer is not None
+
+
+def test_incomplete_root_finalization_replaces_root_question_with_specific_gap(
+    tmp_path: Path,
+) -> None:
+    document = _document(tmp_path, page_element_specs=[[]])
+    checker = StateOnlyRootFinalizingChecker(
+        root_gap="The reason for the revenue change is still missing."
+    )
+    controller = QueueController(
+        [
+            {
+                "action": "STOP",
+                "reason": "This test stops after inspecting the refined Root gap.",
+            }
+        ]
+    )
+    result = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=controller,
+        reader=PageTeacherReader({"page:1": "ANSWER: revenue was 12 million."}),
+        checker=checker,
+        answerer=EvidenceAnswerer(),
+    ).run(
+        root_question=RootQuestion(
+            question_id="root:finalize-gap",
+            text="What was revenue and why did it change?",
+        ),
+        questions=[
+            QuestionState(
+                question_id="Q1",
+                text="What was revenue on Page 1?",
+            )
+        ],
+    )
+
+    assert result.status == ReadingRunStatus.STOPPED_INCOMPLETE
+    assert len(checker.inputs) == 2
+    assert len(controller.inputs) == 1
+    assert controller.inputs[0].current_gap.description == (
+        "The reason for the revenue change is still missing."
+    )
+    assert result.evidence_memory.current_target is not None
+    assert result.evidence_memory.current_target.gap_description == (
+        "The reason for the revenue change is still missing."
+    )
+
+
 def test_next_candidate_batch_remains_in_one_search_session(tmp_path: Path) -> None:
     specs = [
         {
@@ -669,6 +1040,9 @@ def test_budget_exhausted_run_resumes_search_cursor_without_replaying(
     )
 
     assert first.status == ReadingRunStatus.BUDGET_EXHAUSTED
+    assert first.answer is not None
+    assert first.answer.answer == "Not answerable"
+    assert first.answer.used_evidence_ids == []
     assert len(first.action_trace.entries) == 1
     assert first.search_sessions[0].cursor == 1
     first_candidate = first.visible_search_batches[0].candidate_previews[0].element_id
@@ -858,7 +1232,7 @@ def test_root_direct_initial_plan_runs_without_a_synthetic_subquestion(
         planner_trace=PlannerTrace(
             backend_name="teacher",
             model="scripted",
-            prompt_version="planner-v0.20",
+            prompt_version="planner-v0.21",
         ),
     )
     checker = PredicateChecker(lambda text: "12 million" in text)
@@ -913,7 +1287,9 @@ def test_controller_can_stop_cleanly_with_incomplete_evidence(tmp_path: Path) ->
 
     assert result.status == ReadingRunStatus.STOPPED_INCOMPLETE
     assert result.evidence_memory.root_status == EvidenceStatus.INCOMPLETE
-    assert result.answer is None
+    assert result.answer is not None
+    assert result.answer.answer == "Not answerable"
+    assert result.answer.used_evidence_ids == []
     assert result.action_trace.entries[-1].action_name == "STOP"
     assert result.diagnostics[-1].code == "controller_stopped_incomplete"
 

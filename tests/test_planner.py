@@ -372,11 +372,14 @@ def test_prompt_defines_empty_parallel_and_dependent_plans() -> None:
     assert "Figure 6" not in prompt
 
 
-def test_planner_v020_prompt_is_frozen() -> None:
+def test_planner_v021_prompt_is_frozen() -> None:
     prompt = build_initial_planner_prompt("FROZEN PLANNER PROMPT SNAPSHOT")
-    assert INITIAL_PLANNER_PROMPT_VERSION == "planner-v0.20"
+    system = build_initial_planner_system_prompt()
+    assert INITIAL_PLANNER_PROMPT_VERSION == "planner-v0.21"
+    assert "verify semantic closure" in system
+    assert "without another unstated factual input" in system
     assert sha256(prompt.encode("utf-8")).hexdigest() == (
-        "ee98333712b028c93ff6d37759a0736d4b6c37b7c3cb511fae0c58a7e78e5a70"
+        "438e0a1ca2d61fc3aa5d596a10ad4f2aa8fa7475030b962372ea5eb0f1c49499"
     )
 
 

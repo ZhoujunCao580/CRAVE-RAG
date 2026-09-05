@@ -1,9 +1,9 @@
 """Run a model-only Evidence Checker evaluation against synthetic cases.
 
 This probe deliberately does not call a real Reader.  It constructs validated
-EvidenceCheckInput objects, asks a local Ollama model for EvidenceCheckResult
-JSON, validates and applies the delta with the production state transition,
-and writes an auditable report under data/processed/.
+EvidenceCheckInput objects, asks a local Ollama model for EvidenceCheckDecision
+JSON, materializes the runtime-derived provenance fields, validates and applies
+the delta with the production state transition, and writes an auditable report.
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ from softdoc.checking_prompt import (
 )
 from softdoc.reading_state import (
     CurrentTarget,
+    EvidenceCheckDecision,
     EvidenceCheckInput,
     EvidenceCheckResult,
     EvidenceItem,
@@ -37,6 +38,7 @@ from softdoc.reading_state import (
     RootQuestion,
     StoredObservation,
     apply_evidence_check_result,
+    materialize_evidence_check_decision,
 )
 
 
@@ -529,6 +531,45 @@ def build_cases() -> list[Case]:
         ),
     ))
 
+    cid = "C27"
+    root = f"root:{cid}"
+    q1 = QuestionState(
+        question_id="Q1",
+        text="What accuracy did Method A achieve?",
+        status="satisfied",
+    )
+    q2 = QuestionState(
+        question_id="Q2",
+        text="What accuracy did Method B achieve?",
+        status="satisfied",
+    )
+    existing = [
+        evidence(cid, 0, "Method A achieved 72% accuracy.", "Q1"),
+        evidence(cid, 1, "Method B achieved 79% accuracy.", "Q2"),
+    ]
+    add(Case(
+        cid,
+        "state_only_root_finalization",
+        "After the plan completes, existing Evidence alone resolves the Root.",
+        make_input(
+            cid,
+            "Which method achieved higher accuracy?",
+            target_id=root,
+            gap="Which method achieved higher accuracy?",
+            questions=[q1, q2],
+            existing=existing,
+            observations=[],
+        ),
+        Expected(
+            {},
+            0,
+            target_status="satisfied",
+            root_status="ready",
+            gap_required=False,
+            next_target=None,
+        ),
+    ))
+
     return cases
 
 
@@ -547,7 +588,7 @@ def call_ollama(
         ],
         "stream": False,
         "think": False,
-        "format": EvidenceCheckResult.model_json_schema(),
+        "format": EvidenceCheckDecision.model_json_schema(),
         "keep_alive": "30m",
         "options": {"temperature": 0.0, "seed": seed, "num_ctx": 8192},
     }
@@ -718,7 +759,11 @@ def run_pass(
                 base_url=base_url, model=model, checker_input=case.checker_input,
                 timeout=timeout, seed=seed,
             )
-            result = EvidenceCheckResult.model_validate_json(raw_output)
+            decision = EvidenceCheckDecision.model_validate_json(raw_output)
+            result = materialize_evidence_check_decision(
+                case.checker_input,
+                decision,
+            )
             checks, updated, apply_error = evaluate_result(case, result)
             if updated is not None:
                 updated_by_case[case.case_id] = updated
@@ -743,6 +788,7 @@ def run_pass(
                     "next_target": case.expected.next_target,
                 },
                 "valid_output": True,
+                "model_output": decision.model_dump(mode="json"),
                 "output": result.model_dump(mode="json"),
                 "checks": checks,
                 "case_passed": all(checks.values()),
