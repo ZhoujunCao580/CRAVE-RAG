@@ -12,9 +12,9 @@ information.
 - Planner: `planner-v0.21`
 - Controller: `controller-policy-v0.11`
 - Controller input/action: `controller-input-v0.4` / `controller-action-v0.3`
-- Checker: `checker-v2.2`
+- Checker: `checker-v2.4`
 - Answerer: `answerer-v0.8`
-- Reading environment: `reading-environment-v0.4`
+- Reading environment: `reading-environment-v0.5`
 - Visual retrieval descriptor: `visual-retrieval-v0.1`
 - Visual reader: `visual-reader-v0.5`
 
@@ -90,6 +90,19 @@ action. The Checker returns `reused_evidence_ids`; the runtime records the new
 support association while preserving Evidence statements and provenance.
 State-only Checker calls cannot add, replace, or remove Evidence.
 
+### Bounded Observation Recall on target switch
+
+If the evidence-only target recheck leaves a newly selected SubQuestion
+incomplete, the Environment may select at most three relevant historical
+Observations that never entered Evidence. Selection is lexical, deduplicated by
+stable source identity plus normalized claim text, and excludes claims already
+cited by accepted Evidence. The selected claims go only to the Checker in a
+separate recall invocation; they are not exposed to the Controller, do not
+fabricate a read, and do not consume an action. Recall may add current-target
+Evidence but cannot replace or remove accepted Evidence. Broader semantic
+recall and source rereading remain deferred until server evidence justifies
+their cost and loop risk.
+
 ### Deterministic incomplete output and resume
 
 Runs that still terminate as `budget_exhausted` or `stopped_incomplete` emit the
@@ -120,7 +133,7 @@ Answerer result. Any substantive answer still requires Evidence IDs.
 The complete CPU test suite passed before this checkpoint was committed:
 
 ```text
-478 passed
+482 passed
 ```
 
 Server-side model behavior is not claimed by this checkpoint. The next server
@@ -131,7 +144,8 @@ fallback replacement.
 
 ## Deliberately pending
 
-- lightweight Observation recall;
+- server-side semantic and false-reuse evaluation of bounded Observation
+  Recall;
 - server-side semantic evaluation of the optional Multimodal Table Reader,
   including table-level unit retention and conservative cross-page recovery;
 - document/range inventory and coverage-complete counting;

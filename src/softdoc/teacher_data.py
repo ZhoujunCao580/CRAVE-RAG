@@ -420,7 +420,6 @@ def build_checker_sft_examples(
             evidence_updates=result.evidence_updates,
             reused_evidence_ids=result.reused_evidence_ids,
             current_target_status=result.current_target_status,
-            root_status=result.root_status,
             remaining_gap_description=result.remaining_gap_description,
         )
         examples.append(

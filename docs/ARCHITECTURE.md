@@ -27,7 +27,12 @@
 
 The repository implements and tests the SoftDoc foundation, MinerU adapter and deterministic passes, document relations, retrieval stack, resumable search sessions, candidate previews, the contracts for planning, reading, evidence checking, and answering, an injectable Reading Environment v0, and an Ollama-backed runner that executes those contracts as one stateful loop.
 
-Production-quality model policies, citation materialization, model-quality evaluation, deferred planning, Observation Recall, post-training, and full-dataset end-to-end answer evaluation remain research-stage work.
+Production-quality model policies, citation materialization, model-quality
+evaluation, deferred planning, broader semantic/source recall, post-training,
+and full-dataset end-to-end answer evaluation remain research-stage work. The
+runtime already implements a bounded lexical Observation Recall pass for a
+newly selected SubQuestion, but its model-level precision still requires
+server evaluation.
 
 ## Executable Reading Loop
 

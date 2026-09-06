@@ -149,9 +149,21 @@ class ReadInput(SoftDocModel):
 
 
 class ObservationSourceRef(SoftDocModel):
-    """A precise grounding inside an input actually supplied to the Reader."""
+    """A precise grounding inside an input actually supplied to the Reader.
+
+    ``input_id`` is only a call-local alias (for example, every separate read
+    may contain an ``I1``).  The remaining optional fields are populated by the
+    Environment from the authoritative :class:`ReadInput` before an
+    Observation is persisted.  They stay optional so older saved trajectories
+    remain loadable.
+    """
 
     input_id: str = Field(min_length=1, pattern=r"^I[1-9][0-9]*$")
+    source_id: str | None = Field(default=None, min_length=1)
+    page_id: str | None = Field(default=None, min_length=1)
+    physical_page_number: int | None = Field(default=None, ge=1)
+    display_page_label: str | None = Field(default=None, min_length=1)
+    element_id: str | None = Field(default=None, min_length=1)
     cell_id: str | None = Field(default=None, min_length=1)
     bbox: NormalizedRegion | None = None
 
@@ -562,19 +574,25 @@ class EvidenceCheckInput(SoftDocModel):
     delta, so using a delta never hides existing Evidence from the Checker.
     Most invocations follow one read.  The Environment may also invoke the
     Checker with no new read when accepted Evidence already supports a newly
-    selected SubQuestion, or after the final planned SubQuestion is satisfied
-    so it can judge the Root from the complete accepted Evidence set.
+    selected SubQuestion, with a small set of explicitly recalled historical
+    Observations, or after the final planned SubQuestion is satisfied so it can
+    judge the Root from the complete accepted Evidence set.
     """
 
     action_id: str = Field(min_length=1)
     root_question: RootQuestion
     evidence_memory: EvidenceMemory
     observations: list[StoredObservation] = Field(default_factory=list)
+    recalled_observations: list[StoredObservation] = Field(default_factory=list)
     limitations: list[ObservationLimitation] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_context(self) -> Self:
-        if not self.observations and not self.limitations:
+        if (
+            not self.observations
+            and not self.recalled_observations
+            and not self.limitations
+        ):
             target = self.evidence_memory.current_target
             is_target_recheck = (
                 target is not None
@@ -603,6 +621,29 @@ class EvidenceCheckInput(SoftDocModel):
         _unique_nonblank(observation_ids, label="Checker Observation IDs")
         if any(item.action_id != self.action_id for item in self.observations):
             raise ValueError("Checker Observations must belong to its action_id")
+        recalled_ids = [
+            item.observation_id for item in self.recalled_observations
+        ]
+        _unique_nonblank(recalled_ids, label="Recalled Checker Observation IDs")
+        overlap = set(observation_ids).intersection(recalled_ids)
+        if overlap:
+            raise ValueError(
+                "New and recalled Checker Observations must be disjoint: "
+                + ", ".join(sorted(overlap))
+            )
+        if self.recalled_observations:
+            target = self.evidence_memory.current_target
+            if self.observations or self.limitations:
+                raise ValueError(
+                    "Observation Recall must be a separate Checker invocation"
+                )
+            if (
+                target is None
+                or target.question_id == self.root_question.question_id
+            ):
+                raise ValueError(
+                    "Observation Recall is allowed only for an active SubQuestion"
+                )
         return self
 
 
@@ -719,7 +760,6 @@ class EvidenceCheckDecision(SoftDocModel):
     evidence_updates: EvidenceUpdates = Field(default_factory=EvidenceUpdates)
     reused_evidence_ids: list[str] = Field(default_factory=list)
     current_target_status: QuestionStatus
-    root_status: EvidenceStatus
     remaining_gap_description: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
@@ -739,17 +779,12 @@ class EvidenceCheckDecision(SoftDocModel):
             raise ValueError(
                 "A satisfied current target must not describe another gap"
             )
-        if (
-            self.root_status == EvidenceStatus.READY
-            and self.current_target_status != QuestionStatus.SATISFIED
-        ):
-            raise ValueError("A ready Root requires a satisfied current target")
         return self
 
 
 def _apply_evidence_check_update(
     checker_input: EvidenceCheckInput,
-    result: EvidenceCheckResult | EvidenceCheckDecision,
+    result: EvidenceCheckResult,
 ) -> EvidenceMemory:
     """Apply one Checker delta to a copy and return a fully validated memory.
 
@@ -761,16 +796,20 @@ def _apply_evidence_check_update(
     if result.action_id != checker_input.action_id:
         raise ValueError("Checker result action_id does not match its input")
 
-    new_observation_ids = {
+    presented_observation_ids = {
         observation.observation_id for observation in checker_input.observations
     }
+    presented_observation_ids.update(
+        observation.observation_id
+        for observation in checker_input.recalled_observations
+    )
     assessment_ids = {
         assessment.observation_id
         for assessment in result.observation_assessments
     }
-    if assessment_ids != new_observation_ids:
+    if assessment_ids != presented_observation_ids:
         raise ValueError(
-            "Checker must assess every new Observation exactly once and no others"
+            "Checker must assess every presented Observation exactly once and no others"
         )
 
     existing_items = list(checker_input.evidence_memory.evidence)
@@ -798,18 +837,38 @@ def _apply_evidence_check_update(
     if current_target is None:
         raise ValueError("Checker input requires an active current_target")
     target_question_id = current_target.question_id
-    is_state_only = not checker_input.observations and not checker_input.limitations
     root_question_id = checker_input.evidence_memory.root_question_id
-    is_target_recheck = is_state_only and target_question_id != root_question_id
+    is_state_only = (
+        not checker_input.observations
+        and not checker_input.recalled_observations
+        and not checker_input.limitations
+    )
+    is_recall_recheck = (
+        not checker_input.observations
+        and bool(checker_input.recalled_observations)
+        and not checker_input.limitations
+        and target_question_id != root_question_id
+    )
+    is_target_recheck = (
+        (is_state_only or is_recall_recheck)
+        and target_question_id != root_question_id
+    )
     if is_state_only and (
         result.evidence_updates.add
         or result.evidence_updates.replace
         or result.evidence_updates.remove
     ):
         raise ValueError("A state-only Checker call cannot add, replace, or remove Evidence")
+    if is_recall_recheck and (
+        result.evidence_updates.replace or result.evidence_updates.remove
+    ):
+        raise ValueError(
+            "An Observation Recall call may add current-target Evidence but "
+            "cannot replace or remove accepted Evidence"
+        )
     if result.reused_evidence_ids and not is_target_recheck:
         raise ValueError(
-            "reused_evidence_ids are allowed only during a state-only SubQuestion recheck"
+            "reused_evidence_ids are allowed only during a SubQuestion recheck"
         )
     cross_target_updates = [
         evidence_id
@@ -824,7 +883,7 @@ def _apply_evidence_check_update(
             + ", ".join(cross_target_updates)
         )
 
-    known_observation_ids = set(new_observation_ids)
+    known_observation_ids = set(presented_observation_ids)
     for item in existing_items:
         known_observation_ids.update(item.observation_ids)
     proposed_observation_ids = {
@@ -1003,9 +1062,36 @@ def materialize_evidence_check_decision(
     checker_input: EvidenceCheckInput,
     decision: EvidenceCheckDecision,
 ) -> EvidenceCheckResult:
-    """Derive assessment provenance from the atomically resulting Evidence set."""
+    """Derive Root status and assessment provenance from one model decision."""
 
-    next_memory = _apply_evidence_check_update(checker_input, decision)
+    target = checker_input.evidence_memory.current_target
+    if target is None:  # guarded by EvidenceCheckInput, kept defensive here
+        raise ValueError("Checker input requires a current target")
+    root_status = (
+        EvidenceStatus.READY
+        if (
+            target.question_id == checker_input.root_question.question_id
+            and decision.current_target_status == QuestionStatus.SATISFIED
+        )
+        else EvidenceStatus.INCOMPLETE
+    )
+    provisional_result = EvidenceCheckResult(
+        action_id=decision.action_id,
+        observation_assessments=[
+            ObservationAssessment(
+                observation_id=item.observation_id,
+                used_for_evidence=False,
+                assessment=item.assessment,
+            )
+            for item in decision.observation_assessments
+        ],
+        evidence_updates=decision.evidence_updates,
+        reused_evidence_ids=decision.reused_evidence_ids,
+        current_target_status=decision.current_target_status,
+        root_status=root_status,
+        remaining_gap_description=decision.remaining_gap_description,
+    )
+    next_memory = _apply_evidence_check_update(checker_input, provisional_result)
     used_observation_ids = {
         observation_id
         for item in next_memory.evidence
@@ -1024,7 +1110,7 @@ def materialize_evidence_check_decision(
         evidence_updates=decision.evidence_updates,
         reused_evidence_ids=decision.reused_evidence_ids,
         current_target_status=decision.current_target_status,
-        root_status=decision.root_status,
+        root_status=root_status,
         remaining_gap_description=decision.remaining_gap_description,
     )
     # Keep one authoritative invariant check for both model-backed and scripted

@@ -297,7 +297,8 @@ def test_model_runner_records_every_executed_stage_and_writes_artifacts(tmp_path
     assert checker_manifest.example_count == 1
     checker_examples = load_sft_jsonl(checker_dataset_dir / "checker_sft.jsonl")
     assert checker_examples[0].component.value == "checker"
-    assert checker_examples[0].target["root_status"] == "ready"
+    assert checker_examples[0].target["current_target_status"] == "satisfied"
+    assert "root_status" not in checker_examples[0].target
     assert "used_for_evidence" not in checker_examples[0].target[
         "observation_assessments"
     ][0]

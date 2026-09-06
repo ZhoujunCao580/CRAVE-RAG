@@ -30,6 +30,8 @@ The guiding principle is:
 - Visual Reader request/result contracts and prompt.
 - Retrieval-only visual search identities with asset and Prompt provenance.
 - Append-only ObservationStore and atomic Evidence Checker deltas.
+- Target-switch Evidence rechecking plus bounded, Checker-only Observation
+  Recall for relevant historical claims that never entered Evidence.
 - Derived Controller state, validated action union, and explicit incomplete
   `STOP`.
 - Evidence-only Answerer contract and prompt.
@@ -49,7 +51,8 @@ The guiding principle is:
   the current Ollama v0 backend.
 - A trained Controller policy or a production Teacher trajectory corpus.
 - A reviewed, diverse local Teacher corpus and preference/RL data.
-- Deferred planning and Observation Recall.
+- Deferred planning and broader semantic/source recall beyond the bounded
+  target-switch Observation Recall implementation.
 - Citation materialization in final user-facing output.
 - Full-dataset answer-quality evaluation and action-value ablations.
 - RL rewards or a complete RL training pipeline.

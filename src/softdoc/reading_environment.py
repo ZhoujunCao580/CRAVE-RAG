@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+import re
 from typing import Any, Protocol, Self
 
 from pydantic import Field, model_validator
@@ -101,7 +102,39 @@ from softdoc.store import DocumentStore
 from softdoc.table_view import TableMaterializer, TableView
 
 
-READING_ENVIRONMENT_VERSION = "reading-environment-v0.4"
+READING_ENVIRONMENT_VERSION = "reading-environment-v0.5"
+
+
+_RECALL_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "by",
+        "for",
+        "from",
+        "how",
+        "in",
+        "is",
+        "it",
+        "of",
+        "on",
+        "or",
+        "that",
+        "the",
+        "this",
+        "to",
+        "was",
+        "were",
+        "what",
+        "which",
+        "with",
+    }
+)
 
 
 class ReaderObservationDraft(SoftDocModel):
@@ -184,6 +217,7 @@ class EnvironmentDiagnostic(SoftDocModel):
 class ReadingEnvironmentConfig(SoftDocModel):
     action_budget: int = Field(default=7, ge=1, le=100)
     recent_action_limit: int = Field(default=5, ge=0)
+    observation_recall_limit: int = Field(default=3, ge=0, le=10)
     search: SearchSessionConfig = Field(default_factory=SearchSessionConfig)
 
 
@@ -1081,6 +1115,8 @@ class ReadingEnvironment:
             )
 
         input_ids = {item.input_id for item in resolved}
+        inputs_by_id = {item.input_id: item for item in resolved}
+        pages_by_id = {item.page_id: item for item in self.document.pages}
         for draft in reader_output.observations:
             unknown = {item.input_id for item in draft.sources}.difference(input_ids)
             if unknown:
@@ -1089,12 +1125,35 @@ class ReadingEnvironment:
                     + ", ".join(sorted(unknown))
                 )
 
+        # I1/I2 are deliberately local to one Reader call.  Expand them to
+        # authoritative, stable document identities before persistence so a
+        # later Checker/Recall pass cannot mistake I1 from two reads for the
+        # same source.  Reader-authored stable fields, if any, are ignored.
+        expanded_sources = [
+            [
+                source.model_copy(
+                    update={
+                        "source_id": inputs_by_id[source.input_id].source_id,
+                        "page_id": inputs_by_id[source.input_id].page_id,
+                        "physical_page_number": pages_by_id[
+                            inputs_by_id[source.input_id].page_id
+                        ].page_number,
+                        "display_page_label": pages_by_id[
+                            inputs_by_id[source.input_id].page_id
+                        ].display_page_label,
+                        "element_id": inputs_by_id[source.input_id].element_id,
+                    }
+                )
+                for source in draft.sources
+            ]
+            for draft in reader_output.observations
+        ]
         stored = [
             StoredObservation(
                 observation_id=make_observation_id(current_action_id, index),
                 action_id=current_action_id,
                 text=draft.text,
-                sources=draft.sources,
+                sources=expanded_sources[index],
             )
             for index, draft in enumerate(reader_output.observations)
         ]
@@ -1218,6 +1277,7 @@ class ReadingEnvironment:
                     root_question=root_question,
                     previous_memory=memory,
                     memory=next_memory,
+                    observations=next_observations,
                     triggering_action_id=current_action_id,
                 )
 
@@ -1229,9 +1289,10 @@ class ReadingEnvironment:
         root_question: RootQuestion,
         previous_memory: EvidenceMemory,
         memory: EvidenceMemory,
+        observations: ObservationStore,
         triggering_action_id: str,
     ) -> EvidenceMemory:
-        """Recheck newly selected targets already supported by accepted Evidence."""
+        """Recheck a newly selected target from Evidence, then recalled facts."""
 
         previous_target = previous_memory.current_target
         previous_target_id = (
@@ -1259,13 +1320,30 @@ class ReadingEnvironment:
                     triggering_action_id=triggering_action_id,
                 )
             else:
-                if not current.evidence:
-                    break
-                updated = self._recheck_target_from_evidence(
-                    root_question=root_question,
-                    memory=current,
-                    triggering_action_id=triggering_action_id,
-                )
+                updated = current
+                if current.evidence:
+                    updated = self._recheck_target_from_evidence(
+                        root_question=root_question,
+                        memory=current,
+                        triggering_action_id=triggering_action_id,
+                    )
+                updated_target = updated.current_target
+                if (
+                    updated_target is not None
+                    and updated_target.question_id == target.question_id
+                    and self.config.observation_recall_limit
+                ):
+                    recalled = self._select_recalled_observations(
+                        memory=updated,
+                        observations=observations,
+                    )
+                    if recalled:
+                        updated = self._recheck_target_from_observations(
+                            root_question=root_question,
+                            memory=updated,
+                            recalled_observations=recalled,
+                            triggering_action_id=triggering_action_id,
+                        )
 
             previous_target_id = target.question_id
             if updated == current:
@@ -1273,6 +1351,86 @@ class ReadingEnvironment:
             current = updated
 
         return current
+
+    def _select_recalled_observations(
+        self,
+        *,
+        memory: EvidenceMemory,
+        observations: ObservationStore,
+    ) -> list[StoredObservation]:
+        """Return a small, deduplicated lexical view of unaccepted history.
+
+        Recall is deliberately target-switch-only and does not expose the full
+        ObservationStore to the Controller.  Stable source identity and the
+        normalized claim text suppress repeated reads of the same content.
+        """
+
+        target = memory.current_target
+        if target is None or target.question_id == memory.root_question_id:
+            return []
+        target_text = next(
+            item.text for item in memory.questions
+            if item.question_id == target.question_id
+        )
+        query_terms = self._recall_terms(
+            f"{target_text} {target.gap_description}"
+        )
+        if not query_terms:
+            return []
+
+        accepted_observation_ids = {
+            observation_id
+            for item in memory.evidence
+            for observation_id in item.observation_ids
+        }
+        records_by_action = {
+            record.action_id: record for record in observations.read_records
+        }
+        ranked: list[tuple[int, int, str, StoredObservation]] = []
+        for index, observation in enumerate(observations.observations):
+            if observation.observation_id in accepted_observation_ids:
+                continue
+            record = records_by_action.get(observation.action_id)
+            if record is None or record.subquestion_id == target.question_id:
+                continue
+            observation_terms = self._recall_terms(observation.text)
+            overlap = query_terms.intersection(observation_terms)
+            if not overlap:
+                continue
+            numeric_overlap = sum(
+                token[0].isdigit() for token in overlap if token
+            )
+            score = len(overlap) * 4 + numeric_overlap * 3
+            ranked.append((score, -index, observation.observation_id, observation))
+
+        selected: list[StoredObservation] = []
+        seen_claims: set[tuple[str, tuple[str, ...]]] = set()
+        for _score, _index, _observation_id, observation in sorted(
+            ranked,
+            key=lambda item: (-item[0], -item[1], item[2]),
+        ):
+            source_ids = tuple(
+                sorted(
+                    source.source_id or source.input_id
+                    for source in observation.sources
+                )
+            )
+            key = (" ".join(observation.text.split()).casefold(), source_ids)
+            if key in seen_claims:
+                continue
+            seen_claims.add(key)
+            selected.append(observation)
+            if len(selected) >= self.config.observation_recall_limit:
+                break
+        return selected
+
+    @staticmethod
+    def _recall_terms(value: str) -> set[str]:
+        return {
+            token
+            for token in re.findall(r"[a-z0-9]+(?:\.[0-9]+)?%?", value.casefold())
+            if token not in _RECALL_STOPWORDS and len(token) > 1
+        }
 
     @staticmethod
     def _is_root_finalization_state(
@@ -1323,6 +1481,59 @@ class ReadingEnvironment:
                     code="target_recheck_rejected",
                     description=str(exc),
                     action_id=recheck_action_id,
+                    question_id=target.question_id,
+                )
+            )
+            return memory
+
+    def _recheck_target_from_observations(
+        self,
+        *,
+        root_question: RootQuestion,
+        memory: EvidenceMemory,
+        recalled_observations: list[StoredObservation],
+        triggering_action_id: str,
+    ) -> EvidenceMemory:
+        """Reassess a bounded historical Observation view for a new target."""
+
+        target = memory.current_target
+        assert target is not None
+        recall_action_id = (
+            f"{triggering_action_id}:observation-recall:{target.question_id}"
+        )
+        checker_input = EvidenceCheckInput(
+            action_id=recall_action_id,
+            root_question=root_question,
+            evidence_memory=memory,
+            observations=[],
+            recalled_observations=recalled_observations,
+            limitations=[],
+        )
+        self._diagnostics.append(
+            EnvironmentDiagnostic(
+                code="observation_recall_selected",
+                description=(
+                    "Historical Observations were selected for a target-switch "
+                    "Checker recheck."
+                ),
+                action_id=recall_action_id,
+                question_id=target.question_id,
+                metadata={
+                    "observation_ids": [
+                        item.observation_id for item in recalled_observations
+                    ]
+                },
+            )
+        )
+        try:
+            check_result = self.checker.check(checker_input)
+            return apply_evidence_check_result(checker_input, check_result)
+        except Exception as exc:
+            self._diagnostics.append(
+                EnvironmentDiagnostic(
+                    code="observation_recall_rejected",
+                    description=str(exc),
+                    action_id=recall_action_id,
                     question_id=target.question_id,
                 )
             )

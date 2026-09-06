@@ -232,7 +232,7 @@ def test_checker_and_answerer_backends_use_their_frozen_schemas() -> None:
                     '"add":[{"statement":"Revenue was 12 million.",'
                     '"observation_ids":["obs:1"],'
                     '"supports_question_ids":["root:1"]}],"replace":[],"remove":[]},'
-                    '"current_target_status":"satisfied","root_status":"ready",'
+                    '"current_target_status":"satisfied",'
                     '"remaining_gap_description":null}'
                 )
             }

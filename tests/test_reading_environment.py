@@ -76,8 +76,12 @@ class PredicateChecker:
         self.inputs.append(checker_input)
         target = checker_input.evidence_memory.current_target
         assert target is not None
+        presented_observations = [
+            *checker_input.observations,
+            *checker_input.recalled_observations,
+        ]
         useful_observations = [
-            item for item in checker_input.observations if self.useful(item.text)
+            item for item in presented_observations if self.useful(item.text)
         ]
         used_ids = {item.observation_id for item in useful_observations}
         additions = [
@@ -115,7 +119,7 @@ class PredicateChecker:
                         else "Readable, but it does not resolve the current gap."
                     ),
                 )
-                for item in checker_input.observations
+                for item in presented_observations
             ],
             evidence_updates=EvidenceUpdates(add=additions),
             current_target_status=(
@@ -249,6 +253,116 @@ class MultiTargetRecheckingChecker:
         )
 
 
+class MultiFactPageReader:
+    """Expose one current-target fact and one useful later-target fact."""
+
+    def read(self, context: ReaderContext) -> ReaderOutput:
+        return ReaderOutput(
+            reader_kind=ReaderKind.PAGE,
+            observations=[
+                ReaderObservationDraft(
+                    text="The first-quarter GDP growth was 5.3%.",
+                    sources=[ObservationSourceRef(input_id="I1")],
+                ),
+                ReaderObservationDraft(
+                    text="The second-quarter GDP growth was 5.2%.",
+                    sources=[ObservationSourceRef(input_id="I1")],
+                ),
+            ],
+        )
+
+
+class ObservationRecallChecker:
+    """Accept Q1 now, then recover an unaccepted Q2 fact after target switch."""
+
+    def __init__(self) -> None:
+        self.inputs: list[EvidenceCheckInput] = []
+
+    def check(self, checker_input: EvidenceCheckInput) -> EvidenceCheckResult:
+        self.inputs.append(checker_input)
+        target = checker_input.evidence_memory.current_target
+        assert target is not None
+
+        if checker_input.observations:
+            first, second = checker_input.observations
+            assert target.question_id == "Q1"
+            return EvidenceCheckResult(
+                action_id=checker_input.action_id,
+                observation_assessments=[
+                    ObservationAssessment(
+                        observation_id=first.observation_id,
+                        used_for_evidence=True,
+                        assessment="This is the current Q1 fact.",
+                    ),
+                    ObservationAssessment(
+                        observation_id=second.observation_id,
+                        used_for_evidence=False,
+                        assessment="Reliable, but it belongs to a later target.",
+                    ),
+                ],
+                evidence_updates=EvidenceUpdates(
+                    add=[
+                        EvidenceAddition(
+                            statement=first.text,
+                            observation_ids=[first.observation_id],
+                            supports_question_ids=["Q1"],
+                        )
+                    ]
+                ),
+                current_target_status=QuestionStatus.SATISFIED,
+                root_status=EvidenceStatus.INCOMPLETE,
+                remaining_gap_description=None,
+            )
+
+        if checker_input.recalled_observations:
+            assert target.question_id == "Q2"
+            assert len(checker_input.recalled_observations) == 1
+            recalled = checker_input.recalled_observations[0]
+            return EvidenceCheckResult(
+                action_id=checker_input.action_id,
+                observation_assessments=[
+                    ObservationAssessment(
+                        observation_id=recalled.observation_id,
+                        used_for_evidence=True,
+                        assessment="The recalled claim directly resolves Q2.",
+                    )
+                ],
+                evidence_updates=EvidenceUpdates(
+                    add=[
+                        EvidenceAddition(
+                            statement=recalled.text,
+                            observation_ids=[recalled.observation_id],
+                            supports_question_ids=["Q2"],
+                        )
+                    ]
+                ),
+                current_target_status=QuestionStatus.SATISFIED,
+                root_status=EvidenceStatus.INCOMPLETE,
+                remaining_gap_description=None,
+            )
+
+        if target.question_id == checker_input.root_question.question_id:
+            return EvidenceCheckResult(
+                action_id=checker_input.action_id,
+                observation_assessments=[],
+                evidence_updates=EvidenceUpdates(),
+                current_target_status=QuestionStatus.SATISFIED,
+                root_status=EvidenceStatus.READY,
+                remaining_gap_description=None,
+            )
+
+        assert target.question_id == "Q2"
+        return EvidenceCheckResult(
+            action_id=checker_input.action_id,
+            observation_assessments=[],
+            evidence_updates=EvidenceUpdates(),
+            reused_evidence_ids=[],
+            current_target_status=QuestionStatus.INCOMPLETE,
+            root_status=EvidenceStatus.INCOMPLETE,
+            remaining_gap_description="Need the second-quarter GDP growth.",
+        )
+
+
 class EvidenceAnswerer:
     def answer(self, answer_input: AnswerInput) -> AnswerResult:
         return AnswerResult(
@@ -310,6 +424,31 @@ class PageContextRecordingReader:
                         ObservationSourceRef(input_id=item.input_id)
                         for item in context.inputs
                     ],
+                )
+            ],
+        )
+
+
+class SourceIdentityReader:
+    """Return one Observation per call while deliberately reusing local I1."""
+
+    def read(self, context: ReaderContext) -> ReaderOutput:
+        item = context.inputs[0]
+        text = (
+            "The first chart is readable but does not answer the question."
+            if item.source_id == "figure:1"
+            else "ANSWER: the second source contains the requested result."
+        )
+        return ReaderOutput(
+            reader_kind=(
+                ReaderKind.VISUAL
+                if item.representation == ReadRepresentation.ELEMENT_VISUAL
+                else ReaderKind.TEXT
+            ),
+            observations=[
+                ReaderObservationDraft(
+                    text=text,
+                    sources=[ObservationSourceRef(input_id=item.input_id)],
                 )
             ],
         )
@@ -468,6 +607,76 @@ def test_exact_visual_limitation_then_confirmed_relation_recovers(tmp_path: Path
     assert result.evidence_memory.evidence[0].observation_ids == [
         result.observation_store.observations[0].observation_id
     ]
+
+
+def test_environment_expands_call_local_reader_aliases_to_stable_source_identity(
+    tmp_path: Path,
+) -> None:
+    relation = _relation(
+        "rel:related-chart",
+        "figure:1",
+        "figure:2",
+        RelationType.REFERS_TO,
+        RelationStatus.CONFIRMED,
+    )
+    document = _document(
+        tmp_path,
+        page_element_specs=[
+            [
+                {
+                    "element_id": "figure:1",
+                    "element_type": ElementType.FIGURE,
+                    "reference_label": "Figure 1",
+                    "visual": True,
+                },
+                {
+                    "element_id": "figure:2",
+                    "element_type": ElementType.CHART,
+                    "reference_label": "Figure 2",
+                    "visual": True,
+                },
+            ]
+        ],
+        relations=[relation],
+    )
+    result = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=QueueController(
+            [
+                {
+                    "action": "FOLLOW_RELATION",
+                    "relation_id": relation.relation_id,
+                    "local_problem": "Read the related source.",
+                }
+            ]
+        ),
+        reader=SourceIdentityReader(),
+        checker=PredicateChecker(lambda text: text.startswith("ANSWER:")),
+        answerer=EvidenceAnswerer(),
+    ).run(
+        root_question=RootQuestion(
+            question_id="root:stable-source",
+            text="What requested result is shown in Figure 1?",
+        )
+    )
+
+    observations = result.observation_store.observations
+    assert result.status == ReadingRunStatus.READY
+    assert [item.sources[0].input_id for item in observations] == ["I1", "I1"]
+    assert [item.sources[0].source_id for item in observations] == [
+        "figure:1",
+        "figure:2",
+    ]
+    assert [item.sources[0].element_id for item in observations] == [
+        "figure:1",
+        "figure:2",
+    ]
+    assert [item.sources[0].page_id for item in observations] == [
+        "page:1",
+        "page:1",
+    ]
+    assert all(item.sources[0].physical_page_number == 1 for item in observations)
 
 
 def test_ordinal_page_anchor_auto_reads_physical_page(tmp_path: Path) -> None:
@@ -1062,6 +1271,58 @@ def test_target_switch_rechecks_shared_evidence_without_an_extra_read(
     ]
     assert result.evidence_memory.evidence[0].supports_question_ids == ["Q1", "Q2"]
     assert controller.inputs[0].current_gap.question_id == "Q3"
+
+
+def test_target_switch_recalls_unaccepted_observation_without_rereading(
+    tmp_path: Path,
+) -> None:
+    document = _document(tmp_path, page_element_specs=[[]])
+    checker = ObservationRecallChecker()
+    result = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=RejectingController(),
+        reader=MultiFactPageReader(),
+        checker=checker,
+        answerer=EvidenceAnswerer(),
+    ).run(
+        root_question=RootQuestion(
+            question_id="root:gdp",
+            text="What were first- and second-quarter GDP growth?",
+        ),
+        questions=[
+            QuestionState(
+                question_id="Q1",
+                text="What was first-quarter GDP growth on Page 1?",
+            ),
+            QuestionState(
+                question_id="Q2",
+                text="What was second-quarter GDP growth?",
+            ),
+        ],
+    )
+
+    assert result.status == ReadingRunStatus.READY
+    assert len(result.action_trace.entries) == 1
+    assert all(
+        item.status == QuestionStatus.SATISFIED
+        for item in result.evidence_memory.questions
+    )
+    assert len(checker.inputs) == 4
+    evidence_recheck, recall_recheck = checker.inputs[1:3]
+    assert evidence_recheck.observations == []
+    assert evidence_recheck.recalled_observations == []
+    assert recall_recheck.observations == []
+    assert [
+        item.text for item in recall_recheck.recalled_observations
+    ] == ["The second-quarter GDP growth was 5.2%."]
+    assert result.evidence_memory.evidence[1].supports_question_ids == ["Q2"]
+    assert any(
+        item.code == "observation_recall_selected"
+        and item.metadata["observation_ids"]
+        == [recall_recheck.recalled_observations[0].observation_id]
+        for item in result.diagnostics
+    )
 
 
 def test_next_candidate_batch_remains_in_one_search_session(tmp_path: Path) -> None:

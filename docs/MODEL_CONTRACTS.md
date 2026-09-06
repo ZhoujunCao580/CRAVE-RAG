@@ -255,10 +255,11 @@ produce a self-contained Observation grounded in both inputs.
 ## 4. Evidence Checker
 
 The Checker normally receives the complete current Evidence Memory plus only
-the new Observations and limitations produced by one read action. After the
-last planned SubQuestion is satisfied, it may instead receive a state-only
-Root-finalization input with empty Observations and limitations. It returns a
-delta; the program applies that delta atomically.
+the new Observations and limitations produced by one read action. After a
+target switch, it may receive either an Evidence-only state recheck or a
+separate bounded Observation Recall input. After the last planned SubQuestion
+is satisfied, it may instead receive a state-only Root-finalization input. It
+returns a delta; the program applies that delta atomically.
 
 Input:
 
@@ -307,6 +308,7 @@ Input:
       ]
     }
   ],
+  "recalled_observations": [],
   "limitations": []
 }
 ```
@@ -335,7 +337,6 @@ Model output (`EvidenceCheckDecision`):
   },
   "reused_evidence_ids": [],
   "current_target_status": "satisfied",
-  "root_status": "incomplete",
   "remaining_gap_description": null
 }
 ```
@@ -363,6 +364,16 @@ items. The state-only recheck does not fabricate a Reader result, spend a
 Controller action, or change Evidence statements/provenance. If no old
 Evidence helps, the list is empty and the Checker's precise gap is exposed to
 the Controller.
+
+If that Evidence-only check leaves the target incomplete, the Environment may
+make one separate lightweight recall call. It selects at most three
+deduplicated historical Observations that are lexically relevant to the new
+question/gap, excludes claims already cited by accepted Evidence, and supplies
+them in `recalled_observations`. The full ObservationStore is never exposed to
+the Controller. Recalled claims retain their original Observation, action,
+source, element, and page identities. The Checker may create current-target
+Evidence from those claims, but recall cannot replace or remove accepted
+Evidence and consumes no Controller action or read.
 
 Completing all planned SubQuestions does not by itself guarantee that the Root
 is answerable. The program makes the Root the next current target, copies the
@@ -599,6 +610,8 @@ Planner
   -> Controller action
   -> Reader
   -> Evidence Checker
+  -> on a SubQuestion switch, Evidence-only recheck and then bounded
+     Observation Recall when relevant unaccepted history exists
   -> state-only Root finalization when the last SubQuestion completes
   -> Controller action (repeat while incomplete)
   -> Answerer (only when ready)

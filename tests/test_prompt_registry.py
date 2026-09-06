@@ -38,7 +38,7 @@ def test_registry_text_comes_from_central_versioned_prompt_assets() -> None:
         "visual_retrieval_v0_1.txt"
     ).removesuffix("\n")
     assert get_prompt("checker").canonical_text == load_prompt_text(
-        "checker_v2_2.txt"
+        "checker_v2_4.txt"
     ).removesuffix("\n")
     assert get_prompt("controller").canonical_text == load_prompt_text(
         "controller_policy_v0_11.txt"
@@ -73,7 +73,7 @@ def test_prompt_directory_contains_only_current_assets() -> None:
         "planner_v0_21.txt",
         "visual_retrieval_v0_1.txt",
         "visual_reader_v0_5.txt",
-        "checker_v2_2.txt",
+        "checker_v2_4.txt",
         "controller_policy_v0_11.txt",
         "answerer_v0_8.txt",
         "multimodal_table_reader_v0_2_system.txt",
@@ -86,13 +86,10 @@ def test_checker_prompt_explains_root_target_progression() -> None:
     prompt = get_prompt("checker").canonical_text
     normalized_prompt = " ".join(prompt.split())
 
-    assert (
-        "root_status remains incomplete if any registered SubQuestion is"
-        in normalized_prompt
-    )
+    assert "you do not output or predict root_status" in normalized_prompt
     assert "Once all SubQuestions are satisfied" in normalized_prompt
     assert "If there are no SubQuestions" in normalized_prompt
-    assert "The process completes only when root_status is ready." in normalized_prompt
+    assert "derives Root ready exactly when" in normalized_prompt
     assert "current_target_status answers:" not in prompt
     assert '"observation_assessments"' in prompt
     assert '"evidence_updates"' in prompt
@@ -109,7 +106,11 @@ def test_checker_prompt_explains_root_target_progression() -> None:
     assert "state-only target recheck" in normalized_prompt
     assert "supports_question_ids must contain exactly the current_target" in normalized_prompt
     assert "List in reused_evidence_ids only the existing Evidence" in normalized_prompt
+    assert "lightweight Observation Recall invocation" in normalized_prompt
+    assert "recalled_observations" in normalized_prompt
     assert "Never change the status of a non-current question" in normalized_prompt
+    assert "input_id values such as I1 are local to one read call" in normalized_prompt
+    assert "stable source_id, element_id, and page_id" in normalized_prompt
 
 
 def test_controller_prompt_explains_missing_table_header_recovery() -> None:

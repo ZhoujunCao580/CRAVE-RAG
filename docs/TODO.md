@@ -95,19 +95,24 @@ experiments. Implemented contracts and workflows belong in
   Observation contains both a reliable local fact and a claim that the current
   source cannot establish causality, test whether to promote the reliable
   sub-fact while keeping the causal insufficiency in the limitation/current
-  gap. Observation Recall is absent in v0, so useful facts can otherwise be
-  lost silently.
-- [ ] Evaluate Observation Recall when later targets could reuse a previously
-  rejected Observation. Compare rereading with recalling from ObservationStore
-  and resubmitting to the Checker; implement Recall only if it reduces cost
-  without increasing errors.
+  gap. Bounded target-switch Observation Recall now covers relevant historical
+  claims that were preserved but not admitted into Evidence; source rereading
+  remains a separate deferred problem when the earlier Reader never extracted
+  the later target's fact.
+- [x] Add bounded target-switch Observation Recall for historical claims that
+  never entered Evidence. The Environment selects at most three deduplicated
+  lexical matches, presents them only to the Checker, and records no fake read
+  or Controller action. Server evaluation must still measure false reuse and
+  cost before enabling a broader semantic or source-recall policy.
 - [x] Keep normal read-time Evidence scoped to the current target. On every
   later SubQuestion switch with accepted Evidence available, run a state-only
   Checker recheck; explicitly record any reused Evidence IDs for the new target
   without a fake read or Controller action.
-- [ ] Evaluate lightweight Observation Recall only for useful prior
-  Observations that never entered Evidence. Do not expose the complete
-  ObservationStore to the Controller.
+- [x] Keep lightweight Observation Recall limited to useful prior Observations
+  that never entered Evidence. Do not expose the complete ObservationStore to
+  the Controller. Source Recall remains deferred until real failures show that
+  a target-specific Reader omitted a later target's fact from the old
+  Observation.
 
 ## 7. Controller policy and training
 

@@ -162,7 +162,6 @@ def test_checker_decision_derives_used_for_evidence_from_final_delta() -> None:
             ]
         ),
         current_target_status=QuestionStatus.SATISFIED,
-        root_status=EvidenceStatus.READY,
         remaining_gap_description=None,
     )
 
@@ -197,12 +196,95 @@ def test_checker_decision_rejects_bad_delta_before_deriving_provenance() -> None
             ]
         ),
         current_target_status=QuestionStatus.INCOMPLETE,
-        root_status=EvidenceStatus.INCOMPLETE,
         remaining_gap_description="A grounded value is still missing.",
     )
 
     with pytest.raises(ValueError, match="unavailable Observations"):
         materialize_evidence_check_decision(checker_input, decision)
+
+
+def test_checker_decision_root_status_is_environment_derived() -> None:
+    subquestion_result = materialize_evidence_check_decision(
+        _checker_input(),
+        EvidenceCheckDecision(
+            action_id="action:read",
+            observation_assessments=[
+                CheckerObservationAssessment(
+                    observation_id="obs:1",
+                    assessment="The current SubQuestion is resolved.",
+                )
+            ],
+            evidence_updates=EvidenceUpdates(
+                add=[
+                    EvidenceAddition(
+                        statement="Revenue in 2023 was 12 million.",
+                        observation_ids=["obs:1"],
+                        supports_question_ids=["Q2"],
+                    )
+                ]
+            ),
+            current_target_status=QuestionStatus.SATISFIED,
+            remaining_gap_description=None,
+        ),
+    )
+    assert subquestion_result.root_status == EvidenceStatus.INCOMPLETE
+
+    root_memory = EvidenceMemory(
+        reading_session_id="reading:root",
+        root_question_id="root:only",
+        current_target=CurrentTarget(
+            question_id="root:only",
+            gap_description="What was revenue?",
+        ),
+    )
+    root_input = EvidenceCheckInput(
+        action_id="action:root",
+        root_question=RootQuestion(
+            question_id="root:only", text="What was revenue?"
+        ),
+        evidence_memory=root_memory,
+        observations=[
+            StoredObservation(
+                observation_id="obs:root",
+                action_id="action:root",
+                text="Revenue was 12 million.",
+                sources=[ObservationSourceRef(input_id="I1")],
+            )
+        ],
+    )
+    root_result = materialize_evidence_check_decision(
+        root_input,
+        EvidenceCheckDecision(
+            action_id="action:root",
+            observation_assessments=[
+                CheckerObservationAssessment(
+                    observation_id="obs:root", assessment="Direct support."
+                )
+            ],
+            evidence_updates=EvidenceUpdates(
+                add=[
+                    EvidenceAddition(
+                        statement="Revenue was 12 million.",
+                        observation_ids=["obs:root"],
+                        supports_question_ids=["root:only"],
+                    )
+                ]
+            ),
+            current_target_status=QuestionStatus.SATISFIED,
+            remaining_gap_description=None,
+        ),
+    )
+    assert root_result.root_status == EvidenceStatus.READY
+
+    with pytest.raises(ValidationError, match="root_status"):
+        EvidenceCheckDecision.model_validate(
+            {
+                "action_id": "action:root",
+                "current_target_status": "satisfied",
+                "root_status": "incomplete",
+                "remaining_gap_description": None,
+            }
+        )
 
 
 def test_limitation_and_observation_must_reference_same_action_input():
@@ -443,6 +525,71 @@ def test_state_only_target_recheck_records_reused_evidence_and_cannot_rewrite_it
     )
     with pytest.raises(ValueError, match="cannot add, replace, or remove"):
         apply_evidence_check_result(checker_input, mutating)
+
+
+def test_observation_recall_can_add_current_target_evidence_from_old_action():
+    recalled = _observation(
+        observation_id_value="obs:recalled",
+        action_id_value="action:old-read",
+        text="Revenue in 2023 was 12 million.",
+    )
+    checker_input = EvidenceCheckInput(
+        action_id="action:observation-recall:Q2",
+        root_question=RootQuestion(
+            question_id="root:1", text="How did revenue change from 2022 to 2023?"
+        ),
+        evidence_memory=_memory(),
+        observations=[],
+        recalled_observations=[recalled],
+        limitations=[],
+    )
+    result = EvidenceCheckResult(
+        action_id=checker_input.action_id,
+        observation_assessments=[
+            ObservationAssessment(
+                observation_id=recalled.observation_id,
+                used_for_evidence=True,
+                assessment="The recalled claim resolves Q2.",
+            )
+        ],
+        evidence_updates=EvidenceUpdates(
+            add=[
+                EvidenceAddition(
+                    statement=recalled.text,
+                    observation_ids=[recalled.observation_id],
+                    supports_question_ids=["Q2"],
+                )
+            ]
+        ),
+        current_target_status=QuestionStatus.SATISFIED,
+        root_status=EvidenceStatus.INCOMPLETE,
+        remaining_gap_description=None,
+    )
+
+    updated = apply_evidence_check_result(checker_input, result)
+    assert updated.evidence[-1].observation_ids == ["obs:recalled"]
+    assert updated.evidence[-1].supports_question_ids == ["Q2"]
+    assert updated.current_target == CurrentTarget(
+        question_id="root:1",
+        gap_description="How did revenue change from 2022 to 2023?",
+    )
+
+    replacing = result.model_copy(
+        update={
+            "evidence_updates": EvidenceUpdates(
+                replace=[
+                    EvidenceReplacement(
+                        evidence_id="evidence:old",
+                        statement="Changed old Evidence.",
+                        observation_ids=["obs:recalled"],
+                        supports_question_ids=["Q2"],
+                    )
+                ]
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="cannot replace or remove"):
+        apply_evidence_check_result(checker_input, replacing)
 
 
 def test_program_not_checker_selects_next_dependency_ready_question():

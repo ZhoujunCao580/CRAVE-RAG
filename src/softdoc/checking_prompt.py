@@ -5,7 +5,7 @@ from __future__ import annotations
 from softdoc.prompts import load_prompt_text
 
 
-CHECKER_PROMPT_VERSION = "checker-v2.2"
+CHECKER_PROMPT_VERSION = "checker-v2.4"
 
 
-CHECKER_SYSTEM_PROMPT = load_prompt_text("checker_v2_2.txt").removesuffix("\n")
+CHECKER_SYSTEM_PROMPT = load_prompt_text("checker_v2_4.txt").removesuffix("\n")
