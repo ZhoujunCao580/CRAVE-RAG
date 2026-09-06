@@ -37,6 +37,3 @@ Prompt files contain stable instructions and, where applicable, stable user
 message templates. Dynamic request data and Pydantic input/output schemas
 remain in their owning modules and must not be expanded as an incidental
 prompt edit.
-
-The frozen Multimodal Table Reader v0.1 pair is temporarily retained beside
-v0.2 until v0.1 is committed and recoverable from Git history.

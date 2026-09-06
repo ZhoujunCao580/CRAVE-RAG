@@ -66,7 +66,7 @@ def test_all_canonical_prompts_use_markdown_sections() -> None:
         assert "# Output" in prompt
 
 
-def test_prompt_directory_contains_current_assets_and_retained_table_v0_1() -> None:
+def test_prompt_directory_contains_only_current_assets() -> None:
     current = {path.name for path in PROMPT_DIRECTORY.glob("*.txt")}
 
     assert current == {
@@ -76,8 +76,6 @@ def test_prompt_directory_contains_current_assets_and_retained_table_v0_1() -> N
         "checker_v2_2.txt",
         "controller_policy_v0_11.txt",
         "answerer_v0_8.txt",
-        "multimodal_table_reader_v0_1_system.txt",
-        "multimodal_table_reader_v0_1_user.txt",
         "multimodal_table_reader_v0_2_system.txt",
         "multimodal_table_reader_v0_2_user.txt",
     }
