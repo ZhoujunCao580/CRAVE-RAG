@@ -26,7 +26,9 @@ def _request() -> VisualReadRequest:
                 input_id="I1",
                 visual_asset_id="visual:page:1",
                 page_id="page:1",
-                page_number=1,
+                physical_page_number=1,
+                document_page_count=1,
+                is_last_page=True,
                 page_image_path="assets/pages/page_0001.png",
             )
         ],
@@ -112,7 +114,10 @@ def test_limitation_is_free_text_grounded_to_inputs_without_code_taxonomy():
 def test_visual_reader_prompt_forbids_answer_and_global_ids():
     prompt = visual_reader_user_prompt(_request())
 
-    assert VISUAL_READER_PROMPT_VERSION == "visual-reader-v0.4"
+    assert VISUAL_READER_PROMPT_VERSION == "visual-reader-v0.5"
+    assert '"physical_page_number": 1' in prompt
+    assert '"document_page_count": 1' in prompt
+    assert '"is_last_page": true' in prompt
     assert '"observations"' in prompt
     assert "Do not\nadd an answer or conclusion field" in prompt
     assert '"action_id"' not in prompt.split("return exactly this JSON shape:", 1)[1]
@@ -130,7 +135,9 @@ def test_visual_reader_prompt_shows_joint_shape_for_multiple_images():
                     input_id="I2",
                     visual_asset_id="visual:page:2",
                     page_id="page:2",
-                    page_number=2,
+                    physical_page_number=2,
+                    document_page_count=2,
+                    is_last_page=True,
                     page_image_path="assets/pages/page_0002.png",
                 ),
             ]

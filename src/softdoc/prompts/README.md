@@ -8,10 +8,11 @@ data can bind to an immutable revision.
 | --- | --- | --- |
 | Planner | `planner-v0.21` | `planner_v0_21.txt` |
 | Visual Retrieval | `visual-retrieval-v0.1` | `visual_retrieval_v0_1.txt` |
-| Visual Reader | `visual-reader-v0.4` | `visual_reader_v0_4.txt` |
-| Evidence Checker | `checker-v2.1` | `checker_v2_1.txt` |
-| Reading Controller | `controller-policy-v0.10` | `controller_policy_v0_10.txt` |
+| Visual Reader | `visual-reader-v0.5` | `visual_reader_v0_5.txt` |
+| Evidence Checker | `checker-v2.2` | `checker_v2_2.txt` |
+| Reading Controller | `controller-policy-v0.11` | `controller_policy_v0_11.txt` |
 | Answerer | `answerer-v0.8` | `answerer_v0_8.txt` |
+| Multimodal Table Reader | `multimodal-table-reader-v0.2` | `multimodal_table_reader_v0_2_system.txt`, `multimodal_table_reader_v0_2_user.txt` |
 
 The Python modules that define prompt versions and render dynamic user input
 remain stable compatibility APIs. `softdoc.prompt_registry` is the unified
@@ -32,5 +33,10 @@ When changing prompt semantics:
 5. regenerate the prompt manifest and record evaluation results;
 6. never patch a frozen prompt for only one dataset example.
 
-Prompt files contain instructions only. Pydantic input/output schemas remain
-in their owning modules and must not be expanded as an incidental prompt edit.
+Prompt files contain stable instructions and, where applicable, stable user
+message templates. Dynamic request data and Pydantic input/output schemas
+remain in their owning modules and must not be expanded as an incidental
+prompt edit.
+
+The frozen Multimodal Table Reader v0.1 pair is temporarily retained beside
+v0.2 until v0.1 is committed and recoverable from Git history.

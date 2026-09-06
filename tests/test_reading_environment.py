@@ -188,6 +188,67 @@ class StateOnlyRootFinalizingChecker:
         )
 
 
+class MultiTargetRecheckingChecker:
+    """Store Q1 Evidence, then formally reuse it only after switching to Q2."""
+
+    def __init__(self) -> None:
+        self.inputs: list[EvidenceCheckInput] = []
+
+    def check(self, checker_input: EvidenceCheckInput) -> EvidenceCheckResult:
+        self.inputs.append(checker_input)
+        target = checker_input.evidence_memory.current_target
+        assert target is not None
+        if checker_input.observations:
+            observation = checker_input.observations[0]
+            assert target.question_id == "Q1"
+            return EvidenceCheckResult(
+                action_id=checker_input.action_id,
+                observation_assessments=[
+                    ObservationAssessment(
+                        observation_id=observation.observation_id,
+                        used_for_evidence=True,
+                        assessment="The segment shares resolve Q1.",
+                    )
+                ],
+                evidence_updates=EvidenceUpdates(
+                    add=[
+                        EvidenceAddition(
+                            statement=(
+                                "The segment shares are 63%, 23%, and 14%; "
+                                "Hospitality is the second largest."
+                            ),
+                            observation_ids=[observation.observation_id],
+                            supports_question_ids=["Q1"],
+                        )
+                    ]
+                ),
+                current_target_status=QuestionStatus.SATISFIED,
+                root_status=EvidenceStatus.INCOMPLETE,
+                remaining_gap_description=None,
+            )
+
+        if target.question_id == "Q3":
+            return EvidenceCheckResult(
+                action_id=checker_input.action_id,
+                observation_assessments=[],
+                evidence_updates=EvidenceUpdates(),
+                reused_evidence_ids=[],
+                current_target_status=QuestionStatus.INCOMPLETE,
+                root_status=EvidenceStatus.INCOMPLETE,
+                remaining_gap_description=target.gap_description,
+            )
+        assert target.question_id == "Q2"
+        return EvidenceCheckResult(
+            action_id=checker_input.action_id,
+            observation_assessments=[],
+            evidence_updates=EvidenceUpdates(),
+            reused_evidence_ids=[checker_input.evidence_memory.evidence[0].evidence_id],
+            current_target_status=QuestionStatus.SATISFIED,
+            root_status=EvidenceStatus.INCOMPLETE,
+            remaining_gap_description=None,
+        )
+
+
 class EvidenceAnswerer:
     def answer(self, answer_input: AnswerInput) -> AnswerResult:
         return AnswerResult(
@@ -845,7 +906,9 @@ def test_program_advances_two_exact_subquestions_and_answerer_combines(
     )
     assert [
         item.evidence_memory.current_target.question_id for item in checker.inputs
-    ] == ["Q1", "Q2"]
+    ] == ["Q1", "Q2", "Q2"]
+    assert checker.inputs[1].observations == []
+    assert checker.inputs[2].observations
     assert len(result.answer.used_evidence_ids) == 2
     assert "10 million" in result.answer.answer
     assert "12 million" in result.answer.answer
@@ -933,6 +996,72 @@ def test_incomplete_root_finalization_replaces_root_question_with_specific_gap(
     assert result.evidence_memory.current_target.gap_description == (
         "The reason for the revenue change is still missing."
     )
+
+
+def test_target_switch_rechecks_shared_evidence_without_an_extra_read(
+    tmp_path: Path,
+) -> None:
+    document = _document(tmp_path, page_element_specs=[[]])
+    checker = MultiTargetRecheckingChecker()
+    controller = QueueController(
+        [
+            {
+                "action": "STOP",
+                "reason": "Q3 has no accepted Evidence yet.",
+            }
+        ]
+    )
+    result = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=controller,
+        reader=PageTeacherReader(
+            {"page:1": "ANSWER: segment shares are 63%, 23%, and 14%."}
+        ),
+        checker=checker,
+        answerer=EvidenceAnswerer(),
+    ).run(
+        root_question=RootQuestion(
+            question_id="root:segments",
+            text="Which segment is second largest, and what percentage did it report?",
+        ),
+        questions=[
+            QuestionState(
+                question_id="Q1",
+                text="What are the demographic segment shares on Page 1?",
+            ),
+            QuestionState(
+                question_id="Q2",
+                text="Which demographic segment is second largest?",
+            ),
+            QuestionState(
+                question_id="Q3",
+                text="What percentage did that segment report?",
+                depends_on=["Q2"],
+            ),
+        ],
+    )
+
+    assert result.status == ReadingRunStatus.STOPPED_INCOMPLETE
+    assert len(result.action_trace.entries) == 2
+    assert result.action_trace.entries[0].action_name == "READ_SOURCE"
+    assert result.action_trace.entries[1].action_name == "STOP"
+    assert len(checker.inputs) == 3
+    assert checker.inputs[1].observations == []
+    assert checker.inputs[1].limitations == []
+    assert checker.inputs[1].evidence_memory.current_target is not None
+    assert checker.inputs[1].evidence_memory.current_target.question_id == "Q2"
+    assert checker.inputs[2].observations == []
+    assert checker.inputs[2].limitations == []
+    assert checker.inputs[2].evidence_memory.current_target is not None
+    assert checker.inputs[2].evidence_memory.current_target.question_id == "Q3"
+    assert [item.status for item in result.evidence_memory.questions] == [
+        QuestionStatus.SATISFIED,
+        QuestionStatus.SATISFIED,
+        QuestionStatus.INCOMPLETE,
+    ]
+    assert result.evidence_memory.evidence[0].supports_question_ids == ["Q1", "Q2"]
+    assert controller.inputs[0].current_gap.question_id == "Q3"
 
 
 def test_next_candidate_batch_remains_in_one_search_session(tmp_path: Path) -> None:

@@ -23,7 +23,7 @@ from softdoc.answering import (
     answerer_user_prompt,
 )
 from softdoc.checking_prompt import CHECKER_SYSTEM_PROMPT
-from softdoc.models import SoftDocModel
+from softdoc.models import ElementType, SoftDocModel
 from softdoc.reading_environment import (
     DeterministicContentReader,
     ReaderContext,
@@ -39,6 +39,17 @@ from softdoc.reading_state import (
     ReaderKind,
     ReadRepresentation,
     materialize_evidence_check_decision,
+)
+from softdoc.table_reading import (
+    MULTIMODAL_TABLE_READER_SYSTEM_PROMPT,
+    TableHeaderStatus,
+    TableReadCell,
+    TableReadInput,
+    TableReadRequest,
+    TableReadResult,
+    select_relevant_row_hints,
+    table_reader_user_prompt,
+    validate_table_read_result,
 )
 from softdoc.visual_reading import (
     VISUAL_READER_SYSTEM_PROMPT,
@@ -337,7 +348,9 @@ class OllamaVisualReaderBackend:
                     input_id=item.input_id,
                     visual_asset_id=item.visual_asset_id,
                     page_id=item.page_id,
-                    page_number=page.page_number,
+                    physical_page_number=page.page_number,
+                    document_page_count=len(context.document.pages),
+                    is_last_page=(page.page_id == context.document.pages[-1].page_id),
                     display_page_label=page.display_page_label,
                     page_image_path=item.visual_asset_path,
                     element_id=item.element_id,
@@ -395,6 +408,179 @@ class OllamaVisualReaderBackend:
         )
 
 
+class MultimodalTableReaderBackend:
+    """Read selected Tables from structured cells plus optional table pixels."""
+
+    _TABLE_REPRESENTATIONS = {
+        ReadRepresentation.ELEMENT_TEXT,
+        ReadRepresentation.TABLE_VIEW,
+        ReadRepresentation.ELEMENT_VISUAL,
+    }
+
+    def __init__(self, client: OllamaStructuredClient) -> None:
+        self.client = client
+
+    def read(self, context: ReaderContext) -> ReaderOutput:
+        if not context.inputs:
+            raise ValueError("MultimodalTableReaderBackend requires table inputs")
+
+        # Imported lazily to avoid a module cycle through ReadingEnvironment's
+        # retrieval package imports.
+        from softdoc.retrieval.units import table_header_context
+
+        resolved_headers = table_header_context(context.document)
+        table_inputs: list[TableReadInput] = []
+        image_paths: list[Path] = []
+        for item in context.inputs:
+            element = context.elements_by_id.get(item.element_id or "")
+            if (
+                element is None
+                or element.element_type != ElementType.TABLE
+                or item.representation not in self._TABLE_REPRESENTATIONS
+            ):
+                raise ValueError(
+                    "MultimodalTableReaderBackend accepts Table inputs only"
+                )
+
+            page = context.pages_by_id[item.page_id]
+            header_context = resolved_headers.get(element.element_id)
+            cells: list[TableReadCell] = []
+            row_count: int | None = None
+            column_count: int | None = None
+            if item.representation == ReadRepresentation.TABLE_VIEW:
+                view = context.table_views_by_id[item.table_view_id or ""]
+                row_count = view.row_count
+                column_count = view.column_count
+                cells = [
+                    TableReadCell(
+                        cell_id=cell.cell_id,
+                        row=cell.row,
+                        column=cell.column,
+                        rowspan=cell.rowspan,
+                        colspan=cell.colspan,
+                        text=cell.text,
+                    )
+                    for cell in view.cells
+                    if cell.text is not None
+                ]
+
+            if item.visual_asset_path is not None:
+                assert item.visual_asset_id is not None
+                image_paths.append(item.visual_asset_path)
+
+            table_inputs.append(
+                TableReadInput(
+                    input_id=item.input_id,
+                    element_id=element.element_id,
+                    page_id=item.page_id,
+                    physical_page_number=page.page_number,
+                    document_page_count=len(context.document.pages),
+                    is_last_page=(page.page_id == context.document.pages[-1].page_id),
+                    display_page_label=page.display_page_label,
+                    row_count=row_count,
+                    column_count=column_count,
+                    structured_cells=cells,
+                    extracted_text=(
+                        (element.text or "").strip() or None
+                        if not cells
+                        else None
+                    ),
+                    visual_asset_id=item.visual_asset_id,
+                    visual_asset_path=item.visual_asset_path,
+                    headers=(
+                        list(header_context.headers) if header_context else []
+                    ),
+                    header_status=(
+                        TableHeaderStatus.CONFIRMED_INHERITED
+                        if header_context
+                        and header_context.headers
+                        and header_context.is_continuation
+                        and not header_context.header_is_inferred
+                        and header_context.header_source_element_id
+                        != element.element_id
+                        else TableHeaderStatus.INFERRED_INHERITED
+                        if header_context
+                        and header_context.headers
+                        and header_context.is_continuation
+                        and header_context.header_source_element_id
+                        != element.element_id
+                        else TableHeaderStatus.LOCAL
+                        if header_context
+                        and header_context.headers
+                        and not header_context.header_is_inferred
+                        else TableHeaderStatus.INFERRED_LOCAL
+                        if header_context and header_context.headers
+                        else TableHeaderStatus.NOT_AVAILABLE_IN_STRUCTURE
+                        if not cells and not (element.html or "").strip()
+                        else TableHeaderStatus.UNRESOLVED
+                    ),
+                    header_source_element_id=(
+                        header_context.header_source_element_id
+                        if header_context
+                        else None
+                    ),
+                    table_group_id=(
+                        header_context.group_id if header_context else None
+                    ),
+                    fragment_index=(
+                        header_context.fragment_index if header_context else None
+                    ),
+                    fragment_count=(
+                        header_context.fragment_count if header_context else None
+                    ),
+                    relevant_row_hints=select_relevant_row_hints(
+                        cells, context.local_problem
+                    ),
+                )
+            )
+
+        table_request = TableReadRequest(
+            action_id=context.action_id,
+            subquestion_id=context.question_id,
+            document_id=context.document.document_id,
+            source_name=(
+                context.document.title or context.document.source_path.name
+            ),
+            problem=context.local_problem,
+            table_inputs=table_inputs,
+        )
+        result = self.client.generate(
+            component="multimodal_table_reader",
+            system_prompt=MULTIMODAL_TABLE_READER_SYSTEM_PROMPT,
+            user_prompt=table_reader_user_prompt(table_request),
+            output_model=TableReadResult,
+            image_paths=image_paths,
+        )
+        validate_table_read_result(table_request, result)
+        return ReaderOutput(
+            reader_kind=ReaderKind.TABLE,
+            observations=[
+                ReaderObservationDraft(
+                    text=observation.text,
+                    sources=[
+                        ObservationSourceRef(
+                            input_id=source.input_id,
+                            cell_id=source.cell_id,
+                        )
+                        for source in observation.sources
+                    ],
+                )
+                for observation in result.observations
+            ],
+            limitations=[
+                ObservationLimitation(
+                    code=limitation.code.value,
+                    description=limitation.description,
+                    input_ids=limitation.input_ids,
+                    relevant_visible_content=(
+                        limitation.relevant_visible_content
+                    ),
+                )
+                for limitation in result.limitations
+            ],
+        )
+
+
 class ModelBackedReader:
     """Use deterministic structured reading and a VLM only for pixel inputs."""
 
@@ -404,20 +590,35 @@ class ModelBackedReader:
         self,
         visual_reader: OllamaVisualReaderBackend,
         deterministic_reader: DeterministicContentReader | None = None,
+        table_reader: MultimodalTableReaderBackend | None = None,
     ) -> None:
         self.visual_reader = visual_reader
         self.deterministic_reader = deterministic_reader or DeterministicContentReader()
+        self.table_reader = table_reader
 
     def read(self, context: ReaderContext) -> ReaderOutput:
+        table_model_inputs = tuple(
+            item
+            for item in context.inputs
+            if self.table_reader is not None
+            and context.elements_by_id.get(item.element_id or "") is not None
+            and context.elements_by_id[item.element_id or ""].element_type
+            == ElementType.TABLE
+            and item.representation
+            in MultimodalTableReaderBackend._TABLE_REPRESENTATIONS
+        )
+        table_input_ids = {item.input_id for item in table_model_inputs}
         visual_inputs = tuple(
             item
             for item in context.inputs
             if item.representation in self._VISUAL_REPRESENTATIONS
+            and item.input_id not in table_input_ids
         )
         structured_inputs = tuple(
             item
             for item in context.inputs
             if item.representation not in self._VISUAL_REPRESENTATIONS
+            and item.input_id not in table_input_ids
         )
         outputs: list[ReaderOutput] = []
         if structured_inputs:
@@ -429,6 +630,22 @@ class ModelBackedReader:
                         local_problem=context.local_problem,
                         document=context.document,
                         inputs=structured_inputs,
+                        elements_by_id=context.elements_by_id,
+                        pages_by_id=context.pages_by_id,
+                        table_views_by_id=context.table_views_by_id,
+                    )
+                )
+            )
+        if table_model_inputs:
+            assert self.table_reader is not None
+            outputs.append(
+                self.table_reader.read(
+                    ReaderContext(
+                        action_id=context.action_id,
+                        question_id=context.question_id,
+                        local_problem=context.local_problem,
+                        document=context.document,
+                        inputs=table_model_inputs,
                         elements_by_id=context.elements_by_id,
                         pages_by_id=context.pages_by_id,
                         table_views_by_id=context.table_views_by_id,
@@ -454,8 +671,13 @@ class ModelBackedReader:
             raise ValueError("ReaderContext contains no inputs")
         if len(outputs) == 1:
             return outputs[0]
+        reader_kinds = {output.reader_kind for output in outputs}
         return ReaderOutput(
-            reader_kind=ReaderKind.VISUAL,
+            reader_kind=(
+                next(iter(reader_kinds))
+                if len(reader_kinds) == 1
+                else ReaderKind.VISUAL
+            ),
             observations=[item for output in outputs for item in output.observations],
             limitations=[item for output in outputs for item in output.limitations],
         )

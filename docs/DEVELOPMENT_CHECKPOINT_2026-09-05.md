@@ -10,13 +10,13 @@ information.
 ## Frozen model contracts
 
 - Planner: `planner-v0.21`
-- Controller: `controller-policy-v0.10`
+- Controller: `controller-policy-v0.11`
 - Controller input/action: `controller-input-v0.4` / `controller-action-v0.3`
-- Checker: `checker-v2.1`
+- Checker: `checker-v2.2`
 - Answerer: `answerer-v0.8`
 - Reading environment: `reading-environment-v0.4`
 - Visual retrieval descriptor: `visual-retrieval-v0.1`
-- Visual reader: `visual-reader-v0.4`
+- Visual reader: `visual-reader-v0.5`
 
 Superseded canonical prompt files are removed instead of retained as an in-repo
 prompt archive.
@@ -56,6 +56,14 @@ are hidden from model-visible navigation. The new
 adjacent physical page; offset zero can supply both the whole-page image and the
 most recently opened element crop on that page.
 
+### Visual Reader physical-page grounding
+
+Every visual input now carries canonical `physical_page_number`,
+`document_page_count`, and `is_last_page` metadata from the Environment. The
+Reader treats these as authoritative even when a printed page label inside the
+image differs from physical PDF order. This lets a visual fact be grounded to
+the actual final page without asking the model to infer document boundaries.
+
 ### Checker provenance
 
 The model-facing `EvidenceCheckDecision` no longer asks the model to duplicate
@@ -71,6 +79,16 @@ Root, copies the original Root question as the initial gap, and immediately
 asks the Checker to judge the complete accepted Evidence without fabricating a
 read or consuming a Controller action. A ready result proceeds to the Answerer;
 an incomplete result supplies the next specific Root gap.
+
+### Target-scoped Evidence and target-switch rechecking
+
+During a normal read, the Checker evaluates and labels Evidence only for the
+current target. When the program selects a later SubQuestion and earlier
+Evidence exists, it asks the same Checker to judge that new target from the
+complete accepted Evidence without fabricating a read or spending a Controller
+action. The Checker returns `reused_evidence_ids`; the runtime records the new
+support association while preserving Evidence statements and provenance.
+State-only Checker calls cannot add, replace, or remove Evidence.
 
 ### Deterministic incomplete output and resume
 
@@ -90,7 +108,8 @@ Answerer result. Any substantive answer still requires Evidence IDs.
 
 - Planner, Controller, Checker, and Answerer schemas and manifests are updated
   to their current contracts.
-- Checker includes a state-only Root-finalization evaluation case.
+- Checker includes separate state-only Root-finalization and target-switch
+  recheck evaluation cases, plus a read-time cross-target rejection boundary.
 - Stored runtime feedback keeps the materialized provenance field, while
   Checker SFT targets omit it.
 - Backward-readable defaults are retained where persisted Controller input
@@ -101,7 +120,7 @@ Answerer result. Any substantive answer still requires Evidence IDs.
 The complete CPU test suite passed before this checkpoint was committed:
 
 ```text
-454 passed
+478 passed
 ```
 
 Server-side model behavior is not claimed by this checkpoint. The next server
@@ -112,10 +131,9 @@ fallback replacement.
 
 ## Deliberately pending
 
-- multi-target Evidence semantics;
-- lightweight Observation recall and target-switch rechecking;
-- table-level unit propagation into Reader observations;
-- deterministic first/last-page metadata in Reader input;
+- lightweight Observation recall;
+- server-side semantic evaluation of the optional Multimodal Table Reader,
+  including table-level unit retention and conservative cross-page recovery;
 - document/range inventory and coverage-complete counting;
 - controlled recovery from Checker truncation or other invalid structured
   output.

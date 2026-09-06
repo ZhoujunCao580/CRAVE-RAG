@@ -55,6 +55,8 @@ class Expected:
     gap_forbidden_terms: tuple[str, ...] = ()
     evidence_required_terms: tuple[str, ...] = ()
     evidence_forbidden_terms: tuple[str, ...] = ()
+    support_sets: tuple[tuple[str, ...], ...] = ()
+    reused_evidence_ids: tuple[str, ...] = ()
     next_target: str | None = None
 
 
@@ -346,7 +348,7 @@ def build_cases() -> list[Case]:
     add(Case(
         cid,
         "cross_target_observation",
-        "One Observation contains facts for Q1 and Q2, but this turn may update only Q1.",
+        "One Observation contains facts for Q1 and Q2, but this read may store support only for Q1.",
         make_input(
             cid,
             "Which of Method A and Method B achieved higher accuracy?",
@@ -363,6 +365,7 @@ def build_cases() -> list[Case]:
             gap_required=False,
             evidence_required_terms=("Method A", "72"),
             evidence_forbidden_terms=("Method B", "79"),
+            support_sets=(("Q1",),),
             next_target="Q2",
         ),
     ))
@@ -570,6 +573,47 @@ def build_cases() -> list[Case]:
         ),
     ))
 
+    cid = "C28"
+    root = f"root:{cid}"
+    q1 = QuestionState(
+        question_id="Q1",
+        text="What accuracy did Method A achieve?",
+        status="satisfied",
+    )
+    q2 = QuestionState(
+        question_id="Q2",
+        text="What accuracy did Method B achieve?",
+    )
+    shared = EvidenceItem(
+        evidence_id=f"evidence:{cid}:00",
+        statement="Method A achieved 72% accuracy and Method B achieved 79% accuracy.",
+        observation_ids=[f"obs:prior:{cid}:00"],
+        supports_question_ids=["Q1"],
+    )
+    add(Case(
+        cid,
+        "state_only_target_recheck",
+        "After switching from Q1 to Q2, accepted shared Evidence alone resolves Q2 without a fake read.",
+        make_input(
+            cid,
+            "Which method achieved higher accuracy?",
+            target_id="Q2",
+            gap="What accuracy did Method B achieve?",
+            questions=[q1, q2],
+            existing=[shared],
+            observations=[],
+        ),
+        Expected(
+            {},
+            0,
+            target_status="satisfied",
+            root_status="incomplete",
+            gap_required=False,
+            reused_evidence_ids=(f"evidence:{cid}:00",),
+            next_target=root,
+        ),
+    ))
+
     return cases
 
 
@@ -632,6 +676,8 @@ def evaluate_result(
         "current_target_status": result.current_target_status.value == expected.target_status,
         "root_status": result.root_status.value == expected.root_status,
         "gap_presence": (result.remaining_gap_description is not None) == expected.gap_required,
+        "reused_evidence_ids": tuple(result.reused_evidence_ids)
+        == expected.reused_evidence_ids,
     }
     if expected.gap_terms:
         gap_words = normalized_words(result.remaining_gap_description)
@@ -663,6 +709,16 @@ def evaluate_result(
     checks["evidence_content_excludes_cross_target_facts"] = not any(
         set(term.lower().split()).issubset(update_words)
         for term in expected.evidence_forbidden_terms
+    )
+    actual_support_sets = tuple(
+        tuple(item.supports_question_ids)
+        for item in [
+            *result.evidence_updates.add,
+            *result.evidence_updates.replace,
+        ]
+    )
+    checks["evidence_support_sets"] = (
+        not expected.support_sets or actual_support_sets == expected.support_sets
     )
 
     updated: EvidenceMemory | None = None
@@ -785,6 +841,8 @@ def run_pass(
                     "gap_forbidden_terms": list(case.expected.gap_forbidden_terms),
                     "evidence_required_terms": list(case.expected.evidence_required_terms),
                     "evidence_forbidden_terms": list(case.expected.evidence_forbidden_terms),
+                    "support_sets": [list(item) for item in case.expected.support_sets],
+                    "reused_evidence_ids": list(case.expected.reused_evidence_ids),
                     "next_target": case.expected.next_target,
                 },
                 "valid_output": True,

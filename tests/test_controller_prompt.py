@@ -15,7 +15,7 @@ from softdoc.reading_state import EvidenceStatus, RootQuestion
 
 
 def test_controller_prompt_is_frozen_to_current_action_contract() -> None:
-    assert CONTROLLER_PROMPT_VERSION == "controller-policy-v0.10"
+    assert CONTROLLER_PROMPT_VERSION == "controller-policy-v0.11"
     assert "Treat ControllerInput as read-only" in CONTROLLER_SYSTEM_PROMPT
     assert "using only IDs supplied\nin ControllerInput" in CONTROLLER_SYSTEM_PROMPT
     assert "Return only the action JSON matching the provided Schema" in (

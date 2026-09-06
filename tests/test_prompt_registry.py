@@ -32,20 +32,27 @@ def test_registry_renders_dynamic_and_static_prompts() -> None:
 
 def test_registry_text_comes_from_central_versioned_prompt_assets() -> None:
     assert get_prompt("visual_reader").canonical_text == load_prompt_text(
-        "visual_reader_v0_4.txt"
+        "visual_reader_v0_5.txt"
     )
     assert get_prompt("visual_retrieval").canonical_text == load_prompt_text(
         "visual_retrieval_v0_1.txt"
     ).removesuffix("\n")
     assert get_prompt("checker").canonical_text == load_prompt_text(
-        "checker_v2_1.txt"
+        "checker_v2_2.txt"
     ).removesuffix("\n")
     assert get_prompt("controller").canonical_text == load_prompt_text(
-        "controller_policy_v0_10.txt"
+        "controller_policy_v0_11.txt"
     )
     assert get_prompt("answerer").canonical_text == load_prompt_text(
         "answerer_v0_8.txt"
     )
+    table_reader = get_prompt("multimodal_table_reader")
+    assert table_reader.canonical_text == (
+        load_prompt_text("multimodal_table_reader_v0_2_system.txt")
+        + "\n# User message template\n\n"
+        + load_prompt_text("multimodal_table_reader_v0_2_user.txt")
+    )
+    assert table_reader.prompt_kind == "system_and_user_prompt_template"
     assert "<ROOT_QUESTION>" in get_prompt("planner").canonical_text
     assert get_prompt("planner").prompt_kind == "system_and_user_prompt"
     assert "# User message" in get_prompt("planner").canonical_text
@@ -59,16 +66,20 @@ def test_all_canonical_prompts_use_markdown_sections() -> None:
         assert "# Output" in prompt
 
 
-def test_prompt_directory_contains_only_current_prompt_assets() -> None:
+def test_prompt_directory_contains_current_assets_and_retained_table_v0_1() -> None:
     current = {path.name for path in PROMPT_DIRECTORY.glob("*.txt")}
 
     assert current == {
         "planner_v0_21.txt",
         "visual_retrieval_v0_1.txt",
-        "visual_reader_v0_4.txt",
-        "checker_v2_1.txt",
-        "controller_policy_v0_10.txt",
+        "visual_reader_v0_5.txt",
+        "checker_v2_2.txt",
+        "controller_policy_v0_11.txt",
         "answerer_v0_8.txt",
+        "multimodal_table_reader_v0_1_system.txt",
+        "multimodal_table_reader_v0_1_user.txt",
+        "multimodal_table_reader_v0_2_system.txt",
+        "multimodal_table_reader_v0_2_user.txt",
     }
     assert not (PROMPT_DIRECTORY / "archive").exists()
 
@@ -97,6 +108,18 @@ def test_checker_prompt_explains_root_target_progression() -> None:
     assert "copies that question's text into the next current_target" in normalized_prompt
     assert "Your output is validated and applied by the program" not in prompt
     assert "New or replaced Evidence must be concise" in prompt
+    assert "state-only target recheck" in normalized_prompt
+    assert "supports_question_ids must contain exactly the current_target" in normalized_prompt
+    assert "List in reused_evidence_ids only the existing Evidence" in normalized_prompt
+    assert "Never change the status of a non-current question" in normalized_prompt
+
+
+def test_controller_prompt_explains_missing_table_header_recovery() -> None:
+    prompt = " ".join(get_prompt("controller").canonical_text.split())
+
+    assert "missing_header_context limitation preserves" in prompt
+    assert "read the original data fragment and that header fragment together" in prompt
+    assert "Do not combine merely adjacent or unrelated tables" in prompt
 
 
 def test_cli_exports_versioned_prompts(tmp_path, capsys) -> None:

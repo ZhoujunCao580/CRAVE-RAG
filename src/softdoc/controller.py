@@ -89,13 +89,20 @@ class ControllerReadingLocation(SoftDocModel):
 
 
 class ControllerLimitation(SoftDocModel):
+    code: str | None = Field(default=None, min_length=1)
     description: str = Field(min_length=1)
     source_ids: list[str] = Field(default_factory=list)
+    relevant_visible_content: list[str] = Field(default_factory=list)
 
     @field_validator("source_ids")
     @classmethod
     def validate_sources(cls, value: list[str]) -> list[str]:
         return _unique_nonblank(value, label="Limitation source IDs")
+
+    @field_validator("relevant_visible_content")
+    @classmethod
+    def validate_relevant_visible_content(cls, value: list[str]) -> list[str]:
+        return _unique_nonblank(value, label="Relevant visible content")
 
 
 class ControllerObservationAssessment(SoftDocModel):

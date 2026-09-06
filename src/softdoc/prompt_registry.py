@@ -22,6 +22,11 @@ from softdoc.visual_retrieval import (
     VISUAL_RETRIEVAL_PROMPT_VERSION,
     VISUAL_RETRIEVAL_SYSTEM_PROMPT,
 )
+from softdoc.table_reading import (
+    MULTIMODAL_TABLE_READER_PROMPT_VERSION,
+    MULTIMODAL_TABLE_READER_SYSTEM_PROMPT,
+    MULTIMODAL_TABLE_READER_USER_PROMPT_TEMPLATE,
+)
 
 
 class PromptComponent(StrEnum):
@@ -31,6 +36,7 @@ class PromptComponent(StrEnum):
     CHECKER = "checker"
     ANSWERER = "answerer"
     CONTROLLER = "controller"
+    MULTIMODAL_TABLE_READER = "multimodal_table_reader"
 
 
 @dataclass(frozen=True)
@@ -112,6 +118,17 @@ PROMPT_REGISTRY: dict[PromptComponent, PromptSpec] = {
         prompt_kind="system_prompt",
         source_module="softdoc.controller_prompt",
         canonical_text=CONTROLLER_SYSTEM_PROMPT,
+    ),
+    PromptComponent.MULTIMODAL_TABLE_READER: PromptSpec(
+        component=PromptComponent.MULTIMODAL_TABLE_READER,
+        version=MULTIMODAL_TABLE_READER_PROMPT_VERSION,
+        prompt_kind="system_and_user_prompt_template",
+        source_module="softdoc.table_reading",
+        canonical_text=(
+            MULTIMODAL_TABLE_READER_SYSTEM_PROMPT
+            + "\n# User message template\n\n"
+            + MULTIMODAL_TABLE_READER_USER_PROMPT_TEMPLATE
+        ),
     ),
 }
 

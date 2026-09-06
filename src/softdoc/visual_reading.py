@@ -25,7 +25,7 @@ NormalizedRegion = tuple[
 ]
 
 
-VISUAL_READER_PROMPT_VERSION = "visual-reader-v0.4"
+VISUAL_READER_PROMPT_VERSION = "visual-reader-v0.5"
 
 
 class VisualInput(BaseModel):
@@ -36,7 +36,9 @@ class VisualInput(BaseModel):
     input_id: InputId
     visual_asset_id: str = Field(min_length=1)
     page_id: str = Field(min_length=1)
-    page_number: int = Field(ge=1)
+    physical_page_number: int = Field(ge=1)
+    document_page_count: int = Field(ge=1)
+    is_last_page: bool
     display_page_label: str | None = None
     page_image_path: Path
     element_id: str | None = None
@@ -45,6 +47,16 @@ class VisualInput(BaseModel):
 
     @model_validator(mode="after")
     def validate_bbox(self) -> "VisualInput":
+        if self.physical_page_number > self.document_page_count:
+            raise ValueError(
+                "physical_page_number cannot exceed document_page_count"
+            )
+        if self.is_last_page != (
+            self.physical_page_number == self.document_page_count
+        ):
+            raise ValueError(
+                "is_last_page must agree with physical_page_number and document_page_count"
+            )
         if self.bbox is not None:
             x1, y1, x2, y2 = self.bbox
             if not x1 < x2 or not y1 < y2:
@@ -152,7 +164,7 @@ def validate_visual_read_result(
     return result
 
 
-VISUAL_READER_SYSTEM_PROMPT = load_prompt_text("visual_reader_v0_4.txt")
+VISUAL_READER_SYSTEM_PROMPT = load_prompt_text("visual_reader_v0_5.txt")
 
 
 def visual_reader_user_prompt(request: VisualReadRequest) -> str:

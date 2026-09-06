@@ -1,7 +1,7 @@
 {
   "suite_id": "visual-reader-dev-suite-v1",
   "case_set_version": "visual-reader-cases-v1",
-  "prompt_version_under_test": "visual-reader-v0.4",
+  "prompt_version_under_test": "visual-reader-v0.5",
   "case_count": 35,
   "model_input_file": "model_inputs/visual_reader_cases_v1.jsonl",
   "review_gold_file": "review_only/visual_reader_gold_v1.jsonl",

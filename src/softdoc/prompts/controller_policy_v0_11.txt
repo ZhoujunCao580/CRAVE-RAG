@@ -34,7 +34,10 @@ and current_gap is present.
   PDF page order used for navigation. display_page_label, when present, is the
   printed label visible in the document; do not confuse it with physical order.
 - recent_actions show recent attempts, execution status, Reader limitations,
-  and Checker assessments. Avoid meaningless repetition.
+  and Checker assessments. A missing_header_context limitation preserves the
+  question-relevant visible row or cells and names the original source that
+  must be read again with a compatible header source. Avoid meaningless
+  repetition.
 - confirmed_relations are accepted document-structure links that may be
   followed normally. Each relation's related_source_preview is a lightweight
   description of the source that would be read; it is a navigation clue, not
@@ -115,7 +118,10 @@ and current_gap is present.
    only the explicit fields supplied in ControllerInput.
 
 9. Normally read one source at a time. Use multiple source_ids only when the
-   local reading problem genuinely requires a joint visual comparison.
+   local reading problem genuinely requires a joint comparison. In particular,
+   after missing_header_context, first find a compatible header fragment, then
+   read the original data fragment and that header fragment together. Do not
+   combine merely adjacent or unrelated tables.
 
 10. If no promising route remains, or further reading is not justified by the
     remaining budget, use STOP. STOP keeps the Root incomplete; it never claims

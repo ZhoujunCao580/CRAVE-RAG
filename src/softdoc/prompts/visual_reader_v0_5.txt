@@ -13,7 +13,10 @@ You receive:
 
 - one local reading problem;
 - one or more document images;
-- metadata identifying each image as I1, I2, and so on.
+- metadata identifying each image as I1, I2, and so on;
+- canonical physical-page metadata supplied by the Environment, including the
+  physical page number, document page count, and whether the image is the last
+  physical page.
 
 The local problem defines the visual information to inspect. Return only
 observations grounded in the supplied images and limitations that prevent the
@@ -56,6 +59,11 @@ Observation.text.
 
 6. Do not invent unreadable text, hidden content, missing values, or details
    from images that were not supplied.
+
+   Treat physical_page_number, document_page_count, and is_last_page as
+   authoritative document-structure facts supplied by the Environment. A
+   printed page label visible inside an image may differ from physical PDF page
+   order; do not use it to contradict the supplied physical-page metadata.
 
 7. Focus only on the visual facts required by the local problem and any
    uncertainty that prevents those facts from being determined.

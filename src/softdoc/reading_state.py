@@ -163,8 +163,10 @@ class ObservationSourceRef(SoftDocModel):
         return None if value is None else _validate_normalized_region(value)
 
 class ObservationLimitation(SoftDocModel):
+    code: str | None = Field(default=None, min_length=1)
     description: str = Field(min_length=1)
     input_ids: list[str] = Field(default_factory=list)
+    relevant_visible_content: list[str] = Field(default_factory=list)
 
     @field_validator("input_ids")
     @classmethod
@@ -173,6 +175,11 @@ class ObservationLimitation(SoftDocModel):
         if any(not item.startswith("I") for item in value):
             raise ValueError("Limitation input IDs must use local I1/I2 aliases")
         return value
+
+    @field_validator("relevant_visible_content")
+    @classmethod
+    def validate_relevant_visible_content(cls, value: list[str]) -> list[str]:
+        return _unique_nonblank(value, label="Relevant visible content")
 
 
 class StoredObservation(SoftDocModel):
@@ -553,9 +560,10 @@ class EvidenceCheckInput(SoftDocModel):
 
     The Checker receives the full current EvidenceMemory.  Only its output is a
     delta, so using a delta never hides existing Evidence from the Checker.
-    Most invocations follow one read.  After the final planned SubQuestion is
-    satisfied, the Environment may also invoke the Checker with no new read so
-    it can judge the Root from the complete accepted Evidence set.
+    Most invocations follow one read.  The Environment may also invoke the
+    Checker with no new read when accepted Evidence already supports a newly
+    selected SubQuestion, or after the final planned SubQuestion is satisfied
+    so it can judge the Root from the complete accepted Evidence set.
     """
 
     action_id: str = Field(min_length=1)
@@ -568,6 +576,11 @@ class EvidenceCheckInput(SoftDocModel):
     def validate_context(self) -> Self:
         if not self.observations and not self.limitations:
             target = self.evidence_memory.current_target
+            is_target_recheck = (
+                target is not None
+                and target.question_id != self.root_question.question_id
+                and bool(self.evidence_memory.evidence)
+            )
             is_root_finalization = (
                 bool(self.evidence_memory.questions)
                 and target is not None
@@ -577,10 +590,12 @@ class EvidenceCheckInput(SoftDocModel):
                     for item in self.evidence_memory.questions
                 )
             )
-            if not is_root_finalization:
+            if not (is_target_recheck or is_root_finalization):
                 raise ValueError(
                     "Checker input requires at least one Observation or limitation "
-                    "unless it is finalizing the Root after a completed plan"
+                    "unless it is rechecking a newly selected target from accepted "
+                    "Evidence or "
+                    "it is finalizing the Root after a completed plan"
                 )
         if self.evidence_memory.root_question_id != self.root_question.question_id:
             raise ValueError("Checker Root question must match EvidenceMemory")
@@ -659,6 +674,7 @@ class EvidenceCheckResult(SoftDocModel):
     action_id: str = Field(min_length=1)
     observation_assessments: list[ObservationAssessment] = Field(default_factory=list)
     evidence_updates: EvidenceUpdates = Field(default_factory=EvidenceUpdates)
+    reused_evidence_ids: list[str] = Field(default_factory=list)
     current_target_status: QuestionStatus
     root_status: EvidenceStatus
     remaining_gap_description: str | None = Field(default=None, min_length=1)
@@ -667,6 +683,10 @@ class EvidenceCheckResult(SoftDocModel):
     def validate_result(self) -> Self:
         assessment_ids = [item.observation_id for item in self.observation_assessments]
         _unique_nonblank(assessment_ids, label="Checker assessment Observation IDs")
+        _unique_nonblank(
+            self.reused_evidence_ids,
+            label="Checker reused Evidence IDs",
+        )
         if self.current_target_status == QuestionStatus.INCOMPLETE:
             if self.remaining_gap_description is None:
                 raise ValueError(
@@ -697,6 +717,7 @@ class EvidenceCheckDecision(SoftDocModel):
         default_factory=list
     )
     evidence_updates: EvidenceUpdates = Field(default_factory=EvidenceUpdates)
+    reused_evidence_ids: list[str] = Field(default_factory=list)
     current_target_status: QuestionStatus
     root_status: EvidenceStatus
     remaining_gap_description: str | None = Field(default=None, min_length=1)
@@ -705,6 +726,10 @@ class EvidenceCheckDecision(SoftDocModel):
     def validate_decision(self) -> Self:
         assessment_ids = [item.observation_id for item in self.observation_assessments]
         _unique_nonblank(assessment_ids, label="Checker assessment Observation IDs")
+        _unique_nonblank(
+            self.reused_evidence_ids,
+            label="Checker reused Evidence IDs",
+        )
         if self.current_target_status == QuestionStatus.INCOMPLETE:
             if self.remaining_gap_description is None:
                 raise ValueError(
@@ -750,6 +775,13 @@ def _apply_evidence_check_update(
 
     existing_items = list(checker_input.evidence_memory.evidence)
     existing_by_id = {item.evidence_id: item for item in existing_items}
+    reused_ids = set(result.reused_evidence_ids)
+    missing_reused_ids = reused_ids.difference(existing_by_id)
+    if missing_reused_ids:
+        raise ValueError(
+            "Checker reuses missing Evidence: "
+            + ", ".join(sorted(missing_reused_ids))
+        )
     replace_by_id = {
         item.evidence_id: item for item in result.evidence_updates.replace
     }
@@ -766,10 +798,24 @@ def _apply_evidence_check_update(
     if current_target is None:
         raise ValueError("Checker input requires an active current_target")
     target_question_id = current_target.question_id
+    is_state_only = not checker_input.observations and not checker_input.limitations
+    root_question_id = checker_input.evidence_memory.root_question_id
+    is_target_recheck = is_state_only and target_question_id != root_question_id
+    if is_state_only and (
+        result.evidence_updates.add
+        or result.evidence_updates.replace
+        or result.evidence_updates.remove
+    ):
+        raise ValueError("A state-only Checker call cannot add, replace, or remove Evidence")
+    if result.reused_evidence_ids and not is_target_recheck:
+        raise ValueError(
+            "reused_evidence_ids are allowed only during a state-only SubQuestion recheck"
+        )
     cross_target_updates = [
         evidence_id
         for evidence_id in sorted(targeted_ids)
-        if existing_by_id[evidence_id].supports_question_ids != [target_question_id]
+        if target_question_id
+        not in existing_by_id[evidence_id].supports_question_ids
     ]
     if cross_target_updates:
         raise ValueError(
@@ -836,10 +882,35 @@ def _apply_evidence_check_update(
     ]:
         if update.supports_question_ids != [target_question_id]:
             raise ValueError(
-                "Checker Evidence updates may support only the current target "
-                f"{target_question_id} in v0"
+                "A read-time Checker invocation may label Evidence only for its "
+                f"current target {target_question_id}"
             )
-    root_question_id = checker_input.evidence_memory.root_question_id
+    if reused_ids:
+        next_items = [
+            item.model_copy(
+                update={
+                    "supports_question_ids": [
+                        *item.supports_question_ids,
+                        target_question_id,
+                    ]
+                }
+            )
+            if item.evidence_id in reused_ids
+            and target_question_id not in item.supports_question_ids
+            else item
+            for item in next_items
+        ]
+    if (
+        is_target_recheck
+        and result.current_target_status == QuestionStatus.SATISFIED
+        and not any(
+            target_question_id in item.supports_question_ids
+            for item in next_items
+        )
+    ):
+        raise ValueError(
+            "A satisfied state-only target recheck must identify reused Evidence"
+        )
     questions = list(checker_input.evidence_memory.questions)
     questions_by_id = {item.question_id: item for item in questions}
     if target_question_id == root_question_id:
@@ -951,6 +1022,7 @@ def materialize_evidence_check_decision(
             for item in decision.observation_assessments
         ],
         evidence_updates=decision.evidence_updates,
+        reused_evidence_ids=decision.reused_evidence_ids,
         current_target_status=decision.current_target_status,
         root_status=decision.root_status,
         remaining_gap_description=decision.remaining_gap_description,

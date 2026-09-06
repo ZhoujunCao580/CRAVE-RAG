@@ -89,8 +89,9 @@ def _table(*rows: str) -> str:
 
 
 def test_reconciliation_splits_unique_suffix_and_confirms_relation() -> None:
+    aggregate_html = _table("Header", "page-one", "page-two")
     document = _document(
-        _table("Header", "page-one", "page-two"),
+        aggregate_html,
         [_table("page-two")],
     )
 
@@ -100,8 +101,9 @@ def test_reconciliation_splits_unique_suffix_and_confirms_relation() -> None:
     assert len(result.confirmed_decisions) == 1
     assert "page-two" not in (document.elements[0].html or "")
     assert document.elements[1].html == _table("page-two")
-    assert document.elements[0].provenance.raw_payload["content"]["html"].endswith(
-        "</table>"
+    assert (
+        document.elements[0].provenance.raw_payload["content"]["html"]
+        == aggregate_html
     )
     relation = next(
         relation
@@ -112,6 +114,44 @@ def test_reconciliation_splits_unique_suffix_and_confirms_relation() -> None:
     assert relation.target_id == "table:2"
     assert relation.status == RelationStatus.CONFIRMED
     assert relation.confidence == 1.0
+
+
+def test_confirmed_split_preserves_page_local_structure_and_original_html() -> None:
+    aggregate_html = (
+        '<table class="financial"><tr><th rowspan="2">Company</th>'
+        '<th colspan="2">Revenue</th></tr>'
+        "<tr><th>2022</th><th>2023</th></tr>"
+        '<tr><td data-role="row-key">A Company</td><td>10</td><td>12</td></tr>'
+        '<tr><td data-role="row-key">B Company</td><td>15</td><td>18</td></tr>'
+        "</table>"
+    )
+    continuation_html = (
+        '<table><tr><td data-role="row-key">B Company</td>'
+        "<td>15</td><td>18</td></tr></table>"
+    )
+    document = _document(aggregate_html, [continuation_html])
+
+    result = reconcile_mineru_aggregate_tables(document)
+    RelationBuilder(document).build_all()
+
+    assert len(result.confirmed_decisions) == 1
+    source, continuation = document.elements
+    assert 'rowspan="2"' in (source.html or "")
+    assert 'colspan="2"' in (source.html or "")
+    assert 'data-role="row-key">A Company' in (source.html or "")
+    assert "B Company" not in (source.html or "")
+    assert continuation.html == continuation_html
+    assert 'data-role="row-key">B Company' in (continuation.html or "")
+    assert source.provenance.raw_payload["content"]["html"] == aggregate_html
+    relation = next(
+        relation
+        for relation in document.relations
+        if relation.relation_type == RelationType.CONTINUED_ON
+        and relation.status == RelationStatus.CONFIRMED
+    )
+    assert relation.source_id == source.element_id
+    assert relation.target_id == continuation.element_id
+    assert relation.evidence[0].data["aggregate_html_preserved_in_provenance"]
 
 
 def test_reconciliation_ignores_repeated_page_header_rows() -> None:
@@ -140,6 +180,28 @@ def test_ambiguous_rows_leave_entire_group_unchanged() -> None:
     after_without_audit.metadata.pop("cross_page_table_reconciliation")
     assert after_without_audit.model_dump(mode="json") == before
     assert FRAGMENT_METADATA_KEY not in document.elements[0].metadata
+
+
+def test_skipped_reconciliation_does_not_create_confirmed_continuation() -> None:
+    aggregate = _table("Header", "same", "same")
+    document = _document(aggregate, [_table("same")])
+
+    result = reconcile_mineru_aggregate_tables(document)
+    RelationBuilder(document).build_all()
+
+    assert result.decisions[0].status == TableReconciliationStatus.SKIPPED
+    assert all(
+        not (
+            relation.relation_type == RelationType.CONTINUED_ON
+            and relation.status == RelationStatus.CONFIRMED
+        )
+        for relation in document.relations
+    )
+    assert all(
+        FRAGMENT_METADATA_KEY not in element.metadata for element in document.elements
+    )
+    assert document.elements[0].html == aggregate
+    assert document.elements[0].provenance.raw_payload["content"]["html"] == aggregate
 
 
 def test_rowspan_crossing_boundary_is_not_split() -> None:

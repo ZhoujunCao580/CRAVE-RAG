@@ -125,7 +125,9 @@ Input:
       "input_id": "I1",
       "visual_asset_id": "visual:chart:revenue",
       "page_id": "page:financial-results",
-      "page_number": 18,
+      "physical_page_number": 18,
+      "document_page_count": 20,
+      "is_last_page": false,
       "display_page_label": "16",
       "page_image_path": "assets/elements/revenue_chart.png",
       "element_id": "element:chart:revenue",
@@ -210,6 +212,46 @@ failed reads. The canonical stored form for this example is:
 }
 ```
 
+### Multimodal Table Reader
+
+The optional `multimodal-table-reader-v0.2` backend receives every available
+representation of each selected canonical Table: structured cells or
+parser-extracted text, the original table crop when available, deterministic
+page metadata, and conservative header/fragment context. The Controller's
+`local_problem` is passed through unchanged as the Reader's `problem`.
+
+A Table may participate in both text and visual retrieval, but both channels
+refer to the same `element_id`. Candidate fusion deduplicates that ID and
+retains the contributing channels only as internal audit metadata. The
+Controller sees one candidate. Its preview prefers a query-conditioned
+`TablePreview`; cached visual preview text is used only when no usable
+TablePreview exists. Reading that candidate invokes one Table Reader with all
+available representations rather than separate text and visual reads.
+
+Cross-page tables follow a deliberately asymmetric contract:
+
+- MinerU's original aggregate HTML remains unchanged in Provenance.
+- Runtime Table HTML is split into physical-page fragments only when row
+  ownership is unique, ordered, complete, and no `rowspan` crosses a page
+  boundary.
+- The source fragment retains its real header rows, first-column labels, and
+  `rowspan`/`colspan` structure. Confirmed fragments receive a deterministic
+  `continued_on` relation and group/fragment metadata.
+- A continuation may inherit headers for retrieval and reading only from a
+  confirmed fragment in the same group. Inferred headers remain explicitly
+  marked as inferred.
+- If reconciliation is ambiguous, no Table is rewritten, no confirmed
+  relation is emitted, and no header is forcibly inherited. Original HTML is
+  still available in Provenance.
+
+If a current fragment exposes question-relevant values but lacks a reliable
+header mapping, the Reader must not publish those values as a resolved fact.
+It returns a `missing_header_context` limitation containing the relevant
+visible row/cells. The limitation reaches Controller feedback but never
+becomes Evidence. The Controller may locate a compatible header fragment and
+read it jointly with the original data fragment; only that new joint read may
+produce a self-contained Observation grounded in both inputs.
+
 ## 4. Evidence Checker
 
 The Checker normally receives the complete current Evidence Memory plus only
@@ -291,6 +333,7 @@ Model output (`EvidenceCheckDecision`):
     "replace": [],
     "remove": []
   },
+  "reused_evidence_ids": [],
   "current_target_status": "satisfied",
   "root_status": "incomplete",
   "remaining_gap_description": null
@@ -304,10 +347,22 @@ Evidence delta atomically, then derives that audit flag from the
 field from disagreeing with the actual Evidence delta.
 
 The program, not the model, assigns the Evidence ID and activates the next
-runnable question. Evidence may support either a planned SubQuestion or the
-Root Question. With an empty plan, `questions` is empty,
+runnable question. During a normal read, every new or replaced Evidence item
+is labelled only for the current target. The Checker never inspects or labels
+support for non-current questions in that invocation. With an empty plan,
+`questions` is empty,
 `current_target.question_id` equals `root_question_id`, and accepted Evidence
 uses `supports_question_ids: ["root:1"]`.
+
+When target selection moves to a later SubQuestion and any accepted Evidence
+exists, the Environment immediately invokes the same Checker with the full
+EvidenceMemory and empty `observations`/`limitations`. The Checker lists in
+`reused_evidence_ids` only the old Evidence that actually supports this newly
+current target. The runtime then appends this target ID to those Evidence
+items. The state-only recheck does not fabricate a Reader result, spend a
+Controller action, or change Evidence statements/provenance. If no old
+Evidence helps, the list is empty and the Checker's precise gap is exposed to
+the Controller.
 
 Completing all planned SubQuestions does not by itself guarantee that the Root
 is answerable. The program makes the Root the next current target, copies the

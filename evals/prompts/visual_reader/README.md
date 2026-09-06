@@ -1,9 +1,10 @@
 # Visual Reader suite inventory
 
-- Canonical Prompt: `src/softdoc/prompts/visual_reader_v0_4.txt`
-- Registry version: `visual-reader-v0.4`
+- Canonical Prompt: `src/softdoc/prompts/visual_reader_v0_5.txt`
+- Registry version: `visual-reader-v0.5`
 - Current source: `configs/visual_reader_v0_probe_25.json`
 - Runner: `scripts/run_visual_reader_probe.py`
+- Page-metadata materializer: `scripts/materialize_visual_reader_page_metadata.py`
 - Frozen suite: 35 cases
   - 25 existing real-image development regressions;
   - 10 controlled boundary cases with deterministic local image assets.

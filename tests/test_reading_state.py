@@ -368,7 +368,7 @@ def test_checker_satisfied_result_adds_evidence_and_can_finish_root():
     ]
 
 
-def test_checker_cannot_silently_update_multiple_questions_in_one_round():
+def test_read_time_checker_may_label_evidence_only_for_current_target():
     result = EvidenceCheckResult(
         action_id="action:read", observation_assessments=[_assessment(used=True)],
         evidence_updates=EvidenceUpdates(add=[EvidenceAddition(
@@ -377,8 +377,72 @@ def test_checker_cannot_silently_update_multiple_questions_in_one_round():
         )]), current_target_status=QuestionStatus.SATISFIED,
         root_status=EvidenceStatus.READY,
     )
-    with pytest.raises(ValueError, match="only the current target Q2"):
+    with pytest.raises(ValueError, match="only for its current target Q2"):
         apply_evidence_check_result(_checker_input(), result)
+
+
+def test_read_time_checker_cannot_label_only_another_target():
+    result = EvidenceCheckResult(
+        action_id="action:read", observation_assessments=[_assessment(used=True)],
+        evidence_updates=EvidenceUpdates(add=[EvidenceAddition(
+            statement="The read supports only the other question.",
+            observation_ids=["obs:1"], supports_question_ids=["Q1"],
+        )]), current_target_status=QuestionStatus.SATISFIED,
+        root_status=EvidenceStatus.READY,
+    )
+    with pytest.raises(ValueError, match="only for its current target Q2"):
+        apply_evidence_check_result(_checker_input(), result)
+
+
+def test_state_only_target_recheck_records_reused_evidence_and_cannot_rewrite_it():
+    memory = _memory().model_copy(
+        update={
+            "evidence": [
+                EvidenceItem(
+                    evidence_id="evidence:shared",
+                    statement="Revenue was 10 million in 2022 and 12 million in 2023.",
+                    observation_ids=["obs:old"],
+                    supports_question_ids=["Q1"],
+                )
+            ]
+        }
+    )
+    checker_input = EvidenceCheckInput(
+        action_id="action:target-recheck:Q2",
+        root_question=RootQuestion(
+            question_id="root:1", text="How did revenue change from 2022 to 2023?"
+        ),
+        evidence_memory=memory,
+        observations=[],
+        limitations=[],
+    )
+    decision = EvidenceCheckResult(
+        action_id=checker_input.action_id,
+        observation_assessments=[],
+        evidence_updates=EvidenceUpdates(),
+        reused_evidence_ids=["evidence:shared"],
+        current_target_status=QuestionStatus.SATISFIED,
+        root_status=EvidenceStatus.READY,
+        remaining_gap_description=None,
+    )
+    updated = apply_evidence_check_result(checker_input, decision)
+    assert updated.root_status == EvidenceStatus.READY
+    assert updated.evidence[0].supports_question_ids == ["Q1", "Q2"]
+
+    mutating = decision.model_copy(
+        update={
+            "evidence_updates": EvidenceUpdates(
+                remove=[
+                    EvidenceRemoval(
+                        evidence_id="evidence:shared",
+                        reason="A state-only call must not rewrite Evidence.",
+                    )
+                ]
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="cannot add, replace, or remove"):
+        apply_evidence_check_result(checker_input, mutating)
 
 
 def test_program_not_checker_selects_next_dependency_ready_question():

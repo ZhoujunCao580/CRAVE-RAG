@@ -22,6 +22,19 @@ from softdoc.visual_retrieval import visual_retrieval_descriptor
 _BOUNDARY_END = frozenset(".!?。！？;；:")
 
 
+@dataclass(frozen=True)
+class TableHeaderContext:
+    """Resolved local or inherited headers for one physical Table fragment."""
+
+    headers: tuple[str, ...]
+    header_source_element_id: str | None
+    is_continuation: bool
+    group_id: str | None = None
+    fragment_index: int | None = None
+    fragment_count: int | None = None
+    header_is_inferred: bool = False
+
+
 class SearchUnitBuilder:
     """Create an immutable retrieval view without following Relations."""
 
@@ -30,7 +43,7 @@ class SearchUnitBuilder:
 
     def build(self, document: Document) -> SearchUnitBuildResult:
         pages = {page.page_id: page for page in document.pages}
-        table_headers = _table_header_context(document)
+        table_headers = table_header_context(document)
         ordered = sorted(
             document.elements,
             key=lambda element: (
@@ -47,7 +60,13 @@ class SearchUnitBuilder:
             try:
                 body, context, visual_descriptor_id = _searchable_content(element)
                 table_header_cells, table_header_source_id, table_is_continuation = (
-                    table_headers.get(element.element_id, ([], None, False))
+                    (
+                        list(table_headers[element.element_id].headers),
+                        table_headers[element.element_id].header_source_element_id,
+                        table_headers[element.element_id].is_continuation,
+                    )
+                    if element.element_id in table_headers
+                    else ([], None, False)
                 )
                 display_label = _display_label(element)
                 if not body:
@@ -313,6 +332,7 @@ def html_to_text(value: str) -> str:
 class _ParsedTable:
     rows: list[list[str]]
     header_rows: list[list[str]]
+    complex_header_spans: bool = False
 
 
 class _TableStructureHTMLParser(HTMLParser):
@@ -323,6 +343,7 @@ class _TableStructureHTMLParser(HTMLParser):
         self._row: list[str] | None = None
         self._cell_parts: list[str] | None = None
         self._row_has_header = False
+        self.complex_header_spans = False
 
     def handle_starttag(
         self,
@@ -339,6 +360,12 @@ class _TableStructureHTMLParser(HTMLParser):
             self._cell_parts = []
             if folded == "th":
                 self._row_has_header = True
+                attributes = dict(attrs)
+                if any(
+                    str(attributes.get(name) or "1").strip() not in {"", "1"}
+                    for name in ("rowspan", "colspan")
+                ):
+                    self.complex_header_spans = True
         elif folded == "br" and self._cell_parts is not None:
             self._cell_parts.append(" ")
 
@@ -368,12 +395,16 @@ def _parse_table_structure(html: str) -> _ParsedTable:
     parser = _TableStructureHTMLParser()
     parser.feed(html)
     parser.close()
-    return _ParsedTable(rows=parser.rows, header_rows=parser.header_rows)
+    return _ParsedTable(
+        rows=parser.rows,
+        header_rows=parser.header_rows,
+        complex_header_spans=parser.complex_header_spans,
+    )
 
 
-def _table_header_context(
+def table_header_context(
     document: Document,
-) -> dict[str, tuple[list[str], str | None, bool]]:
+) -> dict[str, TableHeaderContext]:
     """Return compact headers, inheriting them across confirmed table fragments."""
 
     tables = {
@@ -395,8 +426,8 @@ def _table_header_context(
         ):
             groups.setdefault(metadata["group_id"], []).append(element)
 
-    inherited: dict[str, tuple[list[str], str | None, bool]] = {}
-    for fragments in groups.values():
+    inherited: dict[str, TableHeaderContext] = {}
+    for group_id, fragments in groups.items():
         ordered = sorted(
             fragments,
             key=lambda item: int(
@@ -405,33 +436,55 @@ def _table_header_context(
         )
         source = ordered[0]
         headers = _best_table_headers(parsed[source.element_id], allow_inferred=True)
+        source_headers_inferred = bool(headers and not parsed[source.element_id].header_rows)
         source_id = source.element_id if headers else None
         for index, element in enumerate(ordered):
             own = _best_table_headers(
                 parsed[element.element_id],
                 allow_inferred=index == 0,
             )
-            inherited[element.element_id] = (
-                own or headers,
-                element.element_id if own else source_id,
-                index > 0,
+            metadata = element.metadata[FRAGMENT_METADATA_KEY]
+            inherited[element.element_id] = TableHeaderContext(
+                headers=tuple(own or headers),
+                header_source_element_id=(
+                    element.element_id if own else source_id
+                ),
+                is_continuation=index > 0,
+                group_id=group_id,
+                fragment_index=int(metadata.get("fragment_index", index)),
+                fragment_count=int(metadata.get("fragment_count", len(ordered))),
+                header_is_inferred=(
+                    bool(own and not parsed[element.element_id].header_rows)
+                    if own
+                    else source_headers_inferred
+                ),
             )
 
-    result: dict[str, tuple[list[str], str | None, bool]] = {}
+    result: dict[str, TableHeaderContext] = {}
     for element_id, table in parsed.items():
         if element_id in inherited:
             result[element_id] = inherited[element_id]
             continue
         headers = _best_table_headers(table, allow_inferred=True)
-        result[element_id] = (
-            headers,
-            element_id if headers else None,
-            False,
+        result[element_id] = TableHeaderContext(
+            headers=tuple(headers),
+            header_source_element_id=element_id if headers else None,
+            is_continuation=False,
+            header_is_inferred=bool(headers and not table.header_rows),
         )
     return result
 
 
+# Compatibility alias for internal callers from older code/tests.
+_table_header_context = table_header_context
+
+
 def _best_table_headers(table: _ParsedTable, *, allow_inferred: bool) -> list[str]:
+    # A compact flat header would be misleading for merged/multi-level spans.
+    # The Table Reader receives the original structured cells (with spans) and
+    # optional pixels, so leave this unresolved instead of inventing alignment.
+    if table.complex_header_spans:
+        return []
     if table.header_rows:
         width = max(len(row) for row in table.header_rows)
         headers: list[str] = []

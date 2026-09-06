@@ -1,17 +1,20 @@
 # Checker suite inventory
 
-- Canonical Prompt: `src/softdoc/prompts/checker_v2_1.txt`
-- Registry version: `checker-v2.1`
+- Canonical Prompt: `src/softdoc/prompts/checker_v2_2.txt`
+- Registry version: `checker-v2.2`
 
-The model-facing v2.1 output omits `used_for_evidence`. The runtime derives
+The model-facing v2.2 output omits `used_for_evidence`. The runtime derives
 that audit field from the atomically resulting Evidence `observation_ids`.
 It also supports a state-only Root-finalization call after all planned
-SubQuestions are satisfied.
+SubQuestions are satisfied, current-target-only Evidence updates during a
+normal read, and state-only rechecking that explicitly records which accepted
+Evidence is reused for a newly selected SubQuestion.
 - Current source and runner: `scripts/evaluate_checker_mock.py`
 - Materializer: `scripts/materialize_checker_suite.py`
-- Frozen synthetic suite: 27 state-transition cases
+- Frozen synthetic suite: 28 state-transition cases
   - 20 existing contract regressions;
-  - 7 controlled boundaries for cross-target Observations, Root evaluation
+  - 8 controlled boundaries for cross-target rejection, target-switch recheck,
+    cross-target Observations, Root evaluation
     after plan completion (including no-new-read finalization), Evidence
     removal, remaining-gap quality, and limitation-only reading.
 - Model-visible inputs: `model_inputs/checker_cases_v1.jsonl`

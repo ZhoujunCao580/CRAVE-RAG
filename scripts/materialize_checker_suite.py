@@ -7,7 +7,10 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from scripts.evaluate_checker_mock import Case, build_cases
+try:
+    from scripts.evaluate_checker_mock import Case, build_cases
+except ModuleNotFoundError:  # Direct execution: python scripts/materialize_checker_suite.py
+    from evaluate_checker_mock import Case, build_cases
 from softdoc.checking_prompt import CHECKER_PROMPT_VERSION
 
 
@@ -48,6 +51,8 @@ def gold_row(case: Case) -> dict[str, Any]:
             "gap_forbidden_terms": list(expected.gap_forbidden_terms),
             "evidence_required_terms": list(expected.evidence_required_terms),
             "evidence_forbidden_terms": list(expected.evidence_forbidden_terms),
+            "support_sets": [list(item) for item in expected.support_sets],
+            "reused_evidence_ids": list(expected.reused_evidence_ids),
             "next_target": expected.next_target,
         },
         "chained_from": case.chained_from,
@@ -67,8 +72,8 @@ def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
 
 def materialize() -> None:
     cases = build_cases()
-    if len(cases) != 27:
-        raise ValueError(f"Expected 27 Checker cases, found {len(cases)}")
+    if len(cases) != 28:
+        raise ValueError(f"Expected 28 Checker cases, found {len(cases)}")
     case_ids = [case.case_id for case in cases]
     if len(case_ids) != len(set(case_ids)):
         raise ValueError("Checker case IDs must be unique")
@@ -93,8 +98,9 @@ def materialize() -> None:
             "synthetic_only": True,
             "gold_is_not_model_visible": True,
             "c11_c12_form_a_two_turn_regression": True,
-            "c21_preserves_single_current_target_updates": True,
+            "c21_preserves_current_target_only_read_updates": True,
             "c27_covers_state_only_root_finalization": True,
+            "c28_covers_state_only_target_recheck_and_reuse_labeling": True,
             "real_reader_to_checker_packets_still_required": True,
             "unseen_real_holdout_still_required": True,
         },
@@ -107,4 +113,4 @@ def materialize() -> None:
 
 if __name__ == "__main__":
     materialize()
-    print(f"Wrote 27 Checker cases under {SUITE_ROOT.resolve()}")
+    print(f"Wrote 28 Checker cases under {SUITE_ROOT.resolve()}")

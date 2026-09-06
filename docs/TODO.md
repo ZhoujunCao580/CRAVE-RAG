@@ -18,11 +18,14 @@ experiments. Implemented contracts and workflows belong in
   an image. Do not add a VLM call for every Table in v0.
 - [ ] Compare the current pipeline, MinerU Hybrid, and visual recovery on a
   larger sample. Remove recovery/normalization rules with no net benefit.
-- [ ] Treat splitting MinerU-aggregated cross-page Tables as a development
-  strategy validated only on representative-28. On the full datasets, compare
-  retaining MinerU aggregation with splitting by physical page and producing a
-  confirmed `continued_on` relation. Do not split when row ownership, repeated
-  headers, or cross-page `rowspan` cannot be validated uniquely.
+- [x] Preserve MinerU aggregate Table HTML in Provenance and split runtime HTML
+  into physical-page fragments only when row ownership is unique, ordered,
+  complete, and free of a cross-page `rowspan`. Emit confirmed `continued_on`
+  only for those groups; ambiguous groups remain untouched and cannot lend
+  headers to adjacent Tables.
+- [ ] On the full QA failure set, measure whether confirmed fragment header
+  inheritance and joint header/data rereads improve answer quality without
+  causing unrelated adjacent Tables to be merged.
 
 ## 2. Planner policy
 
@@ -66,9 +69,9 @@ experiments. Implemented contracts and workflows belong in
 - [ ] Default to single-image reads. Decompose multi-image numeric or factual
   comparisons into separate reads followed by Answerer aggregation. Use joint
   multi-image reading only when the visual relationship itself is inseparable.
-- [ ] Add `INSPECT_REGION`/zoom, a structured Table Reader, or visual fallback
-  only after a real failure taxonomy justifies them; do not expand the action
-  schema for hypothetical cases.
+- [ ] Evaluate the implemented Multimodal Table Reader on the server failure
+  set before enabling it by default. `INSPECT_REGION`/zoom remains deferred;
+  do not expand the action schema for hypothetical cases.
 - [ ] When `continued_on` is absent, a candidate Relation is uncertain, or a
   structured read fails, let the Controller choose an adjacent page, candidate
   relation, or visual read. The Reader must not navigate automatically.
@@ -98,9 +101,13 @@ experiments. Implemented contracts and workflows belong in
   rejected Observation. Compare rereading with recalling from ObservationStore
   and resubmitting to the Checker; implement Recall only if it reduces cost
   without increasing errors.
-- [ ] Evaluate duplicate reads caused by one Observation potentially supporting
-  multiple questions. v0 still evaluates only the current target per Checker
-  invocation.
+- [x] Keep normal read-time Evidence scoped to the current target. On every
+  later SubQuestion switch with accepted Evidence available, run a state-only
+  Checker recheck; explicitly record any reused Evidence IDs for the new target
+  without a fake read or Controller action.
+- [ ] Evaluate lightweight Observation Recall only for useful prior
+  Observations that never entered Evidence. Do not expose the complete
+  ObservationStore to the Controller.
 
 ## 7. Controller policy and training
 

@@ -1213,41 +1213,120 @@ class ReadingEnvironment:
                 entries=[*trace.entries, entry],
             )
 
-            if check_succeeded and self._needs_root_finalization(
-                previous_memory=memory,
-                next_memory=next_memory,
-                root_question=root_question,
-            ):
-                next_memory = self._finalize_root_from_evidence(
+            if check_succeeded:
+                next_memory = self._advance_state_only_checks(
                     root_question=root_question,
+                    previous_memory=memory,
                     memory=next_memory,
                     triggering_action_id=current_action_id,
                 )
 
         return next_observations, next_memory, next_trace
 
-    @staticmethod
-    def _needs_root_finalization(
+    def _advance_state_only_checks(
+        self,
         *,
+        root_question: RootQuestion,
         previous_memory: EvidenceMemory,
-        next_memory: EvidenceMemory,
+        memory: EvidenceMemory,
+        triggering_action_id: str,
+    ) -> EvidenceMemory:
+        """Recheck newly selected targets already supported by accepted Evidence."""
+
+        previous_target = previous_memory.current_target
+        previous_target_id = (
+            previous_target.question_id if previous_target is not None else None
+        )
+        current = memory
+        for _ in range(len(current.questions) + 1):
+            target = current.current_target
+            if (
+                target is None
+                or target.question_id == previous_target_id
+                or current.root_status == EvidenceStatus.READY
+            ):
+                break
+
+            if target.question_id == root_question.question_id:
+                if not self._is_root_finalization_state(
+                    memory=current,
+                    root_question=root_question,
+                ):
+                    break
+                updated = self._finalize_root_from_evidence(
+                    root_question=root_question,
+                    memory=current,
+                    triggering_action_id=triggering_action_id,
+                )
+            else:
+                if not current.evidence:
+                    break
+                updated = self._recheck_target_from_evidence(
+                    root_question=root_question,
+                    memory=current,
+                    triggering_action_id=triggering_action_id,
+                )
+
+            previous_target_id = target.question_id
+            if updated == current:
+                break
+            current = updated
+
+        return current
+
+    @staticmethod
+    def _is_root_finalization_state(
+        *,
+        memory: EvidenceMemory,
         root_question: RootQuestion,
     ) -> bool:
-        previous_target = previous_memory.current_target
-        next_target = next_memory.current_target
+        target = memory.current_target
         return (
-            previous_target is not None
-            and previous_target.question_id != root_question.question_id
-            and next_memory.root_status == EvidenceStatus.INCOMPLETE
-            and next_target is not None
-            and next_target.question_id == root_question.question_id
-            and next_target.gap_description == root_question.text
-            and bool(next_memory.questions)
+            memory.root_status == EvidenceStatus.INCOMPLETE
+            and target is not None
+            and target.question_id == root_question.question_id
+            and target.gap_description == root_question.text
+            and bool(memory.questions)
             and all(
                 item.status == QuestionStatus.SATISFIED
-                for item in next_memory.questions
+                for item in memory.questions
             )
         )
+
+    def _recheck_target_from_evidence(
+        self,
+        *,
+        root_question: RootQuestion,
+        memory: EvidenceMemory,
+        triggering_action_id: str,
+    ) -> EvidenceMemory:
+        """Judge one newly selected SubQuestion without fabricating another read."""
+
+        target = memory.current_target
+        assert target is not None
+        recheck_action_id = (
+            f"{triggering_action_id}:target-recheck:{target.question_id}"
+        )
+        checker_input = EvidenceCheckInput(
+            action_id=recheck_action_id,
+            root_question=root_question,
+            evidence_memory=memory,
+            observations=[],
+            limitations=[],
+        )
+        try:
+            check_result = self.checker.check(checker_input)
+            return apply_evidence_check_result(checker_input, check_result)
+        except Exception as exc:
+            self._diagnostics.append(
+                EnvironmentDiagnostic(
+                    code="target_recheck_rejected",
+                    description=str(exc),
+                    action_id=recheck_action_id,
+                    question_id=target.question_id,
+                )
+            )
+            return memory
 
     def _finalize_root_from_evidence(
         self,
@@ -1309,12 +1388,17 @@ class ReadingEnvironment:
         inputs_by_id = {item.input_id: item for item in record.inputs}
         return [
             ControllerLimitation(
+                code=item.code,
                 description=item.description,
                 source_ids=[
-                    inputs_by_id[input_id].source_id
+                    (
+                        inputs_by_id[input_id].element_id
+                        or inputs_by_id[input_id].source_id
+                    )
                     for input_id in item.input_ids
                     if input_id in inputs_by_id
                 ],
+                relevant_visible_content=item.relevant_visible_content,
             )
             for item in limitations
         ]
@@ -1354,6 +1438,7 @@ class ReadingEnvironment:
             )
             view = built.view
             self._table_views[view.table_view_id] = view
+            visual_path = self._asset_path(view.outer_visual_path)
             return ReadInput(
                 input_id=input_id,
                 source_id=view.table_view_id,
@@ -1363,6 +1448,17 @@ class ReadingEnvironment:
                 page_id=element.page_id,
                 element_id=element.element_id,
                 table_view_id=view.table_view_id,
+                visual_asset_id=(
+                    "visual:"
+                    + stable_digest(
+                        self.document.document_id,
+                        element.element_id,
+                        "table_visual",
+                    )
+                    if visual_path is not None
+                    else None
+                ),
+                visual_asset_path=visual_path,
             )
 
         visual_path = self._asset_path(element.visual_asset_path)

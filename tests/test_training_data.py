@@ -14,7 +14,7 @@ def _record(**updates):
     payload = {
         "example_id": "example:1",
         "component": "controller",
-        "prompt_version": "controller-policy-v0.10",
+        "prompt_version": "controller-policy-v0.11",
         "input_text": '{"current_gap":{"description":"Find revenue"}}',
         "target": {"action": "STOP", "reason": "No justified route remains."},
     }

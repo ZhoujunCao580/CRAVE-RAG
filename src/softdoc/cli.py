@@ -20,6 +20,7 @@ from softdoc.external_data import (
 )
 from softdoc.model_backends import (
     ModelBackedReader,
+    MultimodalTableReaderBackend,
     OllamaAnswererBackend,
     OllamaEvidenceCheckerBackend,
     OllamaModelConfig,
@@ -120,6 +121,16 @@ def build_parser() -> argparse.ArgumentParser:
     run_model.add_argument("--planner-max-tokens", type=int, default=768)
     run_model.add_argument("--controller-max-tokens", type=int, default=512)
     run_model.add_argument("--reader-max-tokens", type=int, default=1536)
+    run_model.add_argument(
+        "--multimodal-table-reader",
+        action="store_true",
+        help=(
+            "Use the frozen multimodal Table Reader for every selected Table, "
+            "with all available structured, text, and pixel representations. "
+            "Without this flag, the existing deterministic table reader "
+            "remains active."
+        ),
+    )
     run_model.add_argument("--checker-max-tokens", type=int, default=1536)
     run_model.add_argument("--answerer-max-tokens", type=int, default=768)
     run_model.add_argument("--run-key", default="model-v0")
@@ -350,7 +361,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             visual_client = OllamaStructuredClient(OllamaModelConfig(model=args.visual_model, context_length=args.context_length, **common))
             answerer_client = text_client
         reader = ModelBackedReader(
-            OllamaVisualReaderBackend(visual_client)
+            OllamaVisualReaderBackend(visual_client),
+            table_reader=(
+                MultimodalTableReaderBackend(visual_client)
+                if args.multimodal_table_reader
+                else None
+            ),
         )
         if args.visual_search_index is not None and not args.dense:
             raise ValueError("--visual-search-index requires --dense")

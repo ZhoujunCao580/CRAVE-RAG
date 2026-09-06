@@ -63,7 +63,12 @@ from softdoc.retrieval.models import (
     VisualSearchResult,
 )
 from softdoc.retrieval.session import SearchSessionBuilder, SearchSessionNavigator
-from softdoc.retrieval.units import SearchUnitBuilder, html_to_text
+from softdoc.retrieval.units import (
+    SearchUnitBuilder,
+    TableHeaderContext,
+    html_to_text,
+    table_header_context,
+)
 from softdoc.retrieval.visual_dense import VisualDenseIndex
 
 __all__ = [
@@ -110,6 +115,7 @@ __all__ = [
     "SearchUnit",
     "SearchUnitBuildResult",
     "SearchUnitBuilder",
+    "TableHeaderContext",
     "SearchUnitConfig",
     "SearchBatch",
     "SearchSession",
@@ -128,4 +134,5 @@ __all__ = [
     "e5_prefixed_text",
     "resolve_dense_device",
     "html_to_text",
+    "table_header_context",
 ]

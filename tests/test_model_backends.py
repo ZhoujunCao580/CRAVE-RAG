@@ -133,6 +133,9 @@ def test_visual_reader_backend_sends_pixels_and_maps_local_sources(tmp_path: Pat
     payload = transport.calls[0][1]
     assert payload["format"]["title"] == "VisualReadResult"
     assert len(payload["messages"][1]["images"]) == 1
+    assert '"physical_page_number": 1' in payload["messages"][1]["content"]
+    assert '"document_page_count": 1' in payload["messages"][1]["content"]
+    assert '"is_last_page": true' in payload["messages"][1]["content"]
     assert client.call_records[0].component == "visual_reader"
 
 
