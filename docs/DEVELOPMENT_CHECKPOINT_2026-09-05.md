@@ -9,8 +9,8 @@ information.
 
 ## Frozen model contracts
 
-- Planner: `planner-v0.21`
-- Controller: `controller-policy-v0.11`
+- Planner: `planner-v0.22`
+- Controller: `controller-policy-v0.12`
 - Controller input/action: `controller-input-v0.4` / `controller-action-v0.3`
 - Checker: `checker-v2.4`
 - Answerer: `answerer-v0.8`

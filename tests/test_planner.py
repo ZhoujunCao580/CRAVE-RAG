@@ -114,6 +114,26 @@ def test_simple_fact_can_use_empty_plan() -> None:
     }
 
 
+def test_coverage_requirement_survives_planner_validation() -> None:
+    question = "How many people are shown in Figures on Pages 18-19?"
+    payload = _plan(question, [])
+    payload["coverage_requirement"] = {
+        "required": True,
+        "operator": "count",
+        "scope_text": "Pages 18-19",
+        "item_type": "person",
+        "source_type": "figure",
+        "predicate": None,
+    }
+
+    result = InitialPlanner(MockPlannerBackend(payload)).create_plan(question)
+
+    assert result.coverage_requirement is not None
+    assert result.coverage_requirement.scope_text == "Pages 18-19"
+    assert result.coverage_requirement.item_type == "person"
+    assert result.coverage_requirement.source_type.value == "figure"
+
+
 def test_independent_facts_are_parallel_not_artificially_sequential() -> None:
     question = "What were the revenues in 2022 and 2023?"
     backend = MockPlannerBackend(
@@ -372,14 +392,17 @@ def test_prompt_defines_empty_parallel_and_dependent_plans() -> None:
     assert "Figure 6" not in prompt
 
 
-def test_planner_v021_prompt_is_frozen() -> None:
+def test_planner_v022_prompt_is_frozen() -> None:
     prompt = build_initial_planner_prompt("FROZEN PLANNER PROMPT SNAPSHOT")
     system = build_initial_planner_system_prompt()
-    assert INITIAL_PLANNER_PROMPT_VERSION == "planner-v0.21"
+    assert INITIAL_PLANNER_PROMPT_VERSION == "planner-v0.22"
+    assert "Coverage requirement extension (Planner v0.22)" in system
+    assert "Do not convert printed page" in system
+    assert "labels to physical PDF positions" in system
     assert "verify semantic closure" in system
     assert "without another unstated factual input" in system
     assert sha256(prompt.encode("utf-8")).hexdigest() == (
-        "438e0a1ca2d61fc3aa5d596a10ad4f2aa8fa7475030b962372ea5eb0f1c49499"
+        "90ff1a1f699836e554497bf51a0cf61d7646f9c9e81b209a2139faf0d2b00c87"
     )
 
 

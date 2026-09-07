@@ -1,5 +1,90 @@
 {
   "$defs": {
+    "CoverageOperator": {
+      "enum": [
+        "count",
+        "collect_all",
+        "top_k",
+        "argmax",
+        "argmin",
+        "complement"
+      ],
+      "title": "CoverageOperator",
+      "type": "string"
+    },
+    "CoverageRequirement": {
+      "additionalProperties": false,
+      "description": "Static Planner output; it never contains runtime counts or page IDs.",
+      "properties": {
+        "required": {
+          "const": true,
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "operator": {
+          "$ref": "#/$defs/CoverageOperator"
+        },
+        "scope_text": {
+          "minLength": 1,
+          "title": "Scope Text",
+          "type": "string"
+        },
+        "item_type": {
+          "minLength": 1,
+          "title": "Item Type",
+          "type": "string"
+        },
+        "source_type": {
+          "$ref": "#/$defs/CoverageSourceType"
+        },
+        "predicate": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Predicate"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Limit"
+        }
+      },
+      "required": [
+        "operator",
+        "scope_text",
+        "item_type",
+        "source_type"
+      ],
+      "title": "CoverageRequirement",
+      "type": "object"
+    },
+    "CoverageSourceType": {
+      "enum": [
+        "page",
+        "table",
+        "figure",
+        "chart",
+        "visual",
+        "element"
+      ],
+      "title": "CoverageSourceType",
+      "type": "string"
+    },
     "PlannedSubQuestion": {
       "additionalProperties": false,
       "description": "One independently checkable information need in the initial plan.",
@@ -20,6 +105,17 @@
           },
           "title": "Depends On",
           "type": "array"
+        },
+        "coverage_requirement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CoverageRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -44,6 +140,17 @@
       },
       "title": "Subquestions",
       "type": "array"
+    },
+    "coverage_requirement": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CoverageRequirement"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [

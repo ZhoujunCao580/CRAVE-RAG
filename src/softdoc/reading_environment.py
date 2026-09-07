@@ -40,6 +40,14 @@ from softdoc.controller import (
     ControllerStopAction,
     validate_controller_action,
 )
+from softdoc.coverage_reasoning import (
+    CoverageRequirement,
+    CoverageScopeResolver,
+    CoverageScopeStatus,
+    PageNumberNamespace,
+    QuestionCoveragePlan,
+    build_coverage_inventory,
+)
 from softdoc.ids import (
     action_id as make_action_id,
     observation_id as make_observation_id,
@@ -61,11 +69,14 @@ from softdoc.reading_state import (
     ActionExecutionStatus,
     ActionTrace,
     ActionTraceEntry,
+    EvidenceAddition,
     EvidenceCheckInput,
     EvidenceCheckResult,
     EvidenceMemory,
     EvidenceStatus,
+    EvidenceUpdates,
     ExplorationSourceHandle,
+    ObservationAssessment,
     ObservationLimitation,
     ObservationSourceRef,
     ObservationStore,
@@ -219,6 +230,9 @@ class ReadingEnvironmentConfig(SoftDocModel):
     recent_action_limit: int = Field(default=5, ge=0)
     observation_recall_limit: int = Field(default=3, ge=0, le=10)
     search: SearchSessionConfig = Field(default_factory=SearchSessionConfig)
+    coverage_namespace_overrides: dict[str, PageNumberNamespace] = Field(
+        default_factory=dict
+    )
 
 
 class ReadingRunResult(SoftDocModel):
@@ -234,6 +248,7 @@ class ReadingRunResult(SoftDocModel):
     activated_question_ids: list[str] = Field(default_factory=list)
     controller_input_history: list[ControllerInput] = Field(default_factory=list)
     exact_lookup_results: list[ExactLookupResult] = Field(default_factory=list)
+    coverage_plans: list[QuestionCoveragePlan] = Field(default_factory=list)
     diagnostics: list[EnvironmentDiagnostic] = Field(default_factory=list)
     answer: AnswerResult | None = None
 
@@ -450,6 +465,7 @@ class ReadingEnvironment:
         self._diagnostics: list[EnvironmentDiagnostic] = []
         self._controller_inputs: list[ControllerInput] = []
         self._exact_results: list[ExactLookupResult] = []
+        self._coverage_plans: list[QuestionCoveragePlan] = []
         self._stop_reason: str | None = None
         self._action_limit = self.config.action_budget
 
@@ -458,6 +474,7 @@ class ReadingEnvironment:
         *,
         root_question: RootQuestion,
         questions: list[QuestionState] | None = None,
+        coverage_requirements: dict[str, CoverageRequirement] | None = None,
         run_key: str = "v0",
     ) -> ReadingRunResult:
         # A ReadingEnvironment may be reused in tests or services.  Canonical
@@ -470,6 +487,18 @@ class ReadingEnvironment:
             root_question_text=root_question.text,
             questions=questions or [],
         )
+        known_question_ids = {
+            root_question.question_id,
+            *[item.question_id for item in memory.questions],
+        }
+        unknown_coverage_questions = set(coverage_requirements or {}).difference(
+            known_question_ids
+        )
+        if unknown_coverage_questions:
+            raise ValueError(
+                "Coverage requirements reference unknown questions: "
+                + ", ".join(sorted(unknown_coverage_questions))
+            )
         observations = ObservationStore(
             reading_session_id=session_id,
             root_question_id=root_question.question_id,
@@ -478,6 +507,7 @@ class ReadingEnvironment:
             reading_session_id=session_id,
             root_question_id=root_question.question_id,
         )
+        self._prepare_coverage_plans(coverage_requirements or {})
         return self._continue_run(
             root_question=root_question,
             memory=memory,
@@ -502,8 +532,22 @@ class ReadingEnvironment:
 
         if additional_action_budget < 1:
             raise ValueError("additional_action_budget must be positive")
-        if previous.status != ReadingRunStatus.BUDGET_EXHAUSTED:
-            raise ValueError("Only budget_exhausted runs may be resumed")
+        coverage_blocked = any(
+            item.code
+            in {
+                "coverage_scope_execution_blocked",
+                "coverage_semantic_execution_not_implemented",
+            }
+            for item in previous.diagnostics
+        )
+        if previous.status != ReadingRunStatus.BUDGET_EXHAUSTED and not (
+            previous.status == ReadingRunStatus.STOPPED_INCOMPLETE
+            and coverage_blocked
+        ):
+            raise ValueError(
+                "Only budget_exhausted runs or coverage-blocked checkpoints "
+                "may be resumed"
+            )
         if previous.answer is not None and not (
             previous.answer.answer == "Not answerable"
             and previous.answer.used_evidence_ids == []
@@ -539,6 +583,7 @@ class ReadingEnvironment:
         self._diagnostics = []
         self._controller_inputs = []
         self._exact_results = []
+        self._coverage_plans = []
         self._stop_reason = None
         self._action_limit = self.config.action_budget
 
@@ -597,10 +642,17 @@ class ReadingEnvironment:
                 + ", ".join(sorted(unknown_activated))
             )
         self._activated_question_ids = set(activated)
+        coverage_diagnostic_codes = {
+            "coverage_scope_not_resolved",
+            "coverage_page_namespace_review_recommended",
+            "coverage_scope_execution_blocked",
+            "coverage_semantic_execution_not_implemented",
+        }
         self._diagnostics = [
             item.model_copy(deep=True)
             for item in previous.diagnostics
             if item.code != "action_budget_exhausted"
+            and item.code not in coverage_diagnostic_codes
         ]
         self._controller_inputs = [
             item.model_copy(deep=True)
@@ -610,6 +662,79 @@ class ReadingEnvironment:
             item.model_copy(deep=True)
             for item in previous.exact_lookup_results
         ]
+        self._prepare_coverage_plans(
+            {
+                item.question_id: item.requirement
+                for item in previous.coverage_plans
+            }
+        )
+
+    def _prepare_coverage_plans(
+        self,
+        requirements: dict[str, CoverageRequirement],
+    ) -> None:
+        resolver = CoverageScopeResolver()
+        self._coverage_plans = []
+        for question_id, requirement in requirements.items():
+            resolution = resolver.resolve(
+                requirement,
+                self.document,
+                namespace_override=self.config.coverage_namespace_overrides.get(
+                    question_id
+                ),
+            )
+            inventory = build_coverage_inventory(
+                requirement,
+                resolution,
+                self.document,
+            )
+            self._coverage_plans.append(
+                QuestionCoveragePlan(
+                    question_id=question_id,
+                    requirement=requirement,
+                    scope_resolution=resolution,
+                    inventory=inventory,
+                )
+            )
+            if resolution.status != CoverageScopeStatus.RESOLVED:
+                self._diagnostics.append(
+                    EnvironmentDiagnostic(
+                        code="coverage_scope_not_resolved",
+                        description=(
+                            "Coverage scope was not fully resolved; deterministic "
+                            "coverage completion is blocked and no partial count "
+                            "may be treated as complete."
+                        ),
+                        question_id=question_id,
+                        metadata={
+                            "raw_scope_text": resolution.raw_scope_text,
+                            "chosen_namespace": (
+                                resolution.chosen_namespace.value
+                                if resolution.chosen_namespace is not None
+                                else None
+                            ),
+                            "status": resolution.status.value,
+                            "missing_labels": resolution.missing_labels,
+                            "ambiguous_labels": resolution.ambiguous_labels,
+                        },
+                    )
+                )
+            elif resolution.requires_review:
+                self._diagnostics.append(
+                    EnvironmentDiagnostic(
+                        code="coverage_page_namespace_review_recommended",
+                        description=(
+                            "Both printed-label and physical-page interpretations "
+                            "resolve but select different pages. The recorded choice "
+                            "can be replaced with an explicit namespace override."
+                        ),
+                        question_id=question_id,
+                        metadata={
+                            "raw_scope_text": resolution.raw_scope_text,
+                            "chosen_namespace": resolution.chosen_namespace.value,
+                        },
+                    )
+                )
 
     def _reconstruct_visible_batch(self, session: SearchSession) -> SearchBatch:
         size = session.config.batch_size
@@ -674,6 +799,17 @@ class ReadingEnvironment:
             target = memory.current_target
             if target is None:
                 raise ValueError("Incomplete reading state lost its current target")
+            observations, memory, trace, counted = self._route_structural_coverage(
+                root_question=root_question,
+                memory=memory,
+                observations=observations,
+                trace=trace,
+            )
+            if counted:
+                self._validate_state(observations, memory, trace)
+                continue
+            if self._block_unimplemented_coverage(target.question_id):
+                break
             if target.question_id not in self._activated_question_ids:
                 self._activated_question_ids.add(target.question_id)
                 observations, memory, trace, routed = self._route_exact_anchors(
@@ -754,6 +890,7 @@ class ReadingEnvironment:
             activated_question_ids=sorted(self._activated_question_ids),
             controller_input_history=self._controller_inputs,
             exact_lookup_results=self._exact_results,
+            coverage_plans=self._coverage_plans,
             diagnostics=self._diagnostics,
             answer=answer,
         )
@@ -785,8 +922,255 @@ class ReadingEnvironment:
                 )
                 for item in plan.subquestions
             ],
+            coverage_requirements={
+                **(
+                    {root_question_id: plan.coverage_requirement}
+                    if plan.coverage_requirement is not None
+                    else {}
+                ),
+                **{
+                    item.subquestion_id: item.coverage_requirement
+                    for item in plan.subquestions
+                    if item.coverage_requirement is not None
+                },
+            },
             run_key=run_key,
         )
+
+    def _route_structural_coverage(
+        self,
+        *,
+        root_question: RootQuestion,
+        memory: EvidenceMemory,
+        observations: ObservationStore,
+        trace: ActionTrace,
+    ) -> tuple[ObservationStore, EvidenceMemory, ActionTrace, bool]:
+        """Materialize an exact count only when canonical inventory is complete.
+
+        This is an Environment-owned operation, not a model inference.  It is
+        intentionally unavailable for semantic predicates or when the counted
+        item differs from the enumerated source (for example, people inside
+        figures).  Persisting it as one structural Observation keeps the final
+        answer grounded in the exact canonical source set and makes resume and
+        auditing use the same stores as ordinary Reader output.
+        """
+
+        target = memory.current_target
+        if target is None:
+            return observations, memory, trace, False
+        plan = next(
+            (
+                item
+                for item in self._coverage_plans
+                if item.question_id == target.question_id
+            ),
+            None,
+        )
+        if plan is None or plan.inventory.structural_count is None:
+            return observations, memory, trace, False
+        if any(
+            entry.action_name == "COUNT_INVENTORY"
+            and entry.question_id == target.question_id
+            for entry in trace.entries
+        ):
+            return observations, memory, trace, False
+
+        step = len(trace.entries)
+        current_action_id = make_action_id(trace.reading_session_id, step)
+        pages_by_id = {page.page_id: page for page in self.document.pages}
+        elements_by_id = {
+            element.element_id: element for element in self.document.elements
+        }
+        ordered_source_ids: list[str] = []
+        source_page_ids: dict[str, str] = {}
+        for item in plan.inventory.items:
+            for index, source_id in enumerate(item.source_ids):
+                if source_id not in source_page_ids:
+                    element = elements_by_id.get(source_id)
+                    if element is not None:
+                        source_page_ids[source_id] = element.page_id
+                    else:
+                        page_index = min(index, len(item.page_ids) - 1)
+                        source_page_ids[source_id] = item.page_ids[page_index]
+                    ordered_source_ids.append(source_id)
+        # A valid zero count still needs provenance.  Ground it in every page
+        # of the exhaustively resolved scope rather than inventing a source.
+        if not ordered_source_ids:
+            for page in plan.scope_resolution.resolved_pages:
+                ordered_source_ids.append(page.page_id)
+                source_page_ids[page.page_id] = page.page_id
+
+        inputs: list[ReadInput] = []
+        source_refs: list[ObservationSourceRef] = []
+        for index, source_id in enumerate(ordered_source_ids):
+            page_id = source_page_ids[source_id]
+            page = pages_by_id[page_id]
+            element = elements_by_id.get(source_id)
+            input_id = read_input_id(index)
+            read_input = ReadInput(
+                input_id=input_id,
+                source_id=source_id,
+                source_type=(
+                    ReadingSourceType.ELEMENT
+                    if element is not None
+                    else ReadingSourceType.PAGE
+                ),
+                representation=ReadRepresentation.STRUCTURAL_METADATA,
+                document_id=self.document.document_id,
+                page_id=page_id,
+                element_id=element.element_id if element is not None else None,
+            )
+            inputs.append(read_input)
+            source_refs.append(
+                ObservationSourceRef(
+                    input_id=input_id,
+                    source_id=source_id,
+                    page_id=page_id,
+                    physical_page_number=page.page_number,
+                    display_page_label=page.display_page_label,
+                    element_id=(
+                        element.element_id if element is not None else None
+                    ),
+                )
+            )
+
+        count = plan.inventory.structural_count
+        observation = StoredObservation(
+            observation_id=make_observation_id(current_action_id, 0),
+            action_id=current_action_id,
+            text=(
+                f"The exhaustively resolved scope {plan.requirement.scope_text!r} "
+                f"contains exactly {count} canonical "
+                f"{plan.requirement.source_type.value} source(s), after confirmed "
+                "cross-page deduplication."
+            ),
+            sources=source_refs,
+        )
+        record = ReadRecord(
+            action_id=current_action_id,
+            reader_kind="coverage",
+            document_id=self.document.document_id,
+            subquestion_id=(
+                target.question_id
+                if target.question_id != root_question.question_id
+                else None
+            ),
+            local_problem=target.gap_description,
+            inputs=inputs,
+            observation_ids=[observation.observation_id],
+        )
+        next_observations = ObservationStore(
+            reading_session_id=observations.reading_session_id,
+            root_question_id=observations.root_question_id,
+            read_records=[*observations.read_records, record],
+            observations=[*observations.observations, observation],
+        )
+        checker_input = EvidenceCheckInput(
+            action_id=current_action_id,
+            root_question=root_question,
+            evidence_memory=memory,
+            observations=[observation],
+        )
+        check_result = EvidenceCheckResult(
+            action_id=current_action_id,
+            observation_assessments=[
+                ObservationAssessment(
+                    observation_id=observation.observation_id,
+                    used_for_evidence=True,
+                    assessment=(
+                        "Accepted deterministic Environment inventory with "
+                        "complete resolved scope."
+                    ),
+                )
+            ],
+            evidence_updates=EvidenceUpdates(
+                add=[
+                    EvidenceAddition(
+                        statement=observation.text,
+                        observation_ids=[observation.observation_id],
+                        supports_question_ids=[target.question_id],
+                    )
+                ]
+            ),
+            current_target_status=QuestionStatus.SATISFIED,
+            root_status=(
+                EvidenceStatus.READY
+                if target.question_id == root_question.question_id
+                else EvidenceStatus.INCOMPLETE
+            ),
+        )
+        next_memory = apply_evidence_check_result(checker_input, check_result)
+        entry = ActionTraceEntry(
+            step_index=step,
+            action_id=current_action_id,
+            question_id=target.question_id,
+            action_name="COUNT_INVENTORY",
+            target_ids=[item.inventory_id for item in plan.inventory.items],
+            execution_status=ActionExecutionStatus.SUCCEEDED,
+            observation_ids=[observation.observation_id],
+            metadata={
+                "scope_text": plan.requirement.scope_text,
+                "page_number_namespace": plan.scope_resolution.chosen_namespace.value,
+                "resolved_page_ids": plan.scope_resolution.resolved_page_ids,
+                "source_type": plan.requirement.source_type.value,
+                "structural_count": count,
+            },
+        )
+        next_trace = ActionTrace(
+            reading_session_id=trace.reading_session_id,
+            root_question_id=trace.root_question_id,
+            entries=[*trace.entries, entry],
+        )
+        if next_memory.root_status != EvidenceStatus.READY:
+            next_memory = self._advance_state_only_checks(
+                root_question=root_question,
+                previous_memory=memory,
+                memory=next_memory,
+                observations=next_observations,
+                triggering_action_id=current_action_id,
+            )
+        return next_observations, next_memory, next_trace, True
+
+    def _block_unimplemented_coverage(self, question_id: str) -> bool:
+        """Prevent ordinary semantic QA from pretending coverage is complete."""
+
+        plan = next(
+            (item for item in self._coverage_plans if item.question_id == question_id),
+            None,
+        )
+        if plan is None:
+            return False
+        if plan.inventory.status.value == "blocked":
+            code = "coverage_scope_execution_blocked"
+            description = (
+                "Coverage execution stopped because the requested scope is "
+                "unresolved or requires a page-namespace review. Apply an "
+                "explicit namespace override before resuming."
+            )
+        else:
+            code = "coverage_semantic_execution_not_implemented"
+            description = (
+                "Coverage inventory is complete, but this requirement needs "
+                "semantic per-item inspection; ordinary SEARCH/READ cannot be "
+                "treated as exhaustive completion."
+            )
+        self._stop_reason = description
+        self._diagnostics.append(
+            EnvironmentDiagnostic(
+                code=code,
+                description=description,
+                question_id=question_id,
+                metadata={
+                    "scope_text": plan.requirement.scope_text,
+                    "operator": plan.requirement.operator.value,
+                    "item_type": plan.requirement.item_type,
+                    "source_type": plan.requirement.source_type.value,
+                    "scope_status": plan.scope_resolution.status.value,
+                    "requires_review": plan.scope_resolution.requires_review,
+                },
+            )
+        )
+        return True
 
     def _route_exact_anchors(
         self,

@@ -8,6 +8,13 @@ from PIL import Image
 
 from softdoc.answering import AnswerInput, AnswerResult
 from softdoc.controller import ControllerAction, ControllerInput
+from softdoc.coverage_reasoning import (
+    CoverageInventoryStatus,
+    CoverageOperator,
+    CoverageRequirement,
+    CoverageSourceType,
+    PageNumberNamespace,
+)
 from softdoc.models import (
     Document,
     Element,
@@ -1649,6 +1656,271 @@ def test_root_direct_initial_plan_runs_without_a_synthetic_subquestion(
         "root:direct-plan"
     ]
     assert result.answer is not None
+
+
+def test_plan_coverage_scope_is_persisted_and_can_be_overridden(
+    tmp_path: Path,
+) -> None:
+    document = _document(tmp_path, page_element_specs=[[], [], []])
+    # Printed Pages 1-2 point at physical pages 2-3, so automatic resolution
+    # records both interpretations but refuses to call either count complete.
+    for page, label in zip(document.pages[1:], ["1", "2"], strict=True):
+        object.__setattr__(page, "display_page_label", label)
+        object.__setattr__(page, "display_page_label_confidence", 0.99)
+        object.__setattr__(page, "page_label_aliases", [label])
+    requirement = CoverageRequirement(
+        operator=CoverageOperator.COUNT,
+        scope_text="Pages 1-2",
+        item_type="figure",
+        source_type=CoverageSourceType.FIGURE,
+    )
+    plan = InitialPlan(
+        original_question="How many figures appear on Pages 1-2?",
+        subquestions=[],
+        coverage_requirement=requirement,
+        planner_trace=PlannerTrace(
+            backend_name="teacher",
+            model="scripted",
+            prompt_version="planner-v0.22",
+        ),
+    )
+
+    first = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=QueueController(
+            [{"action": "STOP", "reason": "Coverage probe complete."}]
+        ),
+        reader=DeterministicContentReader(),
+        checker=PredicateChecker(lambda _text: False),
+        answerer=EvidenceAnswerer(),
+    ).run_with_plan(
+        root_question_id="root:coverage",
+        plan=plan,
+        run_key="coverage",
+    )
+
+    assert first.coverage_plans[0].scope_resolution.requires_review is True
+    assert first.coverage_plans[0].inventory.status == CoverageInventoryStatus.BLOCKED
+    assert any(
+        item.code == "coverage_page_namespace_review_recommended"
+        for item in first.diagnostics
+    )
+
+    # The correction path is deterministic and changes only scope resolution;
+    # it does not mutate the SoftDoc or rerun Planner/Reader model calls.
+    second = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=QueueController(
+            [{"action": "STOP", "reason": "Coverage probe complete."}]
+        ),
+        reader=DeterministicContentReader(),
+        checker=PredicateChecker(lambda _text: False),
+        answerer=EvidenceAnswerer(),
+        config=ReadingEnvironmentConfig(
+            coverage_namespace_overrides={
+                "root:coverage": PageNumberNamespace.PHYSICAL_PAGE_ORDER
+            }
+        ),
+    ).run_with_plan(
+        root_question_id="root:coverage",
+        plan=plan,
+        run_key="coverage-override",
+    )
+    scope = second.coverage_plans[0].scope_resolution
+    assert scope.decision_reason == "explicit_namespace_override"
+    assert scope.resolved_page_ids == [
+        document.pages[0].page_id,
+        document.pages[1].page_id,
+    ]
+    assert second.coverage_plans[0].inventory.status == CoverageInventoryStatus.COMPLETE
+
+
+def test_complete_structural_inventory_becomes_grounded_evidence_without_models(
+    tmp_path: Path,
+) -> None:
+    document = _document(
+        tmp_path,
+        page_element_specs=[
+            [
+                {
+                    "element_id": "figure:1",
+                    "element_type": ElementType.FIGURE,
+                    "visual": True,
+                }
+            ],
+            [
+                {
+                    "element_id": "figure:2",
+                    "element_type": ElementType.FIGURE,
+                    "visual": True,
+                }
+            ],
+        ],
+    )
+    plan = InitialPlan(
+        original_question="How many figures are in the entire document?",
+        subquestions=[],
+        coverage_requirement=CoverageRequirement(
+            operator=CoverageOperator.COUNT,
+            scope_text="entire document",
+            item_type="figure",
+            source_type=CoverageSourceType.FIGURE,
+        ),
+        planner_trace=PlannerTrace(
+            backend_name="teacher",
+            model="scripted",
+            prompt_version="planner-v0.22",
+        ),
+    )
+
+    result = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=RejectingController(),
+        reader=DeterministicContentReader(),
+        checker=PredicateChecker(lambda _text: False),
+        answerer=EvidenceAnswerer(),
+    ).run_with_plan(
+        root_question_id="root:structural-count",
+        plan=plan,
+        run_key="structural-count",
+    )
+
+    assert result.status == ReadingRunStatus.READY
+    assert result.action_trace.entries[0].action_name == "COUNT_INVENTORY"
+    assert result.action_trace.entries[0].metadata["structural_count"] == 2
+    assert result.observation_store.read_records[0].reader_kind == "coverage"
+    assert {
+        source.source_id
+        for source in result.observation_store.observations[0].sources
+    } == {"figure:1", "figure:2"}
+    assert (
+        "exactly 2 canonical figure"
+        in result.evidence_memory.evidence[0].statement
+    )
+    assert result.answer is not None
+
+
+def test_semantic_item_count_does_not_bypass_reader_or_controller(
+    tmp_path: Path,
+) -> None:
+    document = _document(
+        tmp_path,
+        page_element_specs=[
+            [
+                {
+                    "element_id": "figure:1",
+                    "element_type": ElementType.FIGURE,
+                    "visual": True,
+                }
+            ]
+        ],
+    )
+    plan = InitialPlan(
+        original_question="How many people are shown in the figures?",
+        subquestions=[],
+        coverage_requirement=CoverageRequirement(
+            operator=CoverageOperator.COUNT,
+            scope_text="entire document",
+            item_type="person",
+            source_type=CoverageSourceType.FIGURE,
+        ),
+        planner_trace=PlannerTrace(
+            backend_name="teacher",
+            model="scripted",
+            prompt_version="planner-v0.22",
+        ),
+    )
+    controller = QueueController(
+        [{"action": "STOP", "reason": "Semantic inspection not run in this test."}]
+    )
+
+    result = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=controller,
+        reader=DeterministicContentReader(),
+        checker=PredicateChecker(lambda _text: False),
+        answerer=EvidenceAnswerer(),
+    ).run_with_plan(
+        root_question_id="root:semantic-count",
+        plan=plan,
+        run_key="semantic-count",
+    )
+
+    assert result.status == ReadingRunStatus.STOPPED_INCOMPLETE
+    assert result.action_trace.entries == []
+    assert result.coverage_plans[0].inventory.structural_count is None
+    assert any(
+        item.code == "coverage_semantic_execution_not_implemented"
+        for item in result.diagnostics
+    )
+
+
+def test_namespace_override_can_recover_a_checkpoint_without_replaying_models(
+    tmp_path: Path,
+) -> None:
+    document = _document(tmp_path, page_element_specs=[[], [], []])
+    for page, label in zip(document.pages[1:], ["1", "2"], strict=True):
+        object.__setattr__(page, "display_page_label", label)
+        object.__setattr__(page, "display_page_label_confidence", 0.99)
+        object.__setattr__(page, "page_label_aliases", [label])
+    plan = InitialPlan(
+        original_question="How many figures appear on Pages 1-2?",
+        subquestions=[],
+        coverage_requirement=CoverageRequirement(
+            operator=CoverageOperator.COUNT,
+            scope_text="Pages 1-2",
+            item_type="figure",
+            source_type=CoverageSourceType.FIGURE,
+        ),
+        planner_trace=PlannerTrace(
+            backend_name="teacher",
+            model="scripted",
+            prompt_version="planner-v0.22",
+        ),
+    )
+    first = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=RejectingController(),
+        reader=DeterministicContentReader(),
+        checker=PredicateChecker(lambda _text: False),
+        answerer=EvidenceAnswerer(),
+        config=ReadingEnvironmentConfig(action_budget=1),
+    ).run_with_plan(
+        root_question_id="root:override-resume",
+        plan=plan,
+        run_key="override-resume",
+    )
+    assert first.status == ReadingRunStatus.STOPPED_INCOMPLETE
+    assert first.coverage_plans[0].inventory.status == CoverageInventoryStatus.BLOCKED
+    assert first.action_trace.entries == []
+
+    second = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=RejectingController(),
+        reader=DeterministicContentReader(),
+        checker=PredicateChecker(lambda _text: False),
+        answerer=EvidenceAnswerer(),
+        config=ReadingEnvironmentConfig(
+            action_budget=1,
+            coverage_namespace_overrides={
+                "root:override-resume": PageNumberNamespace.PHYSICAL_PAGE_ORDER
+            },
+        ),
+    ).resume(first, additional_action_budget=1)
+
+    assert second.status == ReadingRunStatus.READY
+    assert [item.action_name for item in second.action_trace.entries] == [
+        "COUNT_INVENTORY"
+    ]
+    assert second.coverage_plans[0].scope_resolution.decision_reason == (
+        "explicit_namespace_override"
+    )
 
 
 def test_controller_can_stop_cleanly_with_incomplete_evidence(tmp_path: Path) -> None:

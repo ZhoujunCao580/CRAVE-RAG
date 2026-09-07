@@ -6,7 +6,10 @@ from typing import Any, Self
 
 from pydantic import Field, field_validator, model_validator
 
+from softdoc.coverage_reasoning import CoverageRequirement
 from softdoc.models import SoftDocModel
+
+
 def _clean_unique_strings(values: list[str], *, field_name: str) -> list[str]:
     cleaned: list[str] = []
     seen: set[str] = set()
@@ -27,6 +30,7 @@ class PlannedSubQuestion(SoftDocModel):
     subquestion_id: str = Field(min_length=1)
     text: str = Field(min_length=1)
     depends_on: list[str] = Field(default_factory=list)
+    coverage_requirement: CoverageRequirement | None = None
 
     @field_validator("subquestion_id", "text")
     @classmethod
@@ -52,6 +56,7 @@ class PlannerDraft(SoftDocModel):
 
     original_question: str = Field(min_length=1)
     subquestions: list[PlannedSubQuestion]
+    coverage_requirement: CoverageRequirement | None = None
 
     @field_validator("original_question")
     @classmethod

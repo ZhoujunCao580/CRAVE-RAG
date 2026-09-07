@@ -11,8 +11,9 @@ current evidence gap with minimal unnecessary reading.
 # Boundaries
 
 Treat ControllerInput as read-only.
-Choose exactly one action from the available actions, using only IDs supplied
-in ControllerInput.
+Choose exactly one action from the available actions, using only IDs that are
+currently actionable for that specific action. An ID merely appearing anywhere
+in ControllerInput is not automatically an actionable handle.
 Return only the action JSON matching the provided Schema.
 
 # Input semantics
@@ -37,14 +38,22 @@ and current_gap is present.
   and Checker assessments. A missing_header_context limitation preserves the
   question-relevant visible row or cells and names the original source that
   must be read again with a compatible header source. Avoid meaningless
-  repetition.
+  repetition. target_ids that appear only in recent_actions are historical
+  records, not current READ_SOURCE handles. Never copy such an ID into a new
+  action unless the identical ID is also present in the current actionable
+  fields described below.
 - confirmed_relations are accepted document-structure links that may be
   followed normally. Each relation's related_source_preview is a lightweight
   description of the source that would be read; it is a navigation clue, not
-  Evidence.
+  Evidence. Use the relation_id with FOLLOW_RELATION. Do not pass an endpoint
+  source_id or target_id to READ_SOURCE unless that identical ID is separately
+  present in current CandidatePreviews, Exact Anchor matches, or
+  reading_locations.source_id.
 - candidate_relations are uncertain navigation opportunities. Their
   related_source_preview describes what can be investigated, but neither the
-  preview nor reading that source confirms that the relation is true.
+  preview nor reading that source confirms that the relation is true. Use the
+  relation_id with EXPLORE_CANDIDATE_RELATION; the same endpoint-ID restriction
+  applies.
 - search_tabs are persistent search sessions. A tab with has_more=true can
   expose another batch.
 - visible_search_view contains the CandidatePreviews currently visible to you.
@@ -115,7 +124,12 @@ and current_gap is present.
    address that failure.
 
 8. Do not infer meaning, type, or page order from the spelling of an ID. Use
-   only the explicit fields supplied in ControllerInput.
+   only the explicit currently actionable fields supplied in ControllerInput.
+   READ_SOURCE accepts only current CandidatePreview element_id values, current
+   Exact Anchor target_id values, and reading_locations.source_id values.
+   Relation IDs and page-context base IDs belong only to their corresponding
+   actions. Historical IDs from recent_actions are never sufficient by
+   themselves.
 
 9. Normally read one source at a time. Use multiple source_ids only when the
    local reading problem genuinely requires a joint comparison. In particular,

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from enum import Enum
 from pathlib import Path
-from typing import Any, Iterable, Self
+from typing import Any, Iterable, Literal, Self
 
 from pydantic import Field, field_validator, model_validator
 
@@ -66,6 +66,7 @@ class ReadRepresentation(str, Enum):
     ELEMENT_VISUAL = "element_visual"
     PAGE_VISUAL = "page_visual"
     REGION_CROP = "region_crop"
+    STRUCTURAL_METADATA = "structural_metadata"
 
 
 class ReadInput(SoftDocModel):
@@ -217,7 +218,7 @@ class ReadRecord(SoftDocModel):
     """Canonical record of one read, including reads with no Observation."""
 
     action_id: str = Field(min_length=1)
-    reader_kind: ReaderKind
+    reader_kind: ReaderKind | Literal["coverage"]
     document_id: str = Field(min_length=1)
     subquestion_id: str | None = Field(default=None, min_length=1)
     local_problem: str = Field(min_length=1)

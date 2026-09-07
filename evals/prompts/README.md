@@ -17,10 +17,10 @@ Generator conversation must use only the materialized `model_inputs/` packet.
 
 | Component | Current Prompt | Current case inventory | Folder |
 |---|---|---|---|
-| Planner | `planner-v0.21` | 49 development cases with separate model input and reviewer-only Gold; Q7 semantic-closure regression is tracked separately until adjudicated | [planner](planner/README.md) |
+| Planner | `planner-v0.22` | v0.21 semantic-closure rules plus explicit coverage requirements; development cases keep model input separate from reviewer-only Gold | [planner](planner/README.md) |
 | Visual Reader | `visual-reader-v0.5` | 35 cases: 25 real-image regressions and 10 controlled boundaries; runtime packets now include canonical physical-page boundaries | [visual_reader](visual_reader/README.md) |
 | Checker | `checker-v2.2` | Synthetic state-transition cases include limitation-only reading, current-target Evidence, explicit target reuse, and Root finalization; provenance is derived by the runtime | [checker](checker/README.md) |
-| Controller | `controller-policy-v0.11` | 28 historical v0.6 split cases: 20 synthetic decisions and 8 historical real trajectory steps; page-context and missing-header recovery cases are tracked for the next materialization | [controller](controller/README.md) |
+| Controller | `controller-policy-v0.12` | 28 historical v0.6 split cases: 20 synthetic decisions and 8 historical real trajectory steps; page-context and missing-header recovery cases are tracked for the next materialization | [controller](controller/README.md) |
 | Answerer | `answerer-v0.8` | 24 English cases: 14 regressions and 10 new boundaries | [answerer](answerer/README.md) |
 | End to end | multiple | real trajectory replay is not frozen yet | [integration](integration/README.md) |
 

@@ -43,14 +43,17 @@ Planner may decompose them. Independent needs remain parallel:
     {
       "subquestion_id": "Q1",
       "text": "What was the revenue in 2022?",
-      "depends_on": []
+      "depends_on": [],
+      "coverage_requirement": null
     },
     {
       "subquestion_id": "Q2",
       "text": "What was the revenue in 2023?",
-      "depends_on": []
+      "depends_on": [],
+      "coverage_requirement": null
     }
-  ]
+  ],
+  "coverage_requirement": null
 }
 ```
 
@@ -63,23 +66,44 @@ After validation, the program adds `planner_trace` and stores an `InitialPlan`:
     {
       "subquestion_id": "Q1",
       "text": "What was the revenue in 2022?",
-      "depends_on": []
+      "depends_on": [],
+      "coverage_requirement": null
     },
     {
       "subquestion_id": "Q2",
       "text": "What was the revenue in 2023?",
-      "depends_on": []
+      "depends_on": [],
+      "coverage_requirement": null
     }
   ],
+  "coverage_requirement": null,
   "planner_trace": {
     "backend_name": "ollama",
     "model": "qwen3:8b",
-    "prompt_version": "planner-v0.21",
+    "prompt_version": "planner-v0.22",
     "warnings": [],
     "metadata": {}
   }
 }
 ```
+
+Coverage-style targets use a static Planner annotation such as:
+
+```json
+{
+  "required": true,
+  "operator": "count",
+  "scope_text": "Pages 18-19",
+  "item_type": "person",
+  "source_type": "figure",
+  "predicate": null
+}
+```
+
+The Planner preserves `scope_text` and never chooses printed versus physical
+page numbering. The Environment resolves it to canonical `page_id` values,
+persists both interpretations when they differ, and blocks a complete inventory
+until an explicit namespace override resolves the ambiguity.
 
 ## 2. Visual retrieval indexing
 

@@ -117,14 +117,6 @@
       "title": "EvidenceReplacement",
       "type": "object"
     },
-    "EvidenceStatus": {
-      "enum": [
-        "incomplete",
-        "ready"
-      ],
-      "title": "EvidenceStatus",
-      "type": "string"
-    },
     "EvidenceUpdates": {
       "additionalProperties": false,
       "properties": {
@@ -180,11 +172,15 @@
     "evidence_updates": {
       "$ref": "#/$defs/EvidenceUpdates"
     },
+    "reused_evidence_ids": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Reused Evidence Ids",
+      "type": "array"
+    },
     "current_target_status": {
       "$ref": "#/$defs/QuestionStatus"
-    },
-    "root_status": {
-      "$ref": "#/$defs/EvidenceStatus"
     },
     "remaining_gap_description": {
       "anyOf": [
@@ -202,8 +198,7 @@
   },
   "required": [
     "action_id",
-    "current_target_status",
-    "root_status"
+    "current_target_status"
   ],
   "title": "EvidenceCheckDecision",
   "type": "object"

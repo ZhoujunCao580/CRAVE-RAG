@@ -1,7 +1,7 @@
 # Controller suite inventory
 
-- Canonical Prompt: `src/softdoc/prompts/controller_policy_v0_11.txt`
-- Registry version: `controller-policy-v0.11`
+- Canonical Prompt: `src/softdoc/prompts/controller_policy_v0_12.txt`
+- Registry version: `controller-policy-v0.12`
 - Current source and runner: `scripts/evaluate_controller_mock.py`
 - Materialized suite: 28 Controller decisions
   - 15 existing contract regressions;

@@ -95,6 +95,7 @@ class InitialPlanner:
             # otherwise valid plan.
             original_question=stripped_question,
             subquestions=draft.subquestions,
+            coverage_requirement=draft.coverage_requirement,
             planner_trace=PlannerTrace(
                 backend_name=self._backend.backend_name,
                 model=response.model,
