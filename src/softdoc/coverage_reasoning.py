@@ -730,7 +730,7 @@ def build_coverage_inventory(
                 inventory_id=page.page_id,
                 source_ids=[page.page_id],
                 page_ids=[page.page_id],
-                physical_page_numbers=[page.page_number],
+                physical_page_numbers=[page.physical_page_number],
                 source_type=CoverageSourceType.PAGE,
                 deduplication_reason="canonical_page_id",
             )

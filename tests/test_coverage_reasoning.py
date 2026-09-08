@@ -143,6 +143,23 @@ def test_out_of_range_scope_is_unresolved_and_cannot_generate_count(
     assert inventory.structural_count is None
 
 
+def test_page_inventory_preserves_resolved_physical_page_numbers(
+    parsed_document,
+) -> None:
+    requirement = _requirement(
+        "Slides 1-2",
+        item_type="page",
+        source_type=CoverageSourceType.PAGE,
+    )
+    resolution = CoverageScopeResolver().resolve(requirement, parsed_document)
+
+    inventory = build_coverage_inventory(requirement, resolution, parsed_document)
+
+    assert inventory.status == CoverageInventoryStatus.COMPLETE
+    assert [item.physical_page_numbers for item in inventory.items] == [[1], [2]]
+    assert inventory.structural_count == 2
+
+
 def test_structural_count_is_only_emitted_for_literal_matching_types(
     parsed_document,
 ) -> None:
