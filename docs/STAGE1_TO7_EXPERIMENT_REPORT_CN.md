@@ -28,7 +28,7 @@
 - 视觉简述缓存：85 条，位于 `/workspace/cache/visual-descriptors/qwen35-27b-v0-1/descriptors.jsonl`。
 - Stage 0 在跨平台图片路径修复后为 508/508；本轮全部新修复合并后的最终回归为 **522/522**。
 - Stage 3–6 的 171 题均有完整要求产物；最终 `cases_with_missing_artifacts=0`。
-- 服务器仓库最终为 `main@b3dfe59`，与 GitHub 一致且工作区干净。
+- 服务器实验代码快照为 `main@b3dfe59` 且工作区干净；实验结束后的报告提交只存在于本地/GitHub，未回传已停止的服务器，也不影响实验代码快照。
 
 ## 三、阶段 1：检索与 Candidate Preview
 
