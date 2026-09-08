@@ -106,9 +106,13 @@ from softdoc.reading_state import (
 from softdoc.reading_state_validation import ReadingStateReferenceValidator
 from softdoc.retrieval import (
     BM25Index,
+    CandidatePreview,
+    CandidateSelectionRoute,
     DenseSearchResult,
     ExactAnchorLookup,
     ExactLookupResult,
+    PreviewMatchScope,
+    RetrievalSource,
     SearchBatch,
     SearchSession,
     SearchSessionBuilder,
@@ -116,6 +120,7 @@ from softdoc.retrieval import (
     SearchSessionNavigator,
     SearchUnitBuildResult,
     SearchUnitBuilder,
+    SnippetSource,
     SubQuestionInput,
     VisualSearchResult,
     html_to_text,
@@ -632,11 +637,22 @@ class ReadingEnvironment:
             if len(self._visible_batches) != len(previous.visible_search_batches):
                 raise ValueError("Resume visible SearchBatch IDs must be unique")
         else:
-            self._visible_batches = {
-                session_id: self._reconstruct_visible_batch(session)
-                for session_id, session in self._sessions.items()
-                if session.cursor > 0
-            }
+            self._visible_batches = {}
+            for session_id, session in self._sessions.items():
+                if session.cursor <= 0:
+                    continue
+                session = self._remap_legacy_search_unit_ids(session)
+                self._sessions[session_id] = session
+                try:
+                    batch = self._reconstruct_visible_batch(session)
+                except ValueError as exc:
+                    if "unavailable SearchUnit" not in str(exc):
+                        raise
+                    batch = self._restore_legacy_visible_batch(
+                        previous,
+                        session,
+                    )
+                self._visible_batches[session_id] = batch
 
         visible_session_id = previous.visible_search_session_id
         if visible_session_id is None:
@@ -818,6 +834,167 @@ class ReadingEnvironment:
                 self.search.navigator.get_preview(session, element_id)
                 for element_id in visible_ids
             ],
+            next_cursor=session.cursor,
+            exhausted=session.exhausted,
+            retrieval_trace=session.retrieval_trace,
+        )
+
+    def _remap_legacy_search_unit_ids(self, session: SearchSession) -> SearchSession:
+        """Keep an old ranking usable after deterministic SearchUnit upgrades.
+
+        SearchSession ranks stable Element IDs, but early checkpoints also
+        persisted versioned SearchUnit IDs inside each candidate.  When a newer
+        builder changes those derived IDs, remap only the source handle to a
+        current unit for the same Element.  Ranking, cursor, shown/opened IDs,
+        and all prior actions remain unchanged.
+        """
+
+        units_by_id = {
+            item.search_unit_id: item for item in self.search.search_units.units
+        }
+        units_by_element: dict[str, list[Any]] = {}
+        for unit in self.search.search_units.units:
+            units_by_element.setdefault(unit.element_id, []).append(unit)
+        changed = False
+        candidates = []
+        for candidate in session.candidate_catalog:
+            referenced = [
+                candidate.bm25_search_unit_id,
+                candidate.dense_search_unit_id,
+                candidate.table_preview_search_unit_id,
+            ]
+            if all(item is None or item in units_by_id for item in referenced):
+                candidates.append(candidate)
+                continue
+            current_units = sorted(
+                units_by_element.get(candidate.element_id, []),
+                key=lambda item: (item.part_index, item.search_unit_id),
+            )
+            if not current_units:
+                candidates.append(candidate)
+                continue
+            unit = current_units[0]
+            update: dict[str, Any] = {}
+            if candidate.bm25_search_unit_id is not None:
+                update["bm25_search_unit_id"] = unit.search_unit_id
+                update["bm25_matched_offsets"] = []
+            if candidate.dense_search_unit_id is not None:
+                update["dense_search_unit_id"] = unit.search_unit_id
+                update["dense_match_start"] = 0
+                update["dense_match_end"] = max(1, min(len(unit.search_text), 1))
+            if candidate.table_preview_search_unit_id is not None:
+                update["table_preview_search_unit_id"] = unit.search_unit_id
+            candidates.append(candidate.model_copy(update=update))
+            changed = True
+        return (
+            session.model_copy(update={"candidate_catalog": candidates})
+            if changed
+            else session
+        )
+
+    @staticmethod
+    def _restore_legacy_visible_batch(
+        previous: ReadingRunResult,
+        session: SearchSession,
+    ) -> SearchBatch:
+        """Restore the exact card text saved before SearchUnit IDs changed.
+
+        Legacy checkpoints did not persist ``SearchBatch``.  Their Controller
+        history still contains the actual cards shown to the model, so a resume
+        must prefer that immutable history over regenerating cards from a newer
+        SearchUnit index.  The recovered provenance is used for display only;
+        source actions remain validated against stable Element IDs.
+        """
+
+        view = next(
+            (
+                item.visible_search_view
+                for item in reversed(previous.controller_input_history)
+                if item.visible_search_view is not None
+                and item.visible_search_view.search_session_id
+                == session.search_session_id
+            ),
+            None,
+        )
+        if view is None:
+            raise ValueError(
+                "Legacy SearchSession cannot be restored because its shown "
+                "CandidatePreview history is missing"
+            )
+        catalog = {item.element_id: item for item in session.candidate_catalog}
+        previews: list[CandidatePreview] = []
+        for shown in view.candidate_previews:
+            candidate = catalog.get(shown.element_id)
+            if candidate is None:
+                raise ValueError(
+                    "Legacy CandidatePreview refers to a missing SessionCandidate"
+                )
+            if (
+                candidate.selection_route == CandidateSelectionRoute.VISUAL
+                or not any(
+                    source in candidate.matched_by
+                    for source in (RetrievalSource.BM25, RetrievalSource.DENSE)
+                )
+            ):
+                preview_source = RetrievalSource.VISUAL_DENSE
+                snippet_source = SnippetSource.VISUAL_METADATA
+                snippet_source_id = candidate.visual_asset_id
+                matched_search_unit_id = None
+            elif candidate.table_preview_search_unit_id is not None:
+                preview_source = (
+                    RetrievalSource.BM25
+                    if RetrievalSource.BM25 in candidate.matched_by
+                    else RetrievalSource.DENSE
+                )
+                snippet_source = SnippetSource.TABLE_PREVIEW
+                snippet_source_id = candidate.table_preview_search_unit_id
+                matched_search_unit_id = candidate.table_preview_search_unit_id
+            else:
+                preview_source = (
+                    RetrievalSource.BM25
+                    if RetrievalSource.BM25 in candidate.matched_by
+                    else RetrievalSource.DENSE
+                )
+                snippet_source = SnippetSource.SEARCH_UNIT_TEXT
+                snippet_source_id = (
+                    candidate.bm25_search_unit_id
+                    if preview_source == RetrievalSource.BM25
+                    else candidate.dense_search_unit_id
+                )
+                matched_search_unit_id = snippet_source_id
+            if snippet_source_id is None:
+                raise ValueError("Legacy CandidatePreview has no persisted source ID")
+            previews.append(
+                CandidatePreview(
+                    element_id=shown.element_id,
+                    element_type=shown.element_type,
+                    page_id=shown.page_id,
+                    page_number=candidate.page_number,
+                    section_path=shown.section_path,
+                    display_label=candidate.display_label,
+                    matched_snippet=shown.matched_snippet,
+                    snippet_char_start=0,
+                    snippet_char_end=len(shown.matched_snippet),
+                    snippet_truncated=False,
+                    snippet_source=snippet_source,
+                    snippet_source_id=snippet_source_id,
+                    matched_search_unit_id=matched_search_unit_id,
+                    visual_asset_id=candidate.visual_asset_id,
+                    matched_by=candidate.matched_by,
+                    preview_source=preview_source,
+                    match_scope=PreviewMatchScope.UNKNOWN,
+                    bm25_rank=candidate.bm25_rank,
+                    dense_rank=candidate.dense_rank,
+                    visual_rank=candidate.visual_rank,
+                    rrf_score=candidate.rrf_score,
+                    content_availability=shown.content_availability,
+                )
+            )
+        return SearchBatch(
+            search_session_id=session.search_session_id,
+            exact_anchor_matches=session.exact_anchor_matches,
+            unresolved_anchors=session.unresolved_anchors,
+            candidate_previews=previews,
             next_cursor=session.cursor,
             exhausted=session.exhausted,
             retrieval_trace=session.retrieval_trace,

@@ -1566,6 +1566,66 @@ def test_budget_exhausted_run_resumes_search_cursor_without_replaying(
     assert resumed.answer is not None
 
 
+def test_legacy_resume_uses_saved_preview_when_search_unit_id_changed(
+    tmp_path: Path,
+) -> None:
+    document = _document(
+        tmp_path,
+        page_element_specs=[
+            [
+                {
+                    "element_id": "paragraph:legacy",
+                    "element_type": ElementType.PARAGRAPH,
+                    "text": "needle candidate from the old index",
+                }
+            ]
+        ],
+    )
+    first = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=QueueController(
+            [{"action": "SEARCH", "operation": "new", "query": "needle"}]
+        ),
+        reader=DeterministicContentReader(),
+        checker=PredicateChecker(lambda _text: False),
+        answerer=EvidenceAnswerer(),
+        config=ReadingEnvironmentConfig(action_budget=1),
+    ).run(
+        root_question=RootQuestion(
+            question_id="root:legacy-search-unit",
+            text="Where is the needle?",
+        )
+    )
+    payload = first.model_dump(mode="json")
+    payload["environment_version"] = "reading-environment-v0.2"
+    payload.pop("visible_search_batches")
+    payload.pop("visible_search_session_id")
+    payload["search_sessions"][0]["candidate_catalog"][0][
+        "bm25_search_unit_id"
+    ] = "search-unit:retired"
+    legacy = type(first).model_validate(payload)
+
+    def stop_after_inspecting_saved_card(controller_input: ControllerInput) -> dict[str, Any]:
+        assert controller_input.visible_search_view is not None
+        assert "needle candidate" in (
+            controller_input.visible_search_view.candidate_previews[0].matched_snippet
+        )
+        return {"action": "STOP", "reason": "Compatibility check complete."}
+
+    resumed = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=QueueController([stop_after_inspecting_saved_card]),
+        reader=DeterministicContentReader(),
+        checker=PredicateChecker(lambda _text: False),
+        answerer=EvidenceAnswerer(),
+    ).resume(legacy, additional_action_budget=1)
+
+    assert resumed.status == ReadingRunStatus.STOPPED_INCOMPLETE
+    assert resumed.action_trace.entries[-1].action_name == "STOP"
+
+
 def test_legacy_budget_checkpoint_does_not_repeat_exact_anchor(
     tmp_path: Path,
 ) -> None:
