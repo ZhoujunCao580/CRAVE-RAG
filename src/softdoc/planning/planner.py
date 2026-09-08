@@ -70,7 +70,28 @@ class InitialPlanner:
             except PlannerOutputError as exc:
                 last_error = exc
                 if attempt == self._config.max_validation_attempts:
-                    raise
+                    if not (
+                        self._config.fallback_to_root_on_limit
+                        and self._is_plan_limit_error(exc)
+                    ):
+                        raise
+                    rejected = PlannerDraft.model_validate_json(response.content)
+                    draft = PlannerDraft(
+                        original_question=rejected.original_question,
+                        subquestions=[],
+                        coverage_requirement=rejected.coverage_requirement,
+                    )
+                    warnings.append(
+                        PlannerWarning(
+                            code="planner_limit_fallback_to_root",
+                            description=(
+                                "The final draft still exceeded a deterministic "
+                                "plan-size limit; runtime preserved the Root as "
+                                "one undecomposed target."
+                            ),
+                        )
+                    )
+                    break
                 warnings.append(
                     PlannerWarning(
                         code="planner_validation_retry",
@@ -88,6 +109,11 @@ class InitialPlanner:
 
         metadata = dict(response.metadata)
         metadata["validation_attempts"] = attempt
+        if any(
+            warning.code == "planner_limit_fallback_to_root"
+            for warning in warnings
+        ):
+            metadata["fallback_mode"] = "undecomposed_root"
         return InitialPlan(
             # The root question is program-owned input.  The model-facing draft
             # retains the field for schema compatibility, but a harmless rewrite
@@ -120,6 +146,14 @@ class InitialPlanner:
 
         self._validate_plan_limits(draft)
         return draft
+
+    @staticmethod
+    def _is_plan_limit_error(error: PlannerOutputError) -> bool:
+        message = str(error)
+        return (
+            "configured SubQuestion limit" in message
+            or "configured DAG depth" in message
+        )
 
     @staticmethod
     def _build_correction_prompt(

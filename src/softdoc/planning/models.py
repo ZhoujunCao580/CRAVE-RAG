@@ -160,3 +160,4 @@ class PlannerConfig(SoftDocModel):
     max_subquestions: int = Field(default=6, ge=0)
     max_depth: int = Field(default=4, ge=1)
     max_validation_attempts: int = Field(default=2, ge=1, le=3)
+    fallback_to_root_on_limit: bool = False

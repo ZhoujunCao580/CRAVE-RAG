@@ -481,7 +481,7 @@ class _PersistentRuntime:
             OpenAICompatibleConfig,
             OpenAICompatibleStructuredClient,
         )
-        from softdoc.planning import InitialPlanner, VLLMPlannerBackend
+        from softdoc.planning import InitialPlanner, PlannerConfig, VLLMPlannerBackend
         from softdoc.reading_environment import ReadingEnvironmentConfig
 
         if self.args.inference_backend != "vllm":
@@ -507,7 +507,10 @@ class _PersistentRuntime:
             config(self.args.answerer_max_tokens)
         )
         return ModelBackedRunner(
-            planner=InitialPlanner(VLLMPlannerBackend(planner_config)),
+            planner=InitialPlanner(
+                VLLMPlannerBackend(planner_config),
+                PlannerConfig(fallback_to_root_on_limit=True),
+            ),
             controller=VLLMControllerBackend(controller_config),
             reader=ModelBackedReader(
                 OllamaVisualReaderBackend(reader_client),

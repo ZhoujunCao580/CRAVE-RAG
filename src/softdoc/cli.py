@@ -32,7 +32,13 @@ from softdoc.model_runner import (
     load_model_pipeline_run,
     write_model_pipeline_run,
 )
-from softdoc.planning import InitialPlanner, OllamaPlannerBackend, OllamaPlannerConfig, VLLMPlannerBackend
+from softdoc.planning import (
+    InitialPlanner,
+    OllamaPlannerBackend,
+    OllamaPlannerConfig,
+    PlannerConfig,
+    VLLMPlannerBackend,
+)
 from softdoc.pipeline import SoftDocPipeline
 from softdoc.prompt_registry import PromptComponent, get_prompt, prompt_manifest
 from softdoc.rule_audit import write_rule_coverage_reports
@@ -349,13 +355,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                     max_tokens=max_tokens,
                 )
 
-            planner = InitialPlanner(VLLMPlannerBackend(vllm_config(args.planner_max_tokens)))
+            planner = InitialPlanner(
+                VLLMPlannerBackend(vllm_config(args.planner_max_tokens)),
+                PlannerConfig(fallback_to_root_on_limit=True),
+            )
             controller = VLLMControllerBackend(vllm_config(args.controller_max_tokens))
             text_client = OpenAICompatibleStructuredClient(vllm_config(args.checker_max_tokens))
             visual_client = OpenAICompatibleStructuredClient(vllm_config(args.reader_max_tokens))
             answerer_client = OpenAICompatibleStructuredClient(vllm_config(args.answerer_max_tokens))
         else:
-            planner = InitialPlanner(OllamaPlannerBackend(OllamaPlannerConfig(model=args.text_model, **common)))
+            planner = InitialPlanner(
+                OllamaPlannerBackend(OllamaPlannerConfig(model=args.text_model, **common)),
+                PlannerConfig(fallback_to_root_on_limit=True),
+            )
             controller = OllamaControllerBackend(OllamaControllerConfig(model=args.text_model, context_length=args.context_length, **common))
             text_client = OllamaStructuredClient(OllamaModelConfig(model=args.text_model, context_length=args.context_length, **common))
             visual_client = OllamaStructuredClient(OllamaModelConfig(model=args.visual_model, context_length=args.context_length, **common))

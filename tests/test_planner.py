@@ -305,6 +305,32 @@ def test_configured_depth_counts_original_question_as_root() -> None:
         InitialPlanner(backend, PlannerConfig(max_depth=3)).create_plan(question)
 
 
+def test_repeated_plan_limit_can_fall_back_to_undecomposed_root() -> None:
+    question = "Question"
+    too_deep = _plan(
+        question,
+        [
+            _subquestion("Q1", "Need fact one?"),
+            _subquestion("Q2", "Need fact two?", depends_on=["Q1"]),
+            _subquestion("Q3", "Need fact three?", depends_on=["Q2"]),
+        ],
+    )
+    backend = SequencePlannerBackend([too_deep, too_deep])
+
+    plan = InitialPlanner(
+        backend,
+        PlannerConfig(max_depth=3, fallback_to_root_on_limit=True),
+    ).create_plan(question)
+
+    assert plan.subquestions == []
+    assert plan.planner_trace.metadata["validation_attempts"] == 2
+    assert plan.planner_trace.metadata["fallback_mode"] == "undecomposed_root"
+    assert [warning.code for warning in plan.planner_trace.warnings] == [
+        "planner_validation_retry",
+        "planner_limit_fallback_to_root",
+    ]
+
+
 def test_removed_answer_requirements_field_is_rejected() -> None:
     payload = _subquestion("Q1", "What was the revenue in 2023?")
     payload["answer_requirements"] = ["the revenue amount for 2023"]
