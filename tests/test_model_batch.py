@@ -44,6 +44,8 @@ def _args(tmp_path: Path) -> argparse.Namespace:
         embedding_cache=None,
         visual_search_index=None,
         visual_search_model=None,
+        visual_descriptor_cache=None,
+        multimodal_table_reader=False,
         visual_search_device="cuda",
         visual_similarity_chunk_elements=16_000_000,
     )
@@ -210,6 +212,7 @@ def test_visual_case_command_preserves_runtime_options(tmp_path: Path) -> None:
     args.dense = True
     args.visual_search_index = tmp_path / "visual-index"
     args.visual_search_model = "visual-retriever"
+    args.multimodal_table_reader = True
     command = build_case_command(
         {
             "case_id": "Q1",
@@ -225,6 +228,7 @@ def test_visual_case_command_preserves_runtime_options(tmp_path: Path) -> None:
     assert command[command.index("--visual-search-model") + 1] == (
         "visual-retriever"
     )
+    assert "--multimodal-table-reader" in command
 
 
 def test_group_cases_by_document_is_stable() -> None:

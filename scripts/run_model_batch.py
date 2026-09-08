@@ -260,6 +260,8 @@ def build_case_command(case: dict[str, Any], args: argparse.Namespace, output: P
                 command.extend(
                     ["--visual-search-model", args.visual_search_model]
                 )
+    if getattr(args, "multimodal_table_reader", False):
+        command.append("--multimodal-table-reader")
     return command
 
 
@@ -314,6 +316,21 @@ class _PersistentRuntime:
         self._dense_encoder = None
         self._embedding_cache = None
         self._visual_model = None
+        self._visual_descriptor_records: dict[str, dict[str, Any]] = {}
+        descriptor_cache = getattr(args, "visual_descriptor_cache", None)
+        if descriptor_cache is not None and Path(descriptor_cache).is_file():
+            for line_number, line in enumerate(
+                Path(descriptor_cache).read_text(encoding="utf-8").splitlines(), 1
+            ):
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                element_id = row.get("element_id")
+                if not isinstance(element_id, str) or not element_id:
+                    raise ValueError(
+                        f"{descriptor_cache}:{line_number}: missing element_id"
+                    )
+                self._visual_descriptor_records[element_id] = row
         if args.dense:
             self._dense_encoder = HuggingFaceE5Encoder(
                 model_name=args.dense_model,
@@ -350,6 +367,7 @@ class _PersistentRuntime:
             if cached is not None:
                 return cached
             document = load_document(Path(document_dir))
+            self._apply_visual_descriptor_cache(document, Path(document_dir))
             search_service = None
             if self.args.dense:
                 search_units = SearchUnitBuilder().build(document)
@@ -393,10 +411,67 @@ class _PersistentRuntime:
             self._services[document_dir] = resources
             return resources
 
+    def _apply_visual_descriptor_cache(self, document: Any, document_dir: Path) -> int:
+        """Attach validated persisted search-only descriptions before indexing."""
+
+        if not self._visual_descriptor_records:
+            return 0
+        from softdoc.visual_retrieval import (
+            VisualRetrievalDraft,
+            VisualRetrievalResult,
+            apply_visual_retrieval_result,
+            build_visual_retrieval_request,
+        )
+
+        element_ids = {item.element_id for item in document.elements}
+        selected = [
+            row
+            for element_id, row in self._visual_descriptor_records.items()
+            if element_id in element_ids
+        ]
+        if not selected:
+            return 0
+        request = build_visual_retrieval_request(
+            document,
+            document_dir,
+            element_ids={row["element_id"] for row in selected},
+        )
+        request_by_element = {
+            item.element_id: item for item in request.visual_inputs
+        }
+        drafts = []
+        for row in selected:
+            request_item = request_by_element.get(row["element_id"])
+            if (
+                request_item is None
+                or request_item.visual_asset_sha256 != row.get("visual_asset_sha256")
+            ):
+                continue
+            drafts.append(
+                VisualRetrievalDraft(
+                    input_id=request_item.input_id,
+                    search_summary=row["search_summary"],
+                    keywords=row.get("keywords", []),
+                )
+            )
+        if not drafts:
+            return 0
+        apply_visual_retrieval_result(
+            document,
+            request,
+            VisualRetrievalResult(descriptors=drafts),
+            generator_model=selected[0].get("generator_model", self.args.visual_model),
+            prompt_version=selected[0].get(
+                "prompt_version", "visual-retrieval-v0.1"
+            ),
+        )
+        return len(drafts)
+
     def _runner(self) -> Any:
         from softdoc.controller_ollama import VLLMControllerBackend
         from softdoc.model_backends import (
             ModelBackedReader,
+            MultimodalTableReaderBackend,
             OllamaAnswererBackend,
             OllamaEvidenceCheckerBackend,
             OllamaVisualReaderBackend,
@@ -434,7 +509,14 @@ class _PersistentRuntime:
         return ModelBackedRunner(
             planner=InitialPlanner(VLLMPlannerBackend(planner_config)),
             controller=VLLMControllerBackend(controller_config),
-            reader=ModelBackedReader(OllamaVisualReaderBackend(reader_client)),
+            reader=ModelBackedReader(
+                OllamaVisualReaderBackend(reader_client),
+                table_reader=(
+                    MultimodalTableReaderBackend(reader_client)
+                    if getattr(self.args, "multimodal_table_reader", False)
+                    else None
+                ),
+            ),
             checker=OllamaEvidenceCheckerBackend(checker_client),
             answerer=OllamaAnswererBackend(answerer_client),
             environment_config=ReadingEnvironmentConfig(
@@ -510,6 +592,14 @@ def _run_persistent_batch_unlocked(
             "dense": args.dense,
             "visual_search_index": str(args.visual_search_index) if args.visual_search_index else None,
             "visual_search_model": args.visual_search_model,
+            "visual_descriptor_cache": (
+                str(args.visual_descriptor_cache)
+                if getattr(args, "visual_descriptor_cache", None)
+                else None
+            ),
+            "multimodal_table_reader": getattr(
+                args, "multimodal_table_reader", False
+            ),
             "max_tokens": {
                 "planner": args.planner_max_tokens,
                 "controller": args.controller_max_tokens,
@@ -738,6 +828,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--embedding-cache", type=Path)
     parser.add_argument("--visual-search-index", type=Path)
     parser.add_argument("--visual-search-model")
+    parser.add_argument(
+        "--visual-descriptor-cache",
+        type=Path,
+        help="Validated JSONL cache of search-only visual descriptions.",
+    )
+    parser.add_argument("--multimodal-table-reader", action="store_true")
     parser.add_argument(
         "--visual-search-device", choices=("cpu", "cuda"), default="cuda"
     )
