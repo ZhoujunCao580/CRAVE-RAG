@@ -48,6 +48,8 @@ def main() -> int:
     parser.add_argument("--all-cases", type=Path, required=True)
     parser.add_argument("--old-batch-manifest", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--parquet", type=Path)
+    parser.add_argument("--softdocs-root", type=Path)
     args = parser.parse_args()
 
     cases = {}
@@ -86,6 +88,30 @@ def main() -> int:
     for values in groups["stage6"].values():
         requested.update(values)
     missing = sorted(requested.difference(cases), key=lambda value: int(value[1:]))
+    if missing and args.parquet is not None and args.softdocs_root is not None:
+        import pandas as pd
+
+        frame = pd.read_parquet(args.parquet)
+        by_source = {}
+        for document_json in args.softdocs_root.glob("*/document.json"):
+            payload = json.loads(document_json.read_text(encoding="utf-8"))
+            source = str(payload.get("source_path") or "")
+            source = source.removesuffix("_origin.pdf").removesuffix(".pdf").casefold()
+            by_source[source] = document_json.parent
+        for case_id in list(missing):
+            number = int(case_id[1:])
+            row = frame.iloc[number]
+            source_key = Path(str(row["doc_id"])).stem.casefold()
+            document_dir = by_source.get(source_key)
+            if document_dir is None:
+                continue
+            cases[case_id] = {
+                "case_id": case_id,
+                "question_id": f"mmlongbench-doc:{case_id}",
+                "document_dir": str(document_dir.resolve()),
+                "question": str(row["question"]).strip(),
+            }
+        missing = sorted(requested.difference(cases), key=lambda value: int(value[1:]))
     selected = sorted(requested.intersection(cases), key=lambda value: int(value[1:]))
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
