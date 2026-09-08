@@ -64,7 +64,7 @@ Prompt、split、检索配额或 action budget。
 
 1. 记录 Git commit、`git status --short`、Python 路径、`PYTHONPATH`、模型路径、SoftDoc 路径、
    visual index 路径、descriptor/cache 路径和输出根目录。
-2. 运行 `python -m softdoc server-readiness --profile eval`，确认 `torch`、`transformers`、
+2. 运行 `softdoc doctor --profile eval --json`，确认 `torch`、`transformers`、
    `sentence_transformers`、CUDA 和项目包来自预期环境。
 3. 导出 Prompt manifest 和 JSON Schemas，核对上面的十个冻结版本；Coverage Checker schema
    必须存在。

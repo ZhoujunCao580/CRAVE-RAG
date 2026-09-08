@@ -98,6 +98,25 @@ def test_visual_description_becomes_auditable_bm25_search_metadata(
     assert bm25.candidates[0].element_id == figure.element_id
 
 
+def test_visual_request_resolves_windows_style_relative_asset_path(
+    parsed_document,
+    tmp_path: Path,
+) -> None:
+    document, figure = _visual_document(parsed_document, tmp_path)
+    asset_root = tmp_path / "portable-softdoc"
+    asset_path = asset_root / "assets" / "elements" / "figure.png"
+    asset_path.parent.mkdir(parents=True)
+    Image.new("RGB", (80, 60), color=(220, 230, 240)).save(asset_path)
+    figure.image_path = Path("assets\\elements\\figure.png")
+
+    request = build_visual_retrieval_request(document, asset_root)
+
+    visual_input = next(
+        item for item in request.visual_inputs if item.element_id == figure.element_id
+    )
+    assert visual_input.visual_asset_path == asset_path.resolve()
+
+
 def test_ordinary_summary_is_not_silently_indexed(
     parsed_document,
     tmp_path: Path,

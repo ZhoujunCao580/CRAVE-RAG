@@ -386,7 +386,13 @@ def visual_retrieval_descriptor(
 
 
 def _resolve_asset_path(path: Path, asset_root: Path) -> Path:
-    candidate = Path(path)
+    # SoftDocs are portable artifacts and may have been authored on Windows
+    # before being copied to a Linux inference host.  On POSIX, Path treats a
+    # backslash as an ordinary character, so normalize persisted relative
+    # paths before checking the asset.  This mirrors visual-dense inventory
+    # resolution and avoids silently dropping valid images from descriptor
+    # generation after a RunPod migration.
+    candidate = Path(str(path).replace("\\", "/"))
     if not candidate.is_absolute():
         candidate = asset_root / candidate
     return candidate.resolve()
