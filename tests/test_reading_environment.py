@@ -531,6 +531,24 @@ class SourceIdentityReader:
         )
 
 
+class DuplicateSourceReferenceReader:
+    """Mimic a model that cites the same Reader input twice."""
+
+    def read(self, context: ReaderContext) -> ReaderOutput:
+        return ReaderOutput(
+            reader_kind=ReaderKind.TEXT,
+            observations=[
+                ReaderObservationDraft(
+                    text="ANSWER: one source contains both requested facts.",
+                    sources=[
+                        ObservationSourceRef(input_id="I1"),
+                        ObservationSourceRef(input_id="I1"),
+                    ],
+                )
+            ],
+        )
+
+
 def _provenance(owner: str) -> Provenance:
     return Provenance(
         provenance_id=f"prov:{owner}",
@@ -754,6 +772,56 @@ def test_environment_expands_call_local_reader_aliases_to_stable_source_identity
         "page:1",
     ]
     assert all(item.sources[0].physical_page_number == 1 for item in observations)
+
+
+def test_environment_deduplicates_repeated_reader_source_references(
+    tmp_path: Path,
+) -> None:
+    document = _document(
+        tmp_path,
+        page_element_specs=[
+            [
+                {
+                    "element_id": "paragraph:1",
+                    "element_type": ElementType.PARAGRAPH,
+                    "reference_label": "Requested facts",
+                    "text": "Both requested facts are here.",
+                }
+            ]
+        ],
+    )
+    result = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=QueueController(
+            [
+                {
+                    "action": "SEARCH",
+                    "operation": "new",
+                    "query": "Both requested facts",
+                },
+                {
+                    "action": "READ_SOURCE",
+                    "source_ids": ["paragraph:1"],
+                    "local_problem": "Read both requested facts.",
+                },
+            ]
+        ),
+        reader=DuplicateSourceReferenceReader(),
+        checker=PredicateChecker(lambda text: text.startswith("ANSWER:")),
+        answerer=EvidenceAnswerer(),
+    ).run(
+        root_question=RootQuestion(
+            question_id="root:duplicate-source-ref",
+            text="What are the requested facts?",
+        )
+    )
+
+    assert result.status == ReadingRunStatus.READY
+    sources = result.observation_store.observations[0].sources
+    assert len(sources) == 1
+    assert sources[0].input_id == "I1"
+    assert sources[0].source_id == "paragraph:1"
 
 
 def test_ordinal_page_anchor_auto_reads_physical_page(tmp_path: Path) -> None:

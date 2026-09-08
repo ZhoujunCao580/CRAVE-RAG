@@ -2246,25 +2246,33 @@ class ReadingEnvironment:
         # authoritative, stable document identities before persistence so a
         # later Checker/Recall pass cannot mistake I1 from two reads for the
         # same source.  Reader-authored stable fields, if any, are ignored.
-        expanded_sources = [
-            [
-                source.model_copy(
-                    update={
-                        "source_id": inputs_by_id[source.input_id].source_id,
-                        "page_id": inputs_by_id[source.input_id].page_id,
-                        "physical_page_number": pages_by_id[
-                            inputs_by_id[source.input_id].page_id
-                        ].page_number,
-                        "display_page_label": pages_by_id[
-                            inputs_by_id[source.input_id].page_id
-                        ].display_page_label,
-                        "element_id": inputs_by_id[source.input_id].element_id,
-                    }
+        expanded_sources = []
+        for draft in reader_output.observations:
+            # A model may cite the same call-local input more than once while
+            # describing several facts from one table/image.  StoredObservation
+            # deliberately permits only one grounding per input_id, so collapse
+            # those duplicate citations at the deterministic Environment
+            # boundary instead of rejecting an otherwise valid READ result.
+            seen_input_ids: set[str] = set()
+            sources: list[ObservationSourceRef] = []
+            for source in draft.sources:
+                if source.input_id in seen_input_ids:
+                    continue
+                seen_input_ids.add(source.input_id)
+                read_input = inputs_by_id[source.input_id]
+                page = pages_by_id[read_input.page_id]
+                sources.append(
+                    source.model_copy(
+                        update={
+                            "source_id": read_input.source_id,
+                            "page_id": read_input.page_id,
+                            "physical_page_number": page.page_number,
+                            "display_page_label": page.display_page_label,
+                            "element_id": read_input.element_id,
+                        }
+                    )
                 )
-                for source in draft.sources
-            ]
-            for draft in reader_output.observations
-        ]
+            expanded_sources.append(sources)
         stored = [
             StoredObservation(
                 observation_id=make_observation_id(current_action_id, index),
