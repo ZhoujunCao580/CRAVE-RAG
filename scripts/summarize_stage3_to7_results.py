@@ -187,21 +187,51 @@ def _aggregate_cases(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def summarize_stage36(root: Path, groups_path: Path) -> dict[str, Any]:
-    manifest = _load_json(root / "outputs" / "batch_manifest.json")
+def summarize_stage36(
+    root: Path,
+    groups_path: Path,
+    supplements: list[Path],
+) -> dict[str, Any]:
     rows: dict[str, dict[str, Any]] = {}
-    for item in manifest.get("cases", []):
-        row = {
-            "case_id": item.get("case_id"),
-            "batch_status": item.get("status"),
-            "elapsed_seconds": item.get("elapsed_seconds"),
-            "peak_gpu_memory_mib": item.get("peak_gpu_memory_mib"),
-            "error": item.get("error"),
-        }
-        output_dir = Path(item.get("output_dir") or root / "outputs" / str(item.get("case_id")))
-        if item.get("status") == "succeeded" and (output_dir / "reading_run.json").is_file():
-            row.update(_case_metrics(output_dir))
-        rows[str(item.get("case_id"))] = row
+    manifests = []
+    for attempt_root in [root, *supplements]:
+        manifest = _load_json(attempt_root / "outputs" / "batch_manifest.json")
+        manifests.append(
+            {
+                "root": str(attempt_root),
+                **{
+                    key: manifest.get(key)
+                    for key in (
+                        "status",
+                        "case_count",
+                        "succeeded",
+                        "failed",
+                        "started_at",
+                        "finished_at",
+                    )
+                },
+            }
+        )
+        for item in manifest.get("cases", []):
+            row = {
+                "case_id": item.get("case_id"),
+                "batch_status": item.get("status"),
+                "elapsed_seconds": item.get("elapsed_seconds"),
+                "peak_gpu_memory_mib": item.get("peak_gpu_memory_mib"),
+                "error": item.get("error"),
+                "attempt_root": str(attempt_root),
+            }
+            output_dir = Path(
+                item.get("output_dir")
+                or attempt_root / "outputs" / str(item.get("case_id"))
+            )
+            if item.get("status") == "succeeded" and (
+                output_dir / "reading_run.json"
+            ).is_file():
+                row.update(_case_metrics(output_dir))
+            previous = rows.get(str(item.get("case_id")))
+            if previous is None or row["batch_status"] == "succeeded":
+                rows[str(item.get("case_id"))] = row
 
     groups_payload = _load_json(groups_path)
     groups = groups_payload["groups"]
@@ -219,7 +249,7 @@ def summarize_stage36(root: Path, groups_path: Path) -> dict[str, Any]:
         for name, case_ids in groups["stage6"].items()
     }
     return {
-        "manifest": {key: manifest.get(key) for key in ("status", "case_count", "succeeded", "failed", "started_at", "finished_at")},
+        "manifests": manifests,
         "selection": {key: groups_payload.get(key) for key in ("requested_unique", "selected_unique", "missing")},
         "overall": _aggregate_cases(list(rows.values())),
         "groups": grouped,
@@ -228,16 +258,43 @@ def summarize_stage36(root: Path, groups_path: Path) -> dict[str, Any]:
     }
 
 
-def summarize_stage7(root: Path) -> dict[str, Any]:
-    manifest = _load_json(root / "outputs" / "resume_manifest.json")
-    rows = manifest.get("cases", [])
+def summarize_stage7(root: Path, supplements: list[Path]) -> dict[str, Any]:
+    manifests = []
+    by_case: dict[str, dict[str, Any]] = {}
+    for attempt_root in [root, *supplements]:
+        manifest = _load_json(attempt_root / "outputs" / "resume_manifest.json")
+        manifests.append(
+            {
+                "root": str(attempt_root),
+                **{
+                    key: manifest.get(key)
+                    for key in (
+                        "status",
+                        "case_count",
+                        "completed",
+                        "succeeded",
+                        "failed",
+                        "started_at",
+                        "finished_at",
+                        "total_step_limit",
+                        "workers",
+                    )
+                },
+            }
+        )
+        for row in manifest.get("cases", []):
+            previous = by_case.get(str(row.get("case_id")))
+            if previous is None or row.get("status") == "succeeded":
+                by_case[str(row.get("case_id"))] = row
+    rows = list(by_case.values())
     succeeded = [row for row in rows if row.get("status") == "succeeded"]
     histogram = Counter(
         str(row.get("first_ready_step")) if row.get("first_ready_step") is not None else "never"
         for row in succeeded
     )
     return {
-        "manifest": {key: manifest.get(key) for key in ("status", "case_count", "completed", "succeeded", "failed", "started_at", "finished_at", "total_step_limit", "workers")},
+        "manifests": manifests,
+        "unique_cases": len(rows),
         "first_ready_step": dict(sorted(histogram.items())),
         "new_status_counts": dict(Counter(row.get("new_status") for row in succeeded)),
         "additional_elapsed_seconds": _timing(
@@ -251,17 +308,32 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stage36-root", type=Path, required=True)
     parser.add_argument("--stage7-root", type=Path, required=True)
+    parser.add_argument("--stage36-supplement", type=Path, action="append", default=[])
+    parser.add_argument("--stage7-supplement", type=Path, action="append", default=[])
     parser.add_argument("--groups", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     payload = {
         "schema_version": "stage1-to7-experiment-summary-v0.1",
-        "stage3_to6": summarize_stage36(args.stage36_root, args.groups),
-        "stage7": summarize_stage7(args.stage7_root),
+        "stage3_to6": summarize_stage36(
+            args.stage36_root,
+            args.groups,
+            args.stage36_supplement,
+        ),
+        "stage7": summarize_stage7(args.stage7_root, args.stage7_supplement),
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({"output": str(args.output), "stage36": payload["stage3_to6"]["manifest"], "stage7": payload["stage7"]["manifest"]}, ensure_ascii=False))
+    print(
+        json.dumps(
+            {
+                "output": str(args.output),
+                "stage36_manifests": payload["stage3_to6"]["manifests"],
+                "stage7_manifests": payload["stage7"]["manifests"],
+            },
+            ensure_ascii=False,
+        )
+    )
     return 0
 
 
