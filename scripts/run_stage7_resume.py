@@ -134,6 +134,15 @@ def main() -> int:
     parser.add_argument("--total-step-limit", type=int, default=12)
     parser.add_argument("--workers", type=int, choices=(1, 2, 4), default=2)
     parser.add_argument("--expected-count", type=int, default=199)
+    parser.add_argument(
+        "--allow-case-subset",
+        action="store_true",
+        help=(
+            "Resume only budget checkpoints named by --cases. This is intended "
+            "for non-overwriting recovery runs after the full batch; without "
+            "this flag the frozen manifest must still contain every checkpoint."
+        ),
+    )
     parser.add_argument("--base-url", default="http://127.0.0.1:8000/v1")
     parser.add_argument("--text-model", required=True)
     parser.add_argument("--visual-model", required=True)
@@ -148,7 +157,12 @@ def main() -> int:
         raise FileExistsError(f"Output directory is not empty: {output_root}")
     output_root.mkdir(parents=True, exist_ok=True)
     case_map = _case_map(args.cases)
-    case_ids = _budget_case_ids(args.old_root)
+    all_case_ids = _budget_case_ids(args.old_root)
+    case_ids = (
+        [case_id for case_id in all_case_ids if case_id in case_map]
+        if args.allow_case_subset
+        else all_case_ids
+    )
     if len(case_ids) != args.expected_count:
         raise ValueError(
             f"Expected {args.expected_count} budget checkpoints, found {len(case_ids)}"
