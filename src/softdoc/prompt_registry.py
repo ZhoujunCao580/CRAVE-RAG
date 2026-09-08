@@ -10,6 +10,10 @@ from typing import Callable
 from softdoc.answering import ANSWERER_PROMPT_VERSION, ANSWERER_SYSTEM_PROMPT
 from softdoc.checking_prompt import CHECKER_PROMPT_VERSION, CHECKER_SYSTEM_PROMPT
 from softdoc.controller_prompt import CONTROLLER_PROMPT_VERSION, CONTROLLER_SYSTEM_PROMPT
+from softdoc.coverage_prompt import (
+    COVERAGE_CHECKER_PROMPT_VERSION,
+    COVERAGE_CHECKER_SYSTEM_PROMPT,
+)
 from softdoc.planning.prompt import (
     INITIAL_PLANNER_PROMPT_VERSION,
     build_initial_planner_prompt,
@@ -37,6 +41,7 @@ class PromptComponent(StrEnum):
     ANSWERER = "answerer"
     CONTROLLER = "controller"
     MULTIMODAL_TABLE_READER = "multimodal_table_reader"
+    COVERAGE_CHECKER = "coverage_checker"
 
 
 @dataclass(frozen=True)
@@ -129,6 +134,13 @@ PROMPT_REGISTRY: dict[PromptComponent, PromptSpec] = {
             + "\n# User message template\n\n"
             + MULTIMODAL_TABLE_READER_USER_PROMPT_TEMPLATE
         ),
+    ),
+    PromptComponent.COVERAGE_CHECKER: PromptSpec(
+        component=PromptComponent.COVERAGE_CHECKER,
+        version=COVERAGE_CHECKER_PROMPT_VERSION,
+        prompt_kind="system_prompt",
+        source_module="softdoc.coverage_prompt",
+        canonical_text=COVERAGE_CHECKER_SYSTEM_PROMPT,
     ),
 }
 

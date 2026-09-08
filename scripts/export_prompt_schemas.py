@@ -9,6 +9,7 @@ from pydantic import TypeAdapter
 
 from softdoc.answering import AnswerResult
 from softdoc.controller import ControllerAction
+from softdoc.coverage_reasoning import CoverageBatchCheckResult
 from softdoc.planning.models import PlannerDraft
 from softdoc.reading_state import EvidenceCheckDecision
 from softdoc.visual_reading import VisualReadResult
@@ -24,6 +25,9 @@ def export_schemas(output_dir: Path = OUTPUT_DIR) -> list[Path]:
         "visual_reader_output.schema.json": VisualReadResult.model_json_schema(),
         "visual_retrieval_output.schema.json": VisualSearchIdentity.model_json_schema(),
         "checker_output.schema.json": EvidenceCheckDecision.model_json_schema(),
+        "coverage_checker_output.schema.json": (
+            CoverageBatchCheckResult.model_json_schema()
+        ),
         "controller_output.schema.json": TypeAdapter(ControllerAction).json_schema(),
         "answerer_output.schema.json": AnswerResult.model_json_schema(),
     }

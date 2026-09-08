@@ -11,6 +11,7 @@ from pydantic import Field, model_validator
 
 from softdoc.answering import AnswerInput, AnswerResult
 from softdoc.controller import ControllerAction, ControllerInput
+from softdoc.coverage_reasoning import CoverageBatchCheckInput, CoverageBatchCheckResult
 from softdoc.ids import root_question_id
 from softdoc.models import Document, SoftDocModel
 from softdoc.planning.models import InitialPlan
@@ -47,6 +48,7 @@ class StageCallRecord(SoftDocModel):
     succeeded: bool = True
     action_id: str | None = Field(default=None, min_length=1)
     elapsed_seconds: float | None = Field(default=None, ge=0)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ModelPipelineRun(SoftDocModel):
@@ -66,7 +68,12 @@ class ModelPipelineRun(SoftDocModel):
         if len(keys) != len(set(keys)):
             raise ValueError("Stage call component/index pairs must be unique")
         for record in self.stage_calls:
-            if record.component in {"controller", "reader", "checker"} and (
+            if record.component in {
+                "controller",
+                "reader",
+                "checker",
+                "coverage_checker",
+            } and (
                 record.action_id is None
             ):
                 raise ValueError(
@@ -165,10 +172,59 @@ class _RecordingChecker:
             started = time.perf_counter()
             output = self.backend.check(checker_input)
         except Exception as exc:
+            rejected_attempts = getattr(
+                self.backend, "last_rejected_attempts", []
+            )
             self.records.append(
                 StageCallRecord(
                     component="checker",
                     call_index=_next_index(self.records, "checker"),
+                    input=input_payload,
+                    output={"error_type": type(exc).__name__, "error": str(exc)},
+                    succeeded=False,
+                    action_id=checker_input.action_id,
+                    elapsed_seconds=time.perf_counter() - started,
+                    metadata=(
+                        {"rejected_attempts": list(rejected_attempts)}
+                        if rejected_attempts
+                        else {}
+                    ),
+                )
+            )
+            raise
+        rejected_attempts = getattr(self.backend, "last_rejected_attempts", [])
+        self.records.append(
+            StageCallRecord(
+                component="checker",
+                call_index=_next_index(self.records, "checker"),
+                input=input_payload,
+                output=output.model_dump(mode="json"),
+                action_id=checker_input.action_id,
+                elapsed_seconds=time.perf_counter() - started,
+                metadata=(
+                    {"rejected_attempts": list(rejected_attempts)}
+                    if rejected_attempts
+                    else {}
+                ),
+            )
+        )
+        return output
+
+    def check_coverage(
+        self, checker_input: CoverageBatchCheckInput
+    ) -> CoverageBatchCheckResult:
+        input_payload = checker_input.model_dump(mode="json")
+        backend_method = getattr(self.backend, "check_coverage", None)
+        if backend_method is None:
+            raise TypeError("Configured Checker does not support semantic coverage")
+        try:
+            started = time.perf_counter()
+            output = backend_method(checker_input)
+        except Exception as exc:
+            self.records.append(
+                StageCallRecord(
+                    component="coverage_checker",
+                    call_index=_next_index(self.records, "coverage_checker"),
                     input=input_payload,
                     output={"error_type": type(exc).__name__, "error": str(exc)},
                     succeeded=False,
@@ -179,8 +235,8 @@ class _RecordingChecker:
             raise
         self.records.append(
             StageCallRecord(
-                component="checker",
-                call_index=_next_index(self.records, "checker"),
+                component="coverage_checker",
+                call_index=_next_index(self.records, "coverage_checker"),
                 input=input_payload,
                 output=output.model_dump(mode="json"),
                 action_id=checker_input.action_id,
@@ -320,7 +376,13 @@ def write_model_pipeline_run(run: ModelPipelineRun, output_dir: Path) -> None:
         output_dir / "reading_run.json",
         run.reading_run.model_dump(mode="json"),
     )
-    for component in ("controller", "reader", "checker", "answerer"):
+    for component in (
+        "controller",
+        "reader",
+        "checker",
+        "coverage_checker",
+        "answerer",
+    ):
         _write_jsonl(
             output_dir / f"{component}_calls.jsonl",
             [item.model_dump(mode="json") for item in calls_by_component.get(component, [])],
@@ -420,9 +482,20 @@ def load_model_pipeline_run(input_dir: Path) -> ModelPipelineRun:
             elapsed_seconds=planner_order.get("elapsed_seconds"),
         )
     ]
-    for component in ("controller", "reader", "checker", "answerer"):
+    for component in (
+        "controller",
+        "reader",
+        "checker",
+        "coverage_checker",
+        "answerer",
+    ):
         path = input_dir / f"{component}_calls.jsonl"
         if not path.is_file():
+            if component == "coverage_checker":
+                # Runs written before semantic Coverage existed have no file
+                # for this optional component. Their manifest also contains no
+                # coverage_checker stage, so skipping it is lossless.
+                continue
             raise FileNotFoundError(f"Missing model call log: {path}")
         for line_number, line in enumerate(
             path.read_text(encoding="utf-8").splitlines(), 1
@@ -469,10 +542,15 @@ def _bind_controller_action_ids(
     """Bind model decisions to executed actions, excluding automatic Exact reads."""
 
     controller_records = [item for item in records if item.component == "controller"]
+    automatic_action_names = {
+        "COUNT_INVENTORY",
+        "INSPECT_COVERAGE_BATCH",
+    }
     controller_entries = [
         item
         for item in action_trace.entries
         if item.metadata.get("trigger") != "exact_anchor"
+        and item.action_name not in automatic_action_names
     ]
     if len(controller_records) != len(controller_entries):
         raise ValueError(

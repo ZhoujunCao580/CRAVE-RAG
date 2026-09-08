@@ -105,6 +105,34 @@ page numbering. The Environment resolves it to canonical `page_id` values,
 persists both interpretations when they differ, and blocks a complete inventory
 until an explicit namespace override resolves the ambiguity.
 
+For semantic counts, such as people inside figures, the Environment reads the
+canonical inventory in bounded batches and sends the resulting Observations to
+the frozen `coverage-checker-v0.1` contract. The Coverage Checker returns one
+item-local verdict for every supplied `inventory_id`:
+
+```json
+{
+  "action_id": "action:coverage:1",
+  "assessments": [
+    {
+      "inventory_id": "figure:1",
+      "verdict": "matched",
+      "matched_count": 2,
+      "matched_values": [],
+      "observation_ids": ["obs:coverage:1"],
+      "rationale": "Two distinct people are visible."
+    }
+  ]
+}
+```
+
+The model cannot output a global count, readiness flag, or completion claim.
+The Environment accepts `complete` only after every canonical inventory item
+has a grounded `matched` or `not_matched` verdict. Any `unresolved` item blocks
+the final count; resuming retries only unresolved items. The persisted
+`QuestionCoveragePlan.execution` plus the final Evidence provenance is the
+machine-readable completeness proof.
+
 ## 2. Visual retrieval indexing
 
 Before question answering, a VLM may create a search-only identity for a real
@@ -284,6 +312,16 @@ target switch, it may receive either an Evidence-only state recheck or a
 separate bounded Observation Recall input. After the last planned SubQuestion
 is satisfied, it may instead receive a state-only Root-finalization input. It
 returns a delta; the program applies that delta atomically.
+
+Two audited structural failures have one bounded backend repair before that
+atomic application: a duplicated `evidence_id` in `replace`, or an Observation
+ID that is not copied exactly from the current Checker input. The repair sees
+the unchanged Checker input and explicit Observation/Evidence ID allowlists,
+must return a complete replacement decision, and cannot fuzzy-match IDs. It is
+part of the same Checker invocation, so it performs no new read, Controller
+action, or action-budget debit. Rejected raw output and its validation error are
+kept in the Checker stage-call metadata. JSON truncation and unrelated semantic
+errors are deliberately not repaired by this path.
 
 Input:
 

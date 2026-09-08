@@ -62,6 +62,23 @@ class CoverageInventoryStatus(str, Enum):
     BLOCKED = "blocked"
 
 
+class CoverageItemVerdict(str, Enum):
+    """Semantic decision for one canonical inventory item."""
+
+    MATCHED = "matched"
+    NOT_MATCHED = "not_matched"
+    UNRESOLVED = "unresolved"
+
+
+class CoverageExecutionStatus(str, Enum):
+    """Environment-derived progress over a complete canonical inventory."""
+
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETE = "complete"
+    BLOCKED = "blocked"
+
+
 class CoverageRequirement(SoftDocModel):
     """Static Planner output; it never contains runtime counts or page IDs."""
 
@@ -154,6 +171,117 @@ class CoverageInventory(SoftDocModel):
     completion_reason: str = Field(min_length=1)
 
 
+class CoverageObservation(SoftDocModel):
+    """Small stable Observation view supplied to the Coverage Checker."""
+
+    observation_id: str = Field(min_length=1)
+    text: str = Field(min_length=1)
+    source_ids: list[str] = Field(min_length=1)
+    page_ids: list[str] = Field(min_length=1)
+
+
+class CoverageLimitation(SoftDocModel):
+    """Reader limitation attached to canonical inventory items."""
+
+    description: str = Field(min_length=1)
+    inventory_ids: list[str] = Field(min_length=1)
+
+
+class CoverageItemAssessment(SoftDocModel):
+    """Model decision for one item; completeness is never model-authored."""
+
+    inventory_id: str = Field(min_length=1)
+    verdict: CoverageItemVerdict
+    matched_count: int | None = Field(default=None, ge=0)
+    matched_values: list[str] = Field(default_factory=list)
+    observation_ids: list[str] = Field(default_factory=list)
+    rationale: str = Field(min_length=1)
+
+    @field_validator("matched_values")
+    @classmethod
+    def normalize_values(cls, values: list[str]) -> list[str]:
+        normalized = [" ".join(value.split()) for value in values if value.strip()]
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("matched_values must be unique")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_verdict_payload(self) -> Self:
+        if self.verdict == CoverageItemVerdict.MATCHED:
+            if self.matched_count is None or self.matched_count < 1:
+                raise ValueError("matched verdict requires matched_count >= 1")
+        elif self.verdict == CoverageItemVerdict.NOT_MATCHED:
+            if self.matched_count != 0 or self.matched_values:
+                raise ValueError(
+                    "not_matched verdict requires matched_count=0 and no values"
+                )
+        elif self.matched_count is not None or self.matched_values:
+            raise ValueError(
+                "unresolved verdict cannot claim a count or matched values"
+            )
+        return self
+
+
+class CoverageBatchCheckInput(SoftDocModel):
+    """One bounded semantic inspection batch over canonical inventory items."""
+
+    action_id: str = Field(min_length=1)
+    question_id: str = Field(min_length=1)
+    question_text: str = Field(min_length=1)
+    requirement: CoverageRequirement
+    inventory_items: list[CoverageInventoryItem] = Field(min_length=1)
+    observations: list[CoverageObservation] = Field(default_factory=list)
+    limitations: list[CoverageLimitation] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_batch_identity(self) -> Self:
+        item_ids = [item.inventory_id for item in self.inventory_items]
+        if len(item_ids) != len(set(item_ids)):
+            raise ValueError("Coverage batch inventory IDs must be unique")
+        observation_ids = [item.observation_id for item in self.observations]
+        if len(observation_ids) != len(set(observation_ids)):
+            raise ValueError("Coverage batch Observation IDs must be unique")
+        known_items = set(item_ids)
+        for limitation in self.limitations:
+            unknown = set(limitation.inventory_ids).difference(known_items)
+            if unknown:
+                raise ValueError(
+                    "Coverage limitation references unknown inventory IDs: "
+                    + ", ".join(sorted(unknown))
+                )
+        return self
+
+
+class CoverageBatchCheckResult(SoftDocModel):
+    """Coverage Checker output; it contains no global completion flag."""
+
+    action_id: str = Field(min_length=1)
+    assessments: list[CoverageItemAssessment] = Field(min_length=1)
+
+
+class CoverageExecutionProgress(SoftDocModel):
+    """Persisted, deterministic execution state for one coverage plan."""
+
+    status: CoverageExecutionStatus = CoverageExecutionStatus.PENDING
+    assessments: list[CoverageItemAssessment] = Field(default_factory=list)
+    completed_batch_count: int = Field(default=0, ge=0)
+    matched_count: int | None = Field(default=None, ge=0)
+    matched_values: list[str] = Field(default_factory=list)
+    completion_reason: str = Field(default="semantic_inspection_not_started", min_length=1)
+
+    @property
+    def assessed_inventory_ids(self) -> set[str]:
+        return {item.inventory_id for item in self.assessments}
+
+    @property
+    def unresolved_inventory_ids(self) -> list[str]:
+        return [
+            item.inventory_id
+            for item in self.assessments
+            if item.verdict == CoverageItemVerdict.UNRESOLVED
+        ]
+
+
 class QuestionCoveragePlan(SoftDocModel):
     """Runtime coverage artifact attached to one Root or SubQuestion."""
 
@@ -161,6 +289,164 @@ class QuestionCoveragePlan(SoftDocModel):
     requirement: CoverageRequirement
     scope_resolution: CoverageScopeResolution
     inventory: CoverageInventory
+    execution: CoverageExecutionProgress = Field(
+        default_factory=CoverageExecutionProgress
+    )
+
+    @model_validator(mode="after")
+    def validate_execution(self) -> Self:
+        inventory_ids = {item.inventory_id for item in self.inventory.items}
+        assessment_ids = [item.inventory_id for item in self.execution.assessments]
+        if len(assessment_ids) != len(set(assessment_ids)):
+            raise ValueError("Coverage progress cannot assess one item twice")
+        unknown = set(assessment_ids).difference(inventory_ids)
+        if unknown:
+            raise ValueError(
+                "Coverage progress references unknown inventory IDs: "
+                + ", ".join(sorted(unknown))
+            )
+        if self.execution.status == CoverageExecutionStatus.COMPLETE:
+            if set(assessment_ids) != inventory_ids:
+                raise ValueError("Complete coverage must assess every inventory item")
+            if self.execution.unresolved_inventory_ids:
+                raise ValueError("Complete coverage cannot contain unresolved items")
+            if self.execution.matched_count is None:
+                raise ValueError("Complete coverage requires an aggregate count")
+        return self
+
+
+def validate_coverage_batch_result(
+    checker_input: CoverageBatchCheckInput,
+    result: CoverageBatchCheckResult,
+) -> CoverageBatchCheckResult:
+    """Bind a model decision to exactly the supplied canonical batch."""
+
+    if result.action_id != checker_input.action_id:
+        raise ValueError("Coverage Checker action_id does not match its input")
+    expected_ids = [item.inventory_id for item in checker_input.inventory_items]
+    actual_ids = [item.inventory_id for item in result.assessments]
+    if len(actual_ids) != len(set(actual_ids)):
+        raise ValueError("Coverage Checker assessed one inventory item twice")
+    if set(actual_ids) != set(expected_ids):
+        missing = set(expected_ids).difference(actual_ids)
+        unknown = set(actual_ids).difference(expected_ids)
+        details: list[str] = []
+        if missing:
+            details.append("missing=" + ",".join(sorted(missing)))
+        if unknown:
+            details.append("unknown=" + ",".join(sorted(unknown)))
+        raise ValueError(
+            "Coverage Checker must assess every supplied inventory item exactly once: "
+            + "; ".join(details)
+        )
+
+    observations = {
+        item.observation_id: item for item in checker_input.observations
+    }
+    items = {item.inventory_id: item for item in checker_input.inventory_items}
+    same_source_and_item_type = (
+        checker_input.requirement.item_type.casefold().strip().rstrip("s")
+        == checker_input.requirement.source_type.value.casefold().rstrip("s")
+    )
+    for assessment in result.assessments:
+        unknown_observations = set(assessment.observation_ids).difference(observations)
+        if unknown_observations:
+            raise ValueError(
+                "Coverage assessment references unavailable Observations: "
+                + ", ".join(sorted(unknown_observations))
+            )
+        item = items[assessment.inventory_id]
+        allowed_sources = set(item.source_ids).union(item.page_ids)
+        for observation_id in assessment.observation_ids:
+            observation = observations[observation_id]
+            if not (
+                allowed_sources.intersection(observation.source_ids)
+                or set(item.page_ids).intersection(observation.page_ids)
+            ):
+                raise ValueError(
+                    f"Observation {observation_id} is not grounded in "
+                    f"inventory item {assessment.inventory_id}"
+                )
+        if (
+            same_source_and_item_type
+            and assessment.matched_count is not None
+            and assessment.matched_count > 1
+        ):
+            raise ValueError(
+                "One canonical source can contribute at most one match when "
+                "item_type equals source_type"
+            )
+        if (
+            assessment.verdict != CoverageItemVerdict.UNRESOLVED
+            and not assessment.observation_ids
+        ):
+            raise ValueError(
+                "A resolved semantic coverage verdict requires grounded Observations"
+            )
+    return result
+
+
+def apply_coverage_batch_result(
+    plan: QuestionCoveragePlan,
+    result: CoverageBatchCheckResult,
+) -> QuestionCoveragePlan:
+    """Append one validated batch and derive progress without model discretion."""
+
+    existing = plan.execution.assessed_inventory_ids
+    repeated = {
+        item.inventory_id for item in result.assessments
+    }.intersection(existing)
+    if repeated:
+        raise ValueError(
+            "Coverage inventory items cannot be assessed twice: "
+            + ", ".join(sorted(repeated))
+        )
+    assessments = [*plan.execution.assessments, *result.assessments]
+    inventory_ids = {item.inventory_id for item in plan.inventory.items}
+    assessed_ids = {item.inventory_id for item in assessments}
+    all_assessed = assessed_ids == inventory_ids
+    unresolved = [
+        item.inventory_id
+        for item in assessments
+        if item.verdict == CoverageItemVerdict.UNRESOLVED
+    ]
+
+    if all_assessed and not unresolved:
+        status = CoverageExecutionStatus.COMPLETE
+        matched_count: int | None = sum(
+            item.matched_count or 0 for item in assessments
+        )
+        completion_reason = "all_inventory_items_semantically_resolved"
+    elif all_assessed:
+        status = CoverageExecutionStatus.BLOCKED
+        matched_count = None
+        completion_reason = "semantic_items_remain_unresolved"
+    else:
+        status = CoverageExecutionStatus.IN_PROGRESS
+        matched_count = None
+        completion_reason = "semantic_inventory_partially_inspected"
+
+    matched_values: list[str] = []
+    seen_values: set[str] = set()
+    for assessment in assessments:
+        for value in assessment.matched_values:
+            key = " ".join(value.split()).casefold()
+            if key not in seen_values:
+                seen_values.add(key)
+                matched_values.append(value)
+
+    return plan.model_copy(
+        update={
+            "execution": CoverageExecutionProgress(
+                status=status,
+                assessments=assessments,
+                completed_batch_count=plan.execution.completed_batch_count + 1,
+                matched_count=matched_count,
+                matched_values=matched_values,
+                completion_reason=completion_reason,
+            )
+        }
+    )
 
 
 _PAGE_RANGE = re.compile(
@@ -460,7 +746,11 @@ def build_coverage_inventory(
         items = _deduplicate_elements(elements, pages_by_id, requirement.source_type)
 
     structural_count = (
-        len(items) if _is_pure_structural_count(requirement) else None
+        len(items)
+        if _is_pure_structural_count(requirement)
+        else 0
+        if requirement.operator == CoverageOperator.COUNT and not items
+        else None
     )
     return CoverageInventory(
         status=CoverageInventoryStatus.COMPLETE,

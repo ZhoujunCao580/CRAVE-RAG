@@ -10,6 +10,7 @@ data can bind to an immutable revision.
 | Visual Retrieval | `visual-retrieval-v0.1` | `visual_retrieval_v0_1.txt` |
 | Visual Reader | `visual-reader-v0.5` | `visual_reader_v0_5.txt` |
 | Evidence Checker | `checker-v2.4` | `checker_v2_4.txt` |
+| Coverage Checker | `coverage-checker-v0.1` | `coverage_checker_v0_1.txt` |
 | Reading Controller | `controller-policy-v0.12` | `controller_policy_v0_12.txt` |
 | Answerer | `answerer-v0.8` | `answerer_v0_8.txt` |
 | Multimodal Table Reader | `multimodal-table-reader-v0.2` | `multimodal_table_reader_v0_2_system.txt`, `multimodal_table_reader_v0_2_user.txt` |

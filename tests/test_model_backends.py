@@ -6,6 +6,15 @@ from typing import Any
 from PIL import Image
 
 from softdoc.answering import AnswerEvidence, AnswerInput, AnswerResult
+from softdoc.coverage_reasoning import (
+    CoverageBatchCheckInput,
+    CoverageInventoryItem,
+    CoverageItemVerdict,
+    CoverageObservation,
+    CoverageOperator,
+    CoverageRequirement,
+    CoverageSourceType,
+)
 from softdoc.model_backends import (
     OllamaAnswererBackend,
     OllamaEvidenceCheckerBackend,
@@ -15,8 +24,13 @@ from softdoc.model_backends import (
     OllamaVisualReaderBackend,
 )
 from softdoc.models import Document, Element, ElementType, Page, Provenance
+from softdoc.openai_compatible import (
+    OpenAICompatibleConfig,
+    OpenAICompatibleStructuredClient,
+)
 from softdoc.reading_environment import ReaderContext
 from softdoc.reading_state import (
+    EvidenceItem,
     EvidenceCheckInput,
     ObservationSourceRef,
     ReadInput,
@@ -43,6 +57,23 @@ class FakeTransport:
     ) -> dict[str, Any]:
         self.calls.append((url, payload, timeout_seconds))
         return self.response
+
+
+class SequenceFakeTransport:
+    def __init__(self, responses: list[dict[str, Any]]) -> None:
+        self.responses = list(responses)
+        self.calls: list[tuple[str, dict[str, Any], float]] = []
+
+    def post_json(
+        self,
+        url: str,
+        payload: dict[str, Any],
+        timeout_seconds: float,
+    ) -> dict[str, Any]:
+        self.calls.append((url, payload, timeout_seconds))
+        if not self.responses:
+            raise AssertionError("SequenceFakeTransport ran out of responses")
+        return self.responses.pop(0)
 
 
 def _provenance(owner: str) -> Provenance:
@@ -277,6 +308,239 @@ def test_checker_and_answerer_backends_use_their_frozen_schemas() -> None:
     answer = answerer.answer(answer_input)
     assert answer.used_evidence_ids == ["E1"]
     assert answer_transport.calls[0][1]["format"]["title"] == "AnswerResult"
+
+
+def test_checker_repairs_duplicate_evidence_replacement_without_new_read() -> None:
+    root = RootQuestion(question_id="root:Q771", text="Which figures use line plots?")
+    memory = initialize_evidence_memory(
+        reading_session_id="reading:Q771",
+        root_question_id=root.question_id,
+        root_question_text=root.text,
+        questions=[],
+    ).model_copy(
+        update={
+            "evidence": [
+                EvidenceItem(
+                    evidence_id="evidence:old:0000",
+                    statement="Figure 1 is a line plot.",
+                    observation_ids=["obs:old:00"],
+                    supports_question_ids=[root.question_id],
+                )
+            ]
+        }
+    )
+    checker_input = EvidenceCheckInput(
+        action_id="action:Q771:2",
+        root_question=root,
+        evidence_memory=memory,
+        observations=[
+            StoredObservation(
+                observation_id="obs:new:00",
+                action_id="action:Q771:2",
+                text="The newly read figure is a bar chart, not a line plot.",
+                sources=[ObservationSourceRef(input_id="I1")],
+            )
+        ],
+    )
+    duplicate_replace = (
+        '{"action_id":"action:Q771:2","observation_assessments":['
+        '{"observation_id":"obs:new:00","assessment":"Contradicts the old claim."}],'
+        '"evidence_updates":{"add":[],"replace":['
+        '{"evidence_id":"evidence:old:0000","statement":"The new figure is a bar chart.",'
+        '"observation_ids":["obs:new:00"],"supports_question_ids":["root:Q771"]},'
+        '{"evidence_id":"evidence:old:0000","statement":"The old line-plot claim is invalid.",'
+        '"observation_ids":["obs:new:00"],"supports_question_ids":["root:Q771"]}],'
+        '"remove":[]},"current_target_status":"incomplete",'
+        '"remaining_gap_description":"Other figures remain unchecked."}'
+    )
+    repaired = (
+        '{"action_id":"action:Q771:2","observation_assessments":['
+        '{"observation_id":"obs:new:00","assessment":"The new source is a bar chart."}],'
+        '"evidence_updates":{"add":[],"replace":['
+        '{"evidence_id":"evidence:old:0000","statement":"The newly read figure is a bar chart.",'
+        '"observation_ids":["obs:new:00"],"supports_question_ids":["root:Q771"]}],'
+        '"remove":[]},"current_target_status":"incomplete",'
+        '"remaining_gap_description":"Other figures remain unchecked."}'
+    )
+    transport = SequenceFakeTransport(
+        [
+            {"model": "text-test", "message": {"content": duplicate_replace}},
+            {"model": "text-test", "message": {"content": repaired}},
+        ]
+    )
+    backend = OllamaEvidenceCheckerBackend(
+        OllamaStructuredClient(OllamaModelConfig(model="text-test"), transport)
+    )
+
+    result = backend.check(checker_input)
+
+    assert len(transport.calls) == 2
+    assert len(result.evidence_updates.replace) == 1
+    assert len(backend.last_rejected_attempts) == 1
+    repair_prompt = transport.calls[1][1]["messages"][1]["content"]
+    assert "evidence:old:0000" in repair_prompt
+    assert "at most once across replace and remove" in repair_prompt
+    assert "do not guess, edit, or fuzzy-match" in repair_prompt
+
+
+def test_checker_repairs_mistyped_observation_id_without_fuzzy_mapping() -> None:
+    root = RootQuestion(question_id="root:Q165", text="What color is Beijing?")
+    memory = initialize_evidence_memory(
+        reading_session_id="reading:Q165",
+        root_question_id=root.question_id,
+        root_question_text=root.text,
+        questions=[],
+    )
+    checker_input = EvidenceCheckInput(
+        action_id="action:Q165:1",
+        root_question=root,
+        evidence_memory=memory,
+        observations=[
+            StoredObservation(
+                observation_id="obs:6883d66e1cce:00",
+                action_id="action:Q165:1",
+                text="The supplied map does not contain Beijing.",
+                sources=[ObservationSourceRef(input_id="I1")],
+            )
+        ],
+    )
+    mistyped = (
+        '{"action_id":"action:Q165:1","observation_assessments":['
+        '{"observation_id":"obs:6883d666e1cce:00","assessment":"No Beijing is shown."}],'
+        '"evidence_updates":{"add":[{"statement":"The map does not contain Beijing.",'
+        '"observation_ids":["obs:6883d666e1cce:00"],'
+        '"supports_question_ids":["root:Q165"]}],"replace":[],"remove":[]},'
+        '"current_target_status":"satisfied","remaining_gap_description":null}'
+    )
+    repaired = mistyped.replace("obs:6883d666e1cce:00", "obs:6883d66e1cce:00")
+    transport = SequenceFakeTransport(
+        [
+            {"model": "text-test", "message": {"content": mistyped}},
+            {"model": "text-test", "message": {"content": repaired}},
+        ]
+    )
+    backend = OllamaEvidenceCheckerBackend(
+        OllamaStructuredClient(OllamaModelConfig(model="text-test"), transport)
+    )
+
+    result = backend.check(checker_input)
+
+    assert result.root_status.value == "ready"
+    assert result.observation_assessments[0].observation_id == "obs:6883d66e1cce:00"
+    assert len(transport.calls) == 2
+    assert len(backend.last_rejected_attempts) == 1
+    repair_prompt = transport.calls[1][1]["messages"][1]["content"]
+    assert '"obs:6883d66e1cce:00"' in repair_prompt
+    assert "obs:6883d666e1cce:00" in repair_prompt
+    assert "fuzzy-match" in repair_prompt
+
+
+def test_checker_contract_repair_works_with_openai_compatible_client() -> None:
+    root = RootQuestion(question_id="root:vllm", text="What is the value?")
+    memory = initialize_evidence_memory(
+        reading_session_id="reading:vllm",
+        root_question_id=root.question_id,
+        root_question_text=root.text,
+        questions=[],
+    )
+    checker_input = EvidenceCheckInput(
+        action_id="action:vllm:1",
+        root_question=root,
+        evidence_memory=memory,
+        observations=[
+            StoredObservation(
+                observation_id="obs:vllm:00",
+                action_id="action:vllm:1",
+                text="The value is 42.",
+                sources=[ObservationSourceRef(input_id="I1")],
+            )
+        ],
+    )
+    bad = (
+        '{"action_id":"action:vllm:1","observation_assessments":['
+        '{"observation_id":"obs:vllm:000","assessment":"Direct support."}],'
+        '"evidence_updates":{"add":[],"replace":[],"remove":[]},'
+        '"current_target_status":"incomplete",'
+        '"remaining_gap_description":"The value is still needed."}'
+    )
+    repaired = bad.replace("obs:vllm:000", "obs:vllm:00")
+    transport = SequenceFakeTransport(
+        [
+            {"choices": [{"message": {"content": bad}}]},
+            {"choices": [{"message": {"content": repaired}}]},
+        ]
+    )
+    backend = OllamaEvidenceCheckerBackend(
+        OpenAICompatibleStructuredClient(
+            OpenAICompatibleConfig(model="text-test"), transport
+        )
+    )
+
+    result = backend.check(checker_input)
+
+    assert result.current_target_status.value == "incomplete"
+    assert len(transport.calls) == 2
+    assert transport.calls[1][1]["response_format"]["type"] == "json_schema"
+    assert len(backend.last_rejected_attempts) == 1
+
+
+def test_coverage_checker_backend_uses_frozen_schema_without_claiming_completion(
+) -> None:
+    checker_input = CoverageBatchCheckInput(
+        action_id="action:coverage:1",
+        question_id="Q913",
+        question_text="How many people appear in the figures on Pages 18-19?",
+        requirement=CoverageRequirement(
+            operator=CoverageOperator.COUNT,
+            scope_text="Pages 18-19",
+            item_type="person",
+            source_type=CoverageSourceType.FIGURE,
+        ),
+        inventory_items=[
+            CoverageInventoryItem(
+                inventory_id="figure:1",
+                source_ids=["figure:1"],
+                page_ids=["page:18"],
+                physical_page_numbers=[18],
+                source_type=CoverageSourceType.FIGURE,
+                element_type=ElementType.FIGURE,
+                deduplication_reason="canonical_element",
+            )
+        ],
+        observations=[
+            CoverageObservation(
+                observation_id="obs:coverage:1",
+                text="Two distinct people are visible in the figure.",
+                source_ids=["figure:1"],
+                page_ids=["page:18"],
+            )
+        ],
+    )
+    transport = FakeTransport(
+        {
+            "model": "vision-test",
+            "message": {
+                "content": (
+                    '{"action_id":"action:coverage:1","assessments":['
+                    '{"inventory_id":"figure:1","verdict":"matched",'
+                    '"matched_count":2,"matched_values":[],'
+                    '"observation_ids":["obs:coverage:1"],'
+                    '"rationale":"Two distinct people are visible."}]}'
+                )
+            },
+        }
+    )
+    backend = OllamaEvidenceCheckerBackend(
+        OllamaStructuredClient(OllamaModelConfig(model="vision-test"), transport)
+    )
+
+    result = backend.check_coverage(checker_input)
+
+    assert result.assessments[0].verdict == CoverageItemVerdict.MATCHED
+    payload = transport.calls[0][1]
+    assert payload["format"]["title"] == "CoverageBatchCheckResult"
+    assert "Environment, not you" in payload["messages"][0]["content"]
+    assert backend.client.call_records[0].component == "coverage_checker"
 
 
 def test_structured_client_accepts_validated_output_from_thinking_channel() -> None:

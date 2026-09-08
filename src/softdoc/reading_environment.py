@@ -41,12 +41,23 @@ from softdoc.controller import (
     validate_controller_action,
 )
 from softdoc.coverage_reasoning import (
+    CoverageBatchCheckInput,
+    CoverageBatchCheckResult,
+    CoverageExecutionProgress,
+    CoverageExecutionStatus,
+    CoverageInventoryStatus,
+    CoverageItemVerdict,
+    CoverageLimitation,
+    CoverageObservation,
+    CoverageOperator,
     CoverageRequirement,
     CoverageScopeResolver,
     CoverageScopeStatus,
     PageNumberNamespace,
     QuestionCoveragePlan,
+    apply_coverage_batch_result,
     build_coverage_inventory,
+    validate_coverage_batch_result,
 )
 from softdoc.ids import (
     action_id as make_action_id,
@@ -113,7 +124,7 @@ from softdoc.store import DocumentStore
 from softdoc.table_view import TableMaterializer, TableView
 
 
-READING_ENVIRONMENT_VERSION = "reading-environment-v0.5"
+READING_ENVIRONMENT_VERSION = "reading-environment-v0.6"
 
 
 _RECALL_STOPWORDS = frozenset(
@@ -196,6 +207,13 @@ class EvidenceCheckerBackend(Protocol):
         """Assess new observations and return an EvidenceMemory delta."""
 
 
+class SemanticCoverageCheckerBackend(Protocol):
+    def check_coverage(
+        self, checker_input: CoverageBatchCheckInput
+    ) -> CoverageBatchCheckResult:
+        """Assess every canonical inventory item in one bounded batch."""
+
+
 class AnswererBackend(Protocol):
     def answer(self, answer_input: AnswerInput) -> AnswerResult:
         """Synthesize the final answer from ready Evidence only."""
@@ -229,6 +247,7 @@ class ReadingEnvironmentConfig(SoftDocModel):
     action_budget: int = Field(default=7, ge=1, le=100)
     recent_action_limit: int = Field(default=5, ge=0)
     observation_recall_limit: int = Field(default=3, ge=0, le=10)
+    coverage_batch_size: int = Field(default=5, ge=1, le=16)
     search: SearchSessionConfig = Field(default_factory=SearchSessionConfig)
     coverage_namespace_overrides: dict[str, PageNumberNamespace] = Field(
         default_factory=dict
@@ -537,6 +556,10 @@ class ReadingEnvironment:
             in {
                 "coverage_scope_execution_blocked",
                 "coverage_semantic_execution_not_implemented",
+                "coverage_semantic_checker_unavailable",
+                "coverage_semantic_check_failed",
+                "coverage_semantic_items_unresolved",
+                "coverage_operator_not_implemented",
             }
             for item in previous.diagnostics
         )
@@ -647,6 +670,10 @@ class ReadingEnvironment:
             "coverage_page_namespace_review_recommended",
             "coverage_scope_execution_blocked",
             "coverage_semantic_execution_not_implemented",
+            "coverage_semantic_checker_unavailable",
+            "coverage_semantic_check_failed",
+            "coverage_semantic_items_unresolved",
+            "coverage_operator_not_implemented",
         }
         self._diagnostics = [
             item.model_copy(deep=True)
@@ -667,6 +694,49 @@ class ReadingEnvironment:
                 item.question_id: item.requirement
                 for item in previous.coverage_plans
             }
+        )
+        previous_plans = {item.question_id: item for item in previous.coverage_plans}
+        self._coverage_plans = [
+            plan.model_copy(
+                update={
+                    "execution": self._resumable_coverage_execution(
+                        previous_plans[plan.question_id].execution
+                    )
+                }
+            )
+            if plan.question_id in previous_plans
+            and previous_plans[plan.question_id].requirement == plan.requirement
+            and previous_plans[plan.question_id].scope_resolution
+            == plan.scope_resolution
+            and previous_plans[plan.question_id].inventory == plan.inventory
+            else plan
+            for plan in self._coverage_plans
+        ]
+
+    @staticmethod
+    def _resumable_coverage_execution(
+        execution: CoverageExecutionProgress,
+    ) -> CoverageExecutionProgress:
+        """Retry only unresolved items while preserving resolved batch work."""
+
+        if execution.status != CoverageExecutionStatus.BLOCKED:
+            return execution.model_copy(deep=True)
+        resolved = [
+            item
+            for item in execution.assessments
+            if item.verdict != CoverageItemVerdict.UNRESOLVED
+        ]
+        return CoverageExecutionProgress(
+            status=(
+                CoverageExecutionStatus.IN_PROGRESS
+                if resolved
+                else CoverageExecutionStatus.PENDING
+            ),
+            assessments=resolved,
+            completed_batch_count=execution.completed_batch_count,
+            matched_count=None,
+            matched_values=list(execution.matched_values),
+            completion_reason="retrying_previously_unresolved_items",
         )
 
     def _prepare_coverage_plans(
@@ -808,7 +878,16 @@ class ReadingEnvironment:
             if counted:
                 self._validate_state(observations, memory, trace)
                 continue
-            if self._block_unimplemented_coverage(target.question_id):
+            observations, memory, trace, inspected = self._route_semantic_coverage(
+                root_question=root_question,
+                memory=memory,
+                observations=observations,
+                trace=trace,
+            )
+            if inspected:
+                self._validate_state(observations, memory, trace)
+                continue
+            if self._block_unavailable_coverage(target.question_id):
                 break
             if target.question_id not in self._activated_question_ids:
                 self._activated_question_ids.add(target.question_id)
@@ -1131,29 +1210,406 @@ class ReadingEnvironment:
             )
         return next_observations, next_memory, next_trace, True
 
-    def _block_unimplemented_coverage(self, question_id: str) -> bool:
-        """Prevent ordinary semantic QA from pretending coverage is complete."""
+    def _route_semantic_coverage(
+        self,
+        *,
+        root_question: RootQuestion,
+        memory: EvidenceMemory,
+        observations: ObservationStore,
+        trace: ActionTrace,
+    ) -> tuple[ObservationStore, EvidenceMemory, ActionTrace, bool]:
+        """Read and judge one bounded batch from a semantic count inventory."""
+
+        target = memory.current_target
+        if target is None:
+            return observations, memory, trace, False
+        plan = next(
+            (item for item in self._coverage_plans if item.question_id == target.question_id),
+            None,
+        )
+        if (
+            plan is None
+            or plan.inventory.status != CoverageInventoryStatus.COMPLETE
+            or plan.inventory.structural_count is not None
+            or plan.requirement.operator != CoverageOperator.COUNT
+            or plan.execution.status
+            in {CoverageExecutionStatus.COMPLETE, CoverageExecutionStatus.BLOCKED}
+        ):
+            return observations, memory, trace, False
+
+        checker_method = getattr(self.checker, "check_coverage", None)
+        if checker_method is None:
+            return observations, memory, trace, False
+
+        assessed_ids = plan.execution.assessed_inventory_ids
+        pending = [
+            item for item in plan.inventory.items if item.inventory_id not in assessed_ids
+        ]
+        if not pending:
+            return observations, memory, trace, False
+        batch_items = pending[: self.config.coverage_batch_size]
+        step = len(trace.entries)
+        current_action_id = make_action_id(trace.reading_session_id, step)
+        question_text = (
+            root_question.text
+            if target.question_id == root_question.question_id
+            else next(
+                item.text
+                for item in memory.questions
+                if item.question_id == target.question_id
+            )
+        )
+        local_problem = self._coverage_local_problem(question_text, plan.requirement)
+
+        read_inputs: list[ReadInput] = []
+        readable_inputs: list[ReadInput] = []
+        input_to_inventory: dict[str, str] = {}
+        reader_limitations: list[ObservationLimitation] = []
+        for inventory_item in batch_items:
+            for source_id in inventory_item.source_ids:
+                input_index = len(read_inputs)
+                try:
+                    read_input = self._read_input(source_id, input_index)
+                    readable_inputs.append(read_input)
+                except (KeyError, ValueError) as exc:
+                    read_input = self._coverage_metadata_input(
+                        inventory_item=inventory_item,
+                        source_id=source_id,
+                        index=input_index,
+                    )
+                    reader_limitations.append(
+                        ObservationLimitation(
+                            code="coverage_source_unreadable",
+                            description=str(exc),
+                            input_ids=[read_input.input_id],
+                        )
+                    )
+                read_inputs.append(read_input)
+                input_to_inventory[read_input.input_id] = inventory_item.inventory_id
+
+        if readable_inputs:
+            context = ReaderContext(
+                action_id=current_action_id,
+                question_id=target.question_id,
+                local_problem=local_problem,
+                document=self.document,
+                inputs=tuple(readable_inputs),
+                elements_by_id={item.element_id: item for item in self.document.elements},
+                pages_by_id={item.page_id: item for item in self.document.pages},
+                table_views_by_id=dict(self._table_views),
+            )
+            try:
+                reader_output = self.reader.read(context)
+            except Exception as exc:
+                reader_output = ReaderOutput(
+                    reader_kind=ReaderKind.VISUAL,
+                    limitations=[
+                        ObservationLimitation(
+                            code="coverage_reader_failed",
+                            description=f"Reader backend failed: {exc}",
+                            input_ids=[item.input_id for item in readable_inputs],
+                        )
+                    ],
+                )
+            reader_limitations.extend(reader_output.limitations)
+            reader_kind: ReaderKind | str = reader_output.reader_kind
+            drafts = reader_output.observations
+        else:
+            reader_kind = "coverage"
+            drafts = []
+
+        inputs_by_id = {item.input_id: item for item in read_inputs}
+        pages_by_id = {item.page_id: item for item in self.document.pages}
+        for draft in drafts:
+            unknown = {item.input_id for item in draft.sources}.difference(inputs_by_id)
+            if unknown:
+                raise ValueError(
+                    "Reader Observation references unavailable coverage inputs: "
+                    + ", ".join(sorted(unknown))
+                )
+        stored = [
+            StoredObservation(
+                observation_id=make_observation_id(current_action_id, index),
+                action_id=current_action_id,
+                text=draft.text,
+                sources=[
+                    source.model_copy(
+                        update={
+                            "source_id": inputs_by_id[source.input_id].source_id,
+                            "page_id": inputs_by_id[source.input_id].page_id,
+                            "physical_page_number": pages_by_id[
+                                inputs_by_id[source.input_id].page_id
+                            ].page_number,
+                            "display_page_label": pages_by_id[
+                                inputs_by_id[source.input_id].page_id
+                            ].display_page_label,
+                            "element_id": inputs_by_id[source.input_id].element_id,
+                        }
+                    )
+                    for source in draft.sources
+                ],
+            )
+            for index, draft in enumerate(drafts)
+        ]
+
+        coverage_observations = [
+            CoverageObservation(
+                observation_id=item.observation_id,
+                text=item.text,
+                source_ids=[
+                    source.source_id
+                    for source in item.sources
+                    if source.source_id is not None
+                ],
+                page_ids=list(
+                    dict.fromkeys(
+                        source.page_id
+                        for source in item.sources
+                        if source.page_id is not None
+                    )
+                ),
+            )
+            for item in stored
+        ]
+        coverage_limitations: list[CoverageLimitation] = []
+        all_batch_ids = [item.inventory_id for item in batch_items]
+        for limitation in reader_limitations:
+            limitation_items = list(
+                dict.fromkeys(
+                    input_to_inventory[input_id]
+                    for input_id in limitation.input_ids
+                    if input_id in input_to_inventory
+                )
+            )
+            if not limitation.input_ids:
+                limitation_items = all_batch_ids
+            if limitation_items:
+                coverage_limitations.append(
+                    CoverageLimitation(
+                        description=limitation.description,
+                        inventory_ids=limitation_items,
+                    )
+                )
+        checker_input = CoverageBatchCheckInput(
+            action_id=current_action_id,
+            question_id=target.question_id,
+            question_text=question_text,
+            requirement=plan.requirement,
+            inventory_items=batch_items,
+            observations=coverage_observations,
+            limitations=coverage_limitations,
+        )
+
+        check_error: Exception | None = None
+        try:
+            batch_result = validate_coverage_batch_result(
+                checker_input, checker_method(checker_input)
+            )
+            updated_plan = apply_coverage_batch_result(plan, batch_result)
+            self._replace_coverage_plan(updated_plan)
+        except Exception as exc:
+            check_error = exc
+            batch_result = None
+            updated_plan = plan
+
+        if (
+            batch_result is not None
+            and updated_plan.execution.status == CoverageExecutionStatus.COMPLETE
+        ):
+            read_inputs, summary_sources = self._append_coverage_provenance_inputs(
+                read_inputs=read_inputs,
+                plan=updated_plan,
+            )
+            matched_count = updated_plan.execution.matched_count
+            assert matched_count is not None
+            summary = StoredObservation(
+                observation_id=make_observation_id(current_action_id, len(stored)),
+                action_id=current_action_id,
+                text=self._coverage_completion_statement(updated_plan),
+                sources=summary_sources,
+            )
+            stored.append(summary)
+            checker_state_input = EvidenceCheckInput(
+                action_id=current_action_id,
+                root_question=root_question,
+                evidence_memory=memory,
+                observations=[summary],
+            )
+            deterministic_result = EvidenceCheckResult(
+                action_id=current_action_id,
+                observation_assessments=[
+                    ObservationAssessment(
+                        observation_id=summary.observation_id,
+                        used_for_evidence=True,
+                        assessment=(
+                            "Accepted exhaustive semantic inventory after every "
+                            "canonical item received a resolved verdict."
+                        ),
+                    )
+                ],
+                evidence_updates=EvidenceUpdates(
+                    add=[
+                        EvidenceAddition(
+                            statement=summary.text,
+                            observation_ids=[summary.observation_id],
+                            supports_question_ids=[target.question_id],
+                        )
+                    ]
+                ),
+                current_target_status=QuestionStatus.SATISFIED,
+                root_status=(
+                    EvidenceStatus.READY
+                    if target.question_id == root_question.question_id
+                    else EvidenceStatus.INCOMPLETE
+                ),
+            )
+            next_memory = apply_evidence_check_result(
+                checker_state_input, deterministic_result
+            )
+        else:
+            next_memory = memory
+
+        record = ReadRecord(
+            action_id=current_action_id,
+            reader_kind=reader_kind,
+            document_id=self.document.document_id,
+            subquestion_id=(
+                target.question_id
+                if target.question_id != root_question.question_id
+                else None
+            ),
+            local_problem=local_problem,
+            inputs=read_inputs,
+            observation_ids=[item.observation_id for item in stored],
+            limitations=reader_limitations,
+        )
+        next_observations = ObservationStore(
+            reading_session_id=observations.reading_session_id,
+            root_question_id=observations.root_question_id,
+            read_records=[*observations.read_records, record],
+            observations=[*observations.observations, *stored],
+        )
+
+        verdicts = (
+            {
+                item.inventory_id: item.verdict.value
+                for item in batch_result.assessments
+            }
+            if batch_result is not None
+            else {}
+        )
+        execution_status = (
+            ActionExecutionStatus.DEGRADED
+            if reader_limitations
+            or check_error is not None
+            or any(value == CoverageItemVerdict.UNRESOLVED.value for value in verdicts.values())
+            else ActionExecutionStatus.SUCCEEDED
+        )
+        entry = ActionTraceEntry(
+            step_index=step,
+            action_id=current_action_id,
+            question_id=target.question_id,
+            action_name="INSPECT_COVERAGE_BATCH",
+            target_ids=[item.inventory_id for item in batch_items],
+            execution_status=execution_status,
+            observation_ids=[item.observation_id for item in stored],
+            metadata={
+                "scope_text": plan.requirement.scope_text,
+                "item_type": plan.requirement.item_type,
+                "source_type": plan.requirement.source_type.value,
+                "batch_size": len(batch_items),
+                "verdicts": verdicts,
+                "coverage_status": updated_plan.execution.status.value,
+                "assessed_count": len(updated_plan.execution.assessments),
+                "inventory_count": len(updated_plan.inventory.items),
+                "matched_count": updated_plan.execution.matched_count,
+            },
+        )
+        next_trace = ActionTrace(
+            reading_session_id=trace.reading_session_id,
+            root_question_id=trace.root_question_id,
+            entries=[*trace.entries, entry],
+        )
+
+        if check_error is not None:
+            description = f"Semantic Coverage Checker failed: {check_error}"
+            self._stop_reason = description
+            self._diagnostics.append(
+                EnvironmentDiagnostic(
+                    code="coverage_semantic_check_failed",
+                    description=description,
+                    action_id=current_action_id,
+                    question_id=target.question_id,
+                    metadata={
+                        "inventory_ids": [item.inventory_id for item in batch_items]
+                    },
+                )
+            )
+        elif updated_plan.execution.status == CoverageExecutionStatus.BLOCKED:
+            description = (
+                "Semantic coverage remains incomplete because one or more "
+                "canonical inventory items could not be resolved."
+            )
+            self._stop_reason = description
+            self._diagnostics.append(
+                EnvironmentDiagnostic(
+                    code="coverage_semantic_items_unresolved",
+                    description=description,
+                    action_id=current_action_id,
+                    question_id=target.question_id,
+                    metadata={
+                        "unresolved_inventory_ids": (
+                            updated_plan.execution.unresolved_inventory_ids
+                        )
+                    },
+                )
+            )
+        elif updated_plan.execution.status == CoverageExecutionStatus.COMPLETE:
+            next_memory = self._advance_state_only_checks(
+                root_question=root_question,
+                previous_memory=memory,
+                memory=next_memory,
+                observations=next_observations,
+                triggering_action_id=current_action_id,
+            )
+        return next_observations, next_memory, next_trace, True
+
+    def _block_unavailable_coverage(self, question_id: str) -> bool:
+        """Block only unsafe or unsupported coverage paths."""
 
         plan = next(
             (item for item in self._coverage_plans if item.question_id == question_id),
             None,
         )
-        if plan is None:
+        if plan is None or plan.inventory.structural_count is not None:
             return False
-        if plan.inventory.status.value == "blocked":
+        if plan.inventory.status == CoverageInventoryStatus.BLOCKED:
             code = "coverage_scope_execution_blocked"
             description = (
                 "Coverage execution stopped because the requested scope is "
                 "unresolved or requires a page-namespace review. Apply an "
                 "explicit namespace override before resuming."
             )
-        else:
-            code = "coverage_semantic_execution_not_implemented"
+        elif plan.requirement.operator != CoverageOperator.COUNT:
+            code = "coverage_operator_not_implemented"
             description = (
-                "Coverage inventory is complete, but this requirement needs "
-                "semantic per-item inspection; ordinary SEARCH/READ cannot be "
-                "treated as exhaustive completion."
+                "This Coverage version executes semantic counts only; the "
+                f"operator {plan.requirement.operator.value!r} remains unsupported."
             )
+        elif plan.execution.status == CoverageExecutionStatus.BLOCKED:
+            code = "coverage_semantic_items_unresolved"
+            description = (
+                "Semantic coverage remains incomplete because canonical items "
+                "still have unresolved verdicts."
+            )
+        elif getattr(self.checker, "check_coverage", None) is None:
+            code = "coverage_semantic_checker_unavailable"
+            description = (
+                "The configured Checker backend does not implement the semantic "
+                "Coverage Checker contract."
+            )
+        else:
+            return False
         self._stop_reason = description
         self._diagnostics.append(
             EnvironmentDiagnostic(
@@ -1167,10 +1623,110 @@ class ReadingEnvironment:
                     "source_type": plan.requirement.source_type.value,
                     "scope_status": plan.scope_resolution.status.value,
                     "requires_review": plan.scope_resolution.requires_review,
+                    "coverage_status": plan.execution.status.value,
                 },
             )
         )
         return True
+
+    @staticmethod
+    def _coverage_local_problem(
+        question_text: str, requirement: CoverageRequirement
+    ) -> str:
+        predicate = requirement.predicate or "the requested item type"
+        return (
+            f"Coverage inspection for: {question_text}\n"
+            f"Inspect each supplied canonical {requirement.source_type.value} source "
+            f"for {requirement.item_type!r}; criterion: {predicate}. Report only "
+            "facts visible in the supplied source and any limitation."
+        )
+
+    def _coverage_metadata_input(
+        self,
+        *,
+        inventory_item: Any,
+        source_id: str,
+        index: int,
+    ) -> ReadInput:
+        element = next(
+            (item for item in self.document.elements if item.element_id == source_id),
+            None,
+        )
+        page_id = (
+            element.page_id
+            if element is not None
+            else inventory_item.page_ids[
+                min(inventory_item.source_ids.index(source_id), len(inventory_item.page_ids) - 1)
+            ]
+        )
+        return ReadInput(
+            input_id=read_input_id(index),
+            source_id=source_id,
+            source_type=(
+                ReadingSourceType.ELEMENT
+                if element is not None
+                else ReadingSourceType.PAGE
+            ),
+            representation=ReadRepresentation.STRUCTURAL_METADATA,
+            document_id=self.document.document_id,
+            page_id=page_id,
+            element_id=element.element_id if element is not None else None,
+        )
+
+    def _append_coverage_provenance_inputs(
+        self,
+        *,
+        read_inputs: list[ReadInput],
+        plan: QuestionCoveragePlan,
+    ) -> tuple[list[ReadInput], list[ObservationSourceRef]]:
+        inputs = list(read_inputs)
+        by_source = {item.source_id: item for item in inputs}
+        for inventory_item in plan.inventory.items:
+            for source_id in inventory_item.source_ids:
+                if source_id not in by_source:
+                    item = self._coverage_metadata_input(
+                        inventory_item=inventory_item,
+                        source_id=source_id,
+                        index=len(inputs),
+                    )
+                    inputs.append(item)
+                    by_source[source_id] = item
+        pages_by_id = {item.page_id: item for item in self.document.pages}
+        sources = [
+            ObservationSourceRef(
+                input_id=item.input_id,
+                source_id=item.source_id,
+                page_id=item.page_id,
+                physical_page_number=pages_by_id[item.page_id].page_number,
+                display_page_label=pages_by_id[item.page_id].display_page_label,
+                element_id=item.element_id,
+            )
+            for item in inputs
+        ]
+        return inputs, sources
+
+    @staticmethod
+    def _coverage_completion_statement(plan: QuestionCoveragePlan) -> str:
+        count = plan.execution.matched_count
+        values = plan.execution.matched_values
+        predicate = plan.requirement.predicate or "no additional predicate"
+        value_suffix = (
+            " Matched values: " + "; ".join(values) + "." if values else ""
+        )
+        return (
+            f"Exhaustively inspected all {len(plan.inventory.items)} canonical "
+            f"{plan.requirement.source_type.value} source(s) in resolved scope "
+            f"{plan.requirement.scope_text!r}. The exact semantic count of "
+            f"{plan.requirement.item_type!r} under criterion {predicate!r} is "
+            f"{count}. Every inventory item has a matched or not_matched verdict; "
+            f"zero items remain unresolved.{value_suffix}"
+        )
+
+    def _replace_coverage_plan(self, updated: QuestionCoveragePlan) -> None:
+        self._coverage_plans = [
+            updated if item.question_id == updated.question_id else item
+            for item in self._coverage_plans
+        ]
 
     def _route_exact_anchors(
         self,

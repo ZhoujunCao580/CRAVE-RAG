@@ -1,14 +1,23 @@
 from __future__ import annotations
 
 from softdoc.coverage_reasoning import (
+    CoverageBatchCheckInput,
+    CoverageBatchCheckResult,
+    CoverageExecutionStatus,
     CoverageInventoryStatus,
+    CoverageItemAssessment,
+    CoverageItemVerdict,
+    CoverageObservation,
     CoverageOperator,
     CoverageRequirement,
     CoverageScopeResolver,
     CoverageScopeStatus,
     CoverageSourceType,
     PageNumberNamespace,
+    QuestionCoveragePlan,
+    apply_coverage_batch_result,
     build_coverage_inventory,
+    validate_coverage_batch_result,
 )
 from softdoc.models import ElementType
 
@@ -208,3 +217,140 @@ def test_confirmed_cross_page_table_fragments_count_once(parsed_document) -> Non
     )
     assert grouped.source_ids == [table.element_id for table in tables[:2]]
     assert grouped.deduplication_reason == "confirmed_cross_page_table_group"
+
+
+def test_semantic_batch_must_cover_exact_inventory_and_use_grounded_observations(
+    parsed_document,
+) -> None:
+    requirement = _requirement(
+        "entire document",
+        item_type="person",
+        source_type=CoverageSourceType.FIGURE,
+    )
+    resolution = CoverageScopeResolver().resolve(requirement, parsed_document)
+    inventory = build_coverage_inventory(requirement, resolution, parsed_document)
+    assert len(inventory.items) >= 2
+    first, second = inventory.items[:2]
+    checker_input = CoverageBatchCheckInput(
+        action_id="action:coverage",
+        question_id="Q1",
+        question_text="How many people are shown in all figures?",
+        requirement=requirement,
+        inventory_items=[first, second],
+        observations=[
+            CoverageObservation(
+                observation_id="obs:first",
+                text="Two people are visible.",
+                source_ids=first.source_ids,
+                page_ids=first.page_ids,
+            ),
+            CoverageObservation(
+                observation_id="obs:second",
+                text="No people are visible.",
+                source_ids=second.source_ids,
+                page_ids=second.page_ids,
+            ),
+        ],
+    )
+
+    incomplete = CoverageBatchCheckResult(
+        action_id="action:coverage",
+        assessments=[
+            CoverageItemAssessment(
+                inventory_id=first.inventory_id,
+                verdict=CoverageItemVerdict.MATCHED,
+                matched_count=2,
+                observation_ids=["obs:first"],
+                rationale="Two distinct people are visible.",
+            )
+        ],
+    )
+    try:
+        validate_coverage_batch_result(checker_input, incomplete)
+    except ValueError as exc:
+        assert "every supplied inventory item exactly once" in str(exc)
+    else:
+        raise AssertionError("Missing inventory assessment must be rejected")
+
+    wrong_source = CoverageBatchCheckResult(
+        action_id="action:coverage",
+        assessments=[
+            CoverageItemAssessment(
+                inventory_id=first.inventory_id,
+                verdict=CoverageItemVerdict.MATCHED,
+                matched_count=2,
+                observation_ids=["obs:second"],
+                rationale="This cites the wrong source.",
+            ),
+            CoverageItemAssessment(
+                inventory_id=second.inventory_id,
+                verdict=CoverageItemVerdict.NOT_MATCHED,
+                matched_count=0,
+                observation_ids=["obs:second"],
+                rationale="No people are visible.",
+            ),
+        ],
+    )
+    try:
+        validate_coverage_batch_result(checker_input, wrong_source)
+    except ValueError as exc:
+        assert "not grounded" in str(exc)
+    else:
+        raise AssertionError("Cross-item Observation leakage must be rejected")
+
+
+def test_semantic_coverage_completes_only_after_every_item_is_resolved(
+    parsed_document,
+) -> None:
+    requirement = _requirement(
+        "entire document",
+        item_type="person",
+        source_type=CoverageSourceType.FIGURE,
+    )
+    resolution = CoverageScopeResolver().resolve(requirement, parsed_document)
+    inventory = build_coverage_inventory(requirement, resolution, parsed_document)
+    assert len(inventory.items) >= 2
+    first, second = inventory.items[:2]
+    plan = QuestionCoveragePlan(
+        question_id="Q1",
+        requirement=requirement,
+        scope_resolution=resolution,
+        inventory=inventory.model_copy(update={"items": [first, second]}),
+    )
+
+    partial = apply_coverage_batch_result(
+        plan,
+        CoverageBatchCheckResult(
+            action_id="action:1",
+            assessments=[
+                CoverageItemAssessment(
+                    inventory_id=first.inventory_id,
+                    verdict=CoverageItemVerdict.MATCHED,
+                    matched_count=2,
+                    observation_ids=["obs:1"],
+                    rationale="Two people are visible.",
+                )
+            ],
+        ),
+    )
+    assert partial.execution.status == CoverageExecutionStatus.IN_PROGRESS
+    assert partial.execution.matched_count is None
+
+    complete = apply_coverage_batch_result(
+        partial,
+        CoverageBatchCheckResult(
+            action_id="action:2",
+            assessments=[
+                CoverageItemAssessment(
+                    inventory_id=second.inventory_id,
+                    verdict=CoverageItemVerdict.NOT_MATCHED,
+                    matched_count=0,
+                    observation_ids=["obs:2"],
+                    rationale="No people are visible.",
+                )
+            ],
+        ),
+    )
+    assert complete.execution.status == CoverageExecutionStatus.COMPLETE
+    assert complete.execution.matched_count == 2
+    assert complete.execution.completed_batch_count == 2

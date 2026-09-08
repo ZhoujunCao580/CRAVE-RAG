@@ -23,6 +23,12 @@ from softdoc.answering import (
     answerer_user_prompt,
 )
 from softdoc.checking_prompt import CHECKER_SYSTEM_PROMPT
+from softdoc.coverage_prompt import COVERAGE_CHECKER_SYSTEM_PROMPT
+from softdoc.coverage_reasoning import (
+    CoverageBatchCheckInput,
+    CoverageBatchCheckResult,
+    validate_coverage_batch_result,
+)
 from softdoc.models import ElementType, SoftDocModel
 from softdoc.reading_environment import (
     DeterministicContentReader,
@@ -257,18 +263,138 @@ class OllamaStructuredClient:
         return result
 
 
+def _is_p10_checker_contract_error(exc: Exception) -> bool:
+    """Limit automatic repair to the two audited P10 contract failures.
+
+    P09 truncation is deliberately excluded until its targeted re-test has run.
+    Infrastructure failures and unrelated semantic validation errors also pass
+    through unchanged.
+    """
+
+    message = str(exc)
+    return (
+        "Evidence replacement IDs must be unique" in message
+        or (
+            "Checker must assess every" in message
+            and "Observation exactly once and no others" in message
+        )
+        or "Checker delta references unavailable Observations" in message
+    )
+
+
+def _last_checker_raw_content(client: Any, exc: Exception) -> str:
+    raw_content = getattr(exc, "raw_content", None)
+    if isinstance(raw_content, str) and raw_content.strip():
+        return raw_content
+
+    raw_content = getattr(client, "last_raw_content", None)
+    if isinstance(raw_content, str) and raw_content.strip():
+        return raw_content
+
+    call_records = getattr(client, "call_records", None)
+    if isinstance(call_records, list):
+        for record in reversed(call_records):
+            if getattr(record, "component", None) == "checker":
+                value = getattr(record, "raw_content", None)
+                if isinstance(value, str) and value.strip():
+                    return value
+    return "<raw Checker output was unavailable>"
+
+
+def _build_checker_contract_repair_prompt(
+    *,
+    checker_input: EvidenceCheckInput,
+    original_user_prompt: str,
+    rejected_content: str,
+    validation_error: str,
+) -> str:
+    presented_observation_ids = [
+        item.observation_id
+        for item in [
+            *checker_input.observations,
+            *checker_input.recalled_observations,
+        ]
+    ]
+    existing_evidence_ids = [
+        item.evidence_id for item in checker_input.evidence_memory.evidence
+    ]
+    return (
+        original_user_prompt
+        + "\n\nThe previous Checker response was rejected by the deterministic "
+        "contract validator. Repair only the structural contract error and "
+        "return one complete strict JSON object again. This repair is part of "
+        "the same Checker invocation; do not invent a new read or action.\n"
+        + f"Validation error: {validation_error}\n"
+        + "Allowed Observation IDs (copy exactly; do not guess, edit, or "
+        "fuzzy-match):\n"
+        + json.dumps(presented_observation_ids, ensure_ascii=False, indent=2)
+        + "\nExisting Evidence IDs that may be replaced or removed (copy "
+        "exactly):\n"
+        + json.dumps(existing_evidence_ids, ensure_ascii=False, indent=2)
+        + "\nRepair rules:\n"
+        + "- Assess every allowed Observation ID exactly once and no other ID.\n"
+        + "- Reference only allowed Observation IDs in Evidence updates.\n"
+        + "- Each existing Evidence ID may occur at most once across replace "
+        "and remove. If duplicate replacements were attempted, consolidate "
+        "them into one unambiguous final replacement.\n"
+        + "- Do not silently select an arbitrary duplicate and do not alter "
+        "factual content merely to satisfy the schema.\n"
+        + "Rejected response:\n"
+        + rejected_content
+    )
+
+
 class OllamaEvidenceCheckerBackend:
     def __init__(self, client: OllamaStructuredClient) -> None:
         self.client = client
+        self.last_rejected_attempts: list[dict[str, str]] = []
 
     def check(self, checker_input: EvidenceCheckInput) -> EvidenceCheckResult:
-        decision = self.client.generate(
-            component="checker",
-            system_prompt=CHECKER_SYSTEM_PROMPT,
+        original_user_prompt = checker_input.model_dump_json(indent=2)
+        user_prompt = original_user_prompt
+        self.last_rejected_attempts = []
+        for attempt in range(2):
+            try:
+                decision = self.client.generate(
+                    component="checker",
+                    system_prompt=CHECKER_SYSTEM_PROMPT,
+                    user_prompt=user_prompt,
+                    output_model=EvidenceCheckDecision,
+                )
+                return materialize_evidence_check_decision(checker_input, decision)
+            except Exception as exc:
+                if not _is_p10_checker_contract_error(exc):
+                    raise
+                raw_content = _last_checker_raw_content(self.client, exc)
+                self.last_rejected_attempts.append(
+                    {
+                        "raw_content": raw_content,
+                        "validation_error": str(exc),
+                    }
+                )
+                if attempt == 1:
+                    raise
+                user_prompt = _build_checker_contract_repair_prompt(
+                    checker_input=checker_input,
+                    original_user_prompt=original_user_prompt,
+                    rejected_content=raw_content,
+                    validation_error=str(exc),
+                )
+
+        raise AssertionError("Checker repair loop exited without a result")
+
+    def check_coverage(
+        self, checker_input: CoverageBatchCheckInput
+    ) -> CoverageBatchCheckResult:
+        """Judge one bounded inventory batch without claiming completeness."""
+
+        result = self.client.generate(
+            component="coverage_checker",
+            system_prompt=COVERAGE_CHECKER_SYSTEM_PROMPT,
             user_prompt=checker_input.model_dump_json(indent=2),
-            output_model=EvidenceCheckDecision,
+            output_model=CoverageBatchCheckResult,
         )
-        return materialize_evidence_check_decision(checker_input, decision)
+        return validate_coverage_batch_result(checker_input, result)
 
 
 class OllamaAnswererBackend:

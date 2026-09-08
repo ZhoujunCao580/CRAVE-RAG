@@ -79,8 +79,19 @@ def test_prompt_directory_contains_only_current_assets() -> None:
         "answerer_v0_8.txt",
         "multimodal_table_reader_v0_2_system.txt",
         "multimodal_table_reader_v0_2_user.txt",
+        "coverage_checker_v0_1.txt",
     }
     assert not (PROMPT_DIRECTORY / "archive").exists()
+
+
+def test_coverage_checker_prompt_keeps_completeness_environment_owned() -> None:
+    prompt = " ".join(get_prompt("coverage_checker").canonical_text.split())
+
+    assert "Judge every supplied canonical inventory item independently" in prompt
+    assert "Environment, not you, decides" in prompt
+    assert "matched / not_matched / unresolved" not in prompt
+    assert "Return exactly one assessment for every supplied `inventory_id`" in prompt
+    assert "Do not output an overall count" in prompt
 
 
 def test_checker_prompt_explains_root_target_progression() -> None:

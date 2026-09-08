@@ -96,7 +96,8 @@ The Controller sees candidate content, not route quotas or rank metadata.
 
 Editable, versioned prompt text lives together under
 [`src/softdoc/prompts/`](src/softdoc/prompts/README.md). The registry remains
-the runtime discovery and hashing interface for all six model-facing prompts:
+the runtime discovery and hashing interface for all eight model-facing prompts,
+including the Multimodal Table Reader and Coverage Checker:
 
 ```bash
 softdoc prompts list
@@ -132,4 +133,4 @@ committed to Git. Use the [external-dataset manifest and
 auditor](docs/EXTERNAL_DATASETS.md) before batch execution. See [Server
 Setup](docs/SERVER_SETUP.md).
 
-See [Project Guide](docs/PROJECT_GUIDE.md), [Model Contracts](docs/MODEL_CONTRACTS.md), [Architecture](docs/ARCHITECTURE.md), and [TODO](docs/TODO.md) for the current implementation boundary, complete JSON interfaces, and open research questions.
+See [Project Guide](docs/PROJECT_GUIDE.md), [Server Experiment Plan](docs/SERVER_EXPERIMENT_PLAN_CN.md), [Model Contracts](docs/MODEL_CONTRACTS.md), [Architecture](docs/ARCHITECTURE.md), and [TODO](docs/TODO.md) for the current implementation boundary, complete JSON interfaces, validation order, and open research questions.

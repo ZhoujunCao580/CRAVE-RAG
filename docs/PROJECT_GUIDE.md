@@ -113,6 +113,9 @@ the current canonical Prompt or action versions.
   manifests, fail-fast corpus auditing, and Gold-free batch export.
 - [Evaluation Protocol](EVALUATION_PROTOCOL.md): canonical development/reference
   scoring boundary, metric definitions, and immutable experiment IDs.
+- [Server Experiment Plan](SERVER_EXPERIMENT_PLAN_CN.md): dependency-ordered
+  component gates, integration smoke tests, affected-case replays, and the next
+  development baseline.
 - [Research Positioning](RESEARCH_POSITIONING.md): current research hypothesis
   and novelty boundary.
 - [TODO](TODO.md): unresolved decisions and experiments. A TODO is not an

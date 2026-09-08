@@ -6,6 +6,15 @@ from typing import Any
 
 from softdoc.answering import AnswerInput, AnswerResult
 from softdoc.controller import ControllerInput
+from softdoc.coverage_reasoning import (
+    CoverageBatchCheckInput,
+    CoverageBatchCheckResult,
+    CoverageItemAssessment,
+    CoverageItemVerdict,
+    CoverageOperator,
+    CoverageRequirement,
+    CoverageSourceType,
+)
 from softdoc.model_runner import (
     ModelBackedRunner,
     load_model_pipeline_run,
@@ -48,6 +57,26 @@ class FixedPlanner:
         return InitialPlan(
             original_question=question,
             subquestions=[],
+            planner_trace=PlannerTrace(
+                backend_name="fake",
+                model="fake",
+                prompt_version="test",
+            ),
+        )
+
+
+class FixedSemanticCoveragePlanner:
+    def create_plan(self, question: str) -> InitialPlan:
+        return InitialPlan(
+            original_question=question,
+            subquestions=[],
+            coverage_requirement=CoverageRequirement(
+                operator=CoverageOperator.COUNT,
+                scope_text="entire document",
+                item_type="revenue statement",
+                source_type=CoverageSourceType.ELEMENT,
+                predicate="states the 2023 revenue",
+            ),
             planner_trace=PlannerTrace(
                 backend_name="fake",
                 model="fake",
@@ -100,6 +129,27 @@ class AcceptingChecker:
             current_target_status=QuestionStatus.SATISFIED,
             root_status=EvidenceStatus.READY,
             remaining_gap_description=None,
+        )
+
+
+class SemanticCoverageChecker(AcceptingChecker):
+    def check_coverage(
+        self, checker_input: CoverageBatchCheckInput
+    ) -> CoverageBatchCheckResult:
+        item = checker_input.inventory_items[0]
+        observation = checker_input.observations[0]
+        return CoverageBatchCheckResult(
+            action_id=checker_input.action_id,
+            assessments=[
+                CoverageItemAssessment(
+                    inventory_id=item.inventory_id,
+                    verdict=CoverageItemVerdict.MATCHED,
+                    matched_count=1,
+                    matched_values=["Revenue in 2023 was 12 million"],
+                    observation_ids=[observation.observation_id],
+                    rationale="The paragraph directly states the requested revenue.",
+                )
+            ],
         )
 
 
@@ -218,6 +268,13 @@ def test_model_runner_records_every_executed_stage_and_writes_artifacts(tmp_path
     reloaded = load_model_pipeline_run(output)
     assert reloaded.model_dump(mode="json") == run.model_dump(mode="json")
 
+    # Backward compatibility: pre-Coverage audit packets do not contain this
+    # optional component log.
+    (output / "coverage_checker_calls.jsonl").unlink()
+    assert load_model_pipeline_run(output).model_dump(mode="json") == (
+        run.model_dump(mode="json")
+    )
+
     interleaved = run.model_copy(
         update={
             "stage_calls": [
@@ -308,3 +365,43 @@ def test_model_runner_records_every_executed_stage_and_writes_artifacts(tmp_path
     assert json.loads(checker_message_records[0].messages[2].content)[
         "current_target_status"
     ] == "satisfied"
+
+
+def test_model_runner_records_and_reloads_semantic_coverage_calls(
+    tmp_path: Path,
+) -> None:
+    runner = ModelBackedRunner(
+        planner=FixedSemanticCoveragePlanner(),
+        controller=SearchThenReadController(),
+        reader=DeterministicContentReader(),
+        checker=SemanticCoverageChecker(),
+        answerer=EvidenceAnswerer(),
+        environment_config=ReadingEnvironmentConfig(action_budget=2),
+    )
+
+    run = runner.run(
+        document=_document(),
+        asset_root=tmp_path,
+        question="How many elements state the 2023 revenue?",
+        question_id="root:model-coverage",
+    )
+
+    assert run.reading_run.status == ReadingRunStatus.READY
+    assert [item.component for item in run.stage_calls] == [
+        "planner",
+        "reader",
+        "coverage_checker",
+        "answerer",
+    ]
+    assert run.stage_calls[2].action_id == (
+        run.reading_run.action_trace.entries[0].action_id
+    )
+    assert run.reading_run.coverage_plans[0].execution.matched_count == 1
+
+    output = tmp_path / "semantic-coverage-run"
+    write_model_pipeline_run(run, output)
+    coverage_log = output / "coverage_checker_calls.jsonl"
+    assert len(coverage_log.read_text(encoding="utf-8").splitlines()) == 1
+    assert load_model_pipeline_run(output).model_dump(mode="json") == (
+        run.model_dump(mode="json")
+    )

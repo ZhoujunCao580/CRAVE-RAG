@@ -9,7 +9,12 @@ from PIL import Image
 from softdoc.answering import AnswerInput, AnswerResult
 from softdoc.controller import ControllerAction, ControllerInput
 from softdoc.coverage_reasoning import (
+    CoverageBatchCheckInput,
+    CoverageBatchCheckResult,
+    CoverageExecutionStatus,
     CoverageInventoryStatus,
+    CoverageItemAssessment,
+    CoverageItemVerdict,
     CoverageOperator,
     CoverageRequirement,
     CoverageSourceType,
@@ -140,6 +145,71 @@ class PredicateChecker:
                 if satisfied
                 else checker_input.evidence_memory.current_target.gap_description
             ),
+        )
+
+
+class ScriptedSemanticCoverageChecker(PredicateChecker):
+    """Return deterministic per-source counts for Coverage execution tests."""
+
+    def __init__(self, counts: dict[str, int | None]) -> None:
+        super().__init__(lambda _text: False)
+        self.counts = counts
+        self.coverage_inputs: list[CoverageBatchCheckInput] = []
+
+    def check_coverage(
+        self, checker_input: CoverageBatchCheckInput
+    ) -> CoverageBatchCheckResult:
+        self.coverage_inputs.append(checker_input)
+        assessments: list[CoverageItemAssessment] = []
+        for item in checker_input.inventory_items:
+            count = self.counts[item.inventory_id]
+            grounded = [
+                observation.observation_id
+                for observation in checker_input.observations
+                if set(observation.source_ids).intersection(item.source_ids)
+            ]
+            if count is None:
+                verdict = CoverageItemVerdict.UNRESOLVED
+                matched_count = None
+            elif count:
+                verdict = CoverageItemVerdict.MATCHED
+                matched_count = count
+            else:
+                verdict = CoverageItemVerdict.NOT_MATCHED
+                matched_count = 0
+            assessments.append(
+                CoverageItemAssessment(
+                    inventory_id=item.inventory_id,
+                    verdict=verdict,
+                    matched_count=matched_count,
+                    matched_values=(
+                        [f"person-{item.inventory_id}-{index + 1}" for index in range(count)]
+                        if count
+                        else []
+                    ),
+                    observation_ids=(
+                        grounded if verdict != CoverageItemVerdict.UNRESOLVED else []
+                    ),
+                    rationale="Scripted semantic coverage verdict.",
+                )
+            )
+        return CoverageBatchCheckResult(
+            action_id=checker_input.action_id,
+            assessments=assessments,
+        )
+
+
+class CoverageFigureReader:
+    def read(self, context: ReaderContext) -> ReaderOutput:
+        return ReaderOutput(
+            reader_kind=ReaderKind.VISUAL,
+            observations=[
+                ReaderObservationDraft(
+                    text=f"Inspected canonical visual source {item.source_id}.",
+                    sources=[ObservationSourceRef(input_id=item.input_id)],
+                )
+                for item in context.inputs
+            ],
         )
 
 
@@ -1803,7 +1873,7 @@ def test_complete_structural_inventory_becomes_grounded_evidence_without_models(
     assert result.answer is not None
 
 
-def test_semantic_item_count_does_not_bypass_reader_or_controller(
+def test_semantic_item_count_requires_coverage_checker_backend(
     tmp_path: Path,
 ) -> None:
     document = _document(
@@ -1854,9 +1924,131 @@ def test_semantic_item_count_does_not_bypass_reader_or_controller(
     assert result.action_trace.entries == []
     assert result.coverage_plans[0].inventory.structural_count is None
     assert any(
-        item.code == "coverage_semantic_execution_not_implemented"
+        item.code == "coverage_semantic_checker_unavailable"
         for item in result.diagnostics
     )
+
+
+def test_semantic_count_inspects_every_item_before_completing(
+    tmp_path: Path,
+) -> None:
+    document = _document(
+        tmp_path,
+        page_element_specs=[
+            [{"element_id": "figure:1", "element_type": ElementType.FIGURE, "visual": True}],
+            [{"element_id": "figure:2", "element_type": ElementType.FIGURE, "visual": True}],
+        ],
+    )
+    plan = InitialPlan(
+        original_question="How many people are shown in all figures?",
+        subquestions=[],
+        coverage_requirement=CoverageRequirement(
+            operator=CoverageOperator.COUNT,
+            scope_text="entire document",
+            item_type="person",
+            source_type=CoverageSourceType.FIGURE,
+        ),
+        planner_trace=PlannerTrace(
+            backend_name="teacher", model="scripted", prompt_version="planner-v0.22"
+        ),
+    )
+    checker = ScriptedSemanticCoverageChecker({"figure:1": 2, "figure:2": 1})
+
+    result = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=RejectingController(),
+        reader=CoverageFigureReader(),
+        checker=checker,
+        answerer=EvidenceAnswerer(),
+        config=ReadingEnvironmentConfig(coverage_batch_size=1, action_budget=3),
+    ).run_with_plan(
+        root_question_id="root:semantic-count-complete",
+        plan=plan,
+        run_key="semantic-count-complete",
+    )
+
+    assert result.status == ReadingRunStatus.READY
+    assert [item.action_name for item in result.action_trace.entries] == [
+        "INSPECT_COVERAGE_BATCH",
+        "INSPECT_COVERAGE_BATCH",
+    ]
+    progress = result.coverage_plans[0].execution
+    assert progress.status == CoverageExecutionStatus.COMPLETE
+    assert progress.matched_count == 3
+    assert len(progress.assessments) == 2
+    assert len(checker.coverage_inputs) == 2
+    assert "exact semantic count" in result.evidence_memory.evidence[0].statement
+    assert "is 3" in result.evidence_memory.evidence[0].statement
+    assert result.action_trace.entries[0].metadata["coverage_status"] == "in_progress"
+    assert result.action_trace.entries[1].metadata["coverage_status"] == "complete"
+
+
+def test_unresolved_semantic_item_blocks_completion_and_can_resume(
+    tmp_path: Path,
+) -> None:
+    document = _document(
+        tmp_path,
+        page_element_specs=[
+            [{"element_id": "figure:1", "element_type": ElementType.FIGURE, "visual": True}],
+            [{"element_id": "figure:2", "element_type": ElementType.FIGURE, "visual": True}],
+        ],
+    )
+    plan = InitialPlan(
+        original_question="How many people are shown in all figures?",
+        subquestions=[],
+        coverage_requirement=CoverageRequirement(
+            operator=CoverageOperator.COUNT,
+            scope_text="entire document",
+            item_type="person",
+            source_type=CoverageSourceType.FIGURE,
+        ),
+        planner_trace=PlannerTrace(
+            backend_name="teacher", model="scripted", prompt_version="planner-v0.22"
+        ),
+    )
+    first = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=RejectingController(),
+        reader=CoverageFigureReader(),
+        checker=ScriptedSemanticCoverageChecker({"figure:1": 1, "figure:2": None}),
+        answerer=EvidenceAnswerer(),
+        config=ReadingEnvironmentConfig(coverage_batch_size=2, action_budget=2),
+    ).run_with_plan(
+        root_question_id="root:semantic-count-resume",
+        plan=plan,
+        run_key="semantic-count-resume",
+    )
+
+    assert first.status == ReadingRunStatus.STOPPED_INCOMPLETE
+    assert first.coverage_plans[0].execution.status == CoverageExecutionStatus.BLOCKED
+    assert first.coverage_plans[0].execution.unresolved_inventory_ids == ["figure:2"]
+    assert first.evidence_memory.evidence == []
+    assert any(
+        item.code == "coverage_semantic_items_unresolved"
+        for item in first.diagnostics
+    )
+
+    retry_checker = ScriptedSemanticCoverageChecker({"figure:2": 2})
+    second = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=RejectingController(),
+        reader=CoverageFigureReader(),
+        checker=retry_checker,
+        answerer=EvidenceAnswerer(),
+        config=ReadingEnvironmentConfig(coverage_batch_size=2, action_budget=2),
+    ).resume(first, additional_action_budget=1)
+
+    assert second.status == ReadingRunStatus.READY
+    assert second.coverage_plans[0].execution.status == CoverageExecutionStatus.COMPLETE
+    assert second.coverage_plans[0].execution.matched_count == 3
+    assert len(retry_checker.coverage_inputs) == 1
+    assert [
+        item.inventory_id
+        for item in retry_checker.coverage_inputs[0].inventory_items
+    ] == ["figure:2"]
 
 
 def test_namespace_override_can_recover_a_checkpoint_without_replaying_models(
