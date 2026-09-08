@@ -84,6 +84,9 @@ def _case_metrics(output_dir: Path) -> dict[str, Any]:
     for call in _jsonl(output_dir / "controller_calls.jsonl"):
         controller_repair_calls += bool(
             (call.get("metadata") or {}).get("rejected_attempts")
+            or ((call.get("metadata") or {}).get("generation_metadata") or {}).get(
+                "rejected_attempts"
+            )
         )
         result = call.get("output") or {}
         trace = result.get("controller_trace") or {}

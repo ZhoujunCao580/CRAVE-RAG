@@ -103,6 +103,16 @@ class _RecordingController:
             if isinstance(output, SoftDocModel)
             else dict(output)
         )
+        generation = getattr(self.backend, "last_generation", None)
+        metadata = {}
+        if generation is not None:
+            metadata = {
+                "raw_content": generation.raw_content,
+                "generation_metadata": dict(generation.metadata),
+            }
+            rejected_attempts = generation.metadata.get("rejected_attempts")
+            if rejected_attempts:
+                metadata["rejected_attempts"] = list(rejected_attempts)
         self.records.append(
             StageCallRecord(
                 component="controller",
@@ -110,6 +120,7 @@ class _RecordingController:
                 input=controller_input.model_dump(mode="json"),
                 output=output_dict,
                 elapsed_seconds=elapsed,
+                metadata=metadata,
             )
         )
         return output

@@ -189,6 +189,8 @@ class OllamaControllerBackend:
     ) -> None:
         self._config = config or OllamaControllerConfig()
         self._transport = transport or UrllibOllamaControllerTransport()
+        self.last_generation: ControllerGeneration | None = None
+        self.last_rejected_attempts: list[dict[str, str]] = []
 
     @property
     def backend_name(self) -> str:
@@ -197,6 +199,8 @@ class OllamaControllerBackend:
     def generate(self, controller_input: ControllerInput) -> ControllerGeneration:
         user_prompt = build_controller_user_prompt(controller_input)
         rejected_attempts: list[dict[str, str]] = []
+        self.last_generation = None
+        self.last_rejected_attempts = []
         for attempt in range(1, _MAX_CONTROLLER_VALIDATION_ATTEMPTS + 1):
             payload: dict[str, Any] = {
                 "model": self._config.model,
@@ -235,6 +239,7 @@ class OllamaControllerBackend:
                 rejected_attempts.append(
                     {"raw_content": content, "validation_error": str(exc)}
                 )
+                self.last_rejected_attempts = list(rejected_attempts)
                 if attempt == _MAX_CONTROLLER_VALIDATION_ATTEMPTS:
                     raise OllamaControllerError(
                         f"Ollama returned an invalid Controller action: {exc}",
@@ -260,12 +265,15 @@ class OllamaControllerBackend:
             metadata["validation_attempts"] = attempt
             if rejected_attempts:
                 metadata["rejected_attempts"] = rejected_attempts
-            return ControllerGeneration(
+            generation = ControllerGeneration(
                 raw_content=content,
                 action=action,
                 model=str(response.get("model") or self._config.model),
                 metadata=metadata,
             )
+            self.last_generation = generation
+            self.last_rejected_attempts = list(rejected_attempts)
+            return generation
 
         raise AssertionError("Controller validation loop ended without a result")
 
@@ -285,6 +293,8 @@ class VLLMControllerBackend:
     ) -> None:
         self._config = config
         self._client = client or OpenAICompatibleStructuredClient(config)
+        self.last_generation: ControllerGeneration | None = None
+        self.last_rejected_attempts: list[dict[str, str]] = []
 
     @property
     def backend_name(self) -> str:
@@ -293,6 +303,8 @@ class VLLMControllerBackend:
     def generate(self, controller_input: ControllerInput) -> ControllerGeneration:
         user_prompt = build_controller_user_prompt(controller_input)
         rejected_attempts: list[dict[str, str]] = []
+        self.last_generation = None
+        self.last_rejected_attempts = []
         for attempt in range(1, _MAX_CONTROLLER_VALIDATION_ATTEMPTS + 1):
             try:
                 action = self._client.generate(
@@ -301,7 +313,7 @@ class VLLMControllerBackend:
                     user_prompt=user_prompt,
                     output_model=_ACTION_ADAPTER,
                 )
-                raw_content = action.model_dump_json()
+                raw_content = self._client.last_raw_content or action.model_dump_json()
                 validated = validate_controller_action(action, controller_input)
             except OpenAICompatibleError as exc:
                 if not exc.raw_content:
@@ -318,12 +330,15 @@ class VLLMControllerBackend:
                 }
                 if rejected_attempts:
                     metadata["rejected_attempts"] = rejected_attempts
-                return ControllerGeneration(
+                generation = ControllerGeneration(
                     raw_content=raw_content,
                     action=validated,
                     model=self._config.model,
                     metadata=metadata,
                 )
+                self.last_generation = generation
+                self.last_rejected_attempts = list(rejected_attempts)
+                return generation
 
             rejected_attempts.append(
                 {
@@ -331,6 +346,7 @@ class VLLMControllerBackend:
                     "validation_error": validation_error,
                 }
             )
+            self.last_rejected_attempts = list(rejected_attempts)
             if attempt == _MAX_CONTROLLER_VALIDATION_ATTEMPTS:
                 raise OllamaControllerError(
                     "OpenAI-compatible backend returned an invalid Controller "

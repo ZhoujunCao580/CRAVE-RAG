@@ -209,11 +209,14 @@ def test_ollama_controller_repairs_historical_id_without_spending_an_action() ->
             },
         ]
     )
-    generation = OllamaControllerBackend(transport=transport).generate(state)
+    backend = OllamaControllerBackend(transport=transport)
+    generation = backend.generate(state)
 
     assert generation.action.source_ids == ["element:table:1"]
     assert generation.metadata["validation_attempts"] == 2
     assert len(generation.metadata["rejected_attempts"]) == 1
+    assert backend.last_generation == generation
+    assert backend.last_rejected_attempts == generation.metadata["rejected_attempts"]
     repair_prompt = transport.calls[1][1]["messages"][1]["content"]
     assert '"historical_non_actionable_ids": [\n    "element:old-batch"' in repair_prompt
 
