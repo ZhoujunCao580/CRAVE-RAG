@@ -21,6 +21,7 @@ from softdoc.answering import (
     AnswerInput,
     AnswerResult,
     answerer_user_prompt,
+    validate_answer_result,
 )
 from softdoc.checking_prompt import CHECKER_SYSTEM_PROMPT
 from softdoc.coverage_prompt import COVERAGE_CHECKER_SYSTEM_PROMPT
@@ -301,6 +302,28 @@ def _last_checker_raw_content(client: Any, exc: Exception) -> str:
     return "<raw Checker output was unavailable>"
 
 
+def _last_component_raw_content(
+    client: Any,
+    exc: Exception,
+    *,
+    component: str,
+) -> str | None:
+    raw_content = getattr(exc, "raw_content", None)
+    if isinstance(raw_content, str) and raw_content.strip():
+        return raw_content
+    raw_content = getattr(client, "last_raw_content", None)
+    if isinstance(raw_content, str) and raw_content.strip():
+        return raw_content
+    call_records = getattr(client, "call_records", None)
+    if isinstance(call_records, list):
+        for record in reversed(call_records):
+            if getattr(record, "component", None) == component:
+                value = getattr(record, "raw_content", None)
+                if isinstance(value, str) and value.strip():
+                    return value
+    return None
+
+
 def _build_checker_contract_repair_prompt(
     *,
     checker_input: EvidenceCheckInput,
@@ -400,14 +423,53 @@ class OllamaEvidenceCheckerBackend:
 class OllamaAnswererBackend:
     def __init__(self, client: OllamaStructuredClient) -> None:
         self.client = client
+        self.last_rejected_attempts: list[dict[str, str]] = []
 
     def answer(self, answer_input: AnswerInput) -> AnswerResult:
-        return self.client.generate(
-            component="answerer",
-            system_prompt=ANSWERER_SYSTEM_PROMPT,
-            user_prompt=answerer_user_prompt(answer_input),
-            output_model=AnswerResult,
-        )
+        original_user_prompt = answerer_user_prompt(answer_input)
+        user_prompt = original_user_prompt
+        self.last_rejected_attempts = []
+        for attempt in range(2):
+            try:
+                result = self.client.generate(
+                    component="answerer",
+                    system_prompt=ANSWERER_SYSTEM_PROMPT,
+                    user_prompt=user_prompt,
+                    output_model=AnswerResult,
+                )
+                return validate_answer_result(answer_input, result)
+            except Exception as exc:
+                raw_content = _last_component_raw_content(
+                    self.client, exc, component="answerer"
+                )
+                if raw_content is None or attempt == 1:
+                    raise
+                self.last_rejected_attempts.append(
+                    {
+                        "raw_content": raw_content,
+                        "validation_error": str(exc),
+                    }
+                )
+                allowed_ids = [item.evidence_id for item in answer_input.evidence]
+                user_prompt = (
+                    original_user_prompt
+                    + "\n\nThe previous Answerer response was rejected by the "
+                    "deterministic contract validator. Repair only the JSON "
+                    "contract error and return one complete strict JSON object "
+                    "again as part of this same Answerer invocation.\n"
+                    + f"Validation error: {exc}\n"
+                    + "Allowed Evidence IDs (copy exactly; do not invent, edit, "
+                    "or fuzzy-match):\n"
+                    + json.dumps(allowed_ids, ensure_ascii=False, indent=2)
+                    + "\nA substantive answer must cite at least one allowed "
+                    "Evidence ID. If the supplied Evidence cannot support a "
+                    "substantive answer, return exactly Not answerable with an "
+                    "empty used_evidence_ids list. Do not change factual content "
+                    "merely to satisfy the schema.\nRejected response:\n"
+                    + raw_content
+                )
+
+        raise AssertionError("Answerer repair loop exited without a result")
 
 
 class OllamaVisualRetrievalBackend:

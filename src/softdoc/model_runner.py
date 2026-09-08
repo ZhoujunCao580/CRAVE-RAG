@@ -257,6 +257,9 @@ class _RecordingAnswerer:
             started = time.perf_counter()
             output = self.backend.answer(answer_input)
         except Exception as exc:
+            rejected_attempts = getattr(
+                self.backend, "last_rejected_attempts", []
+            )
             self.records.append(
                 StageCallRecord(
                     component="answerer",
@@ -265,9 +268,15 @@ class _RecordingAnswerer:
                     output={"error_type": type(exc).__name__, "error": str(exc)},
                     succeeded=False,
                     elapsed_seconds=time.perf_counter() - started,
+                    metadata=(
+                        {"rejected_attempts": list(rejected_attempts)}
+                        if rejected_attempts
+                        else {}
+                    ),
                 )
             )
             raise
+        rejected_attempts = getattr(self.backend, "last_rejected_attempts", [])
         self.records.append(
             StageCallRecord(
                 component="answerer",
@@ -275,6 +284,11 @@ class _RecordingAnswerer:
                 input=input_payload,
                 output=output.model_dump(mode="json"),
                 elapsed_seconds=time.perf_counter() - started,
+                metadata=(
+                    {"rejected_attempts": list(rejected_attempts)}
+                    if rejected_attempts
+                    else {}
+                ),
             )
         )
         return output

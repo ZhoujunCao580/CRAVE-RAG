@@ -310,6 +310,60 @@ def test_checker_and_answerer_backends_use_their_frozen_schemas() -> None:
     assert answer_transport.calls[0][1]["format"]["title"] == "AnswerResult"
 
 
+def test_openai_answerer_repairs_missing_evidence_ids_once() -> None:
+    root = RootQuestion(question_id="root:answer-repair", text="What was revenue?")
+    answer_input = AnswerInput(
+        reading_session_id="reading:answer-repair",
+        root_question=root,
+        evidence=[
+            AnswerEvidence(
+                evidence_id="E1",
+                statement="Revenue was 12 million.",
+                supports_question_ids=[root.question_id],
+            )
+        ],
+    )
+    transport = SequenceFakeTransport(
+        [
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"answer":"12 million","used_evidence_ids":[]}'
+                        }
+                    }
+                ]
+            },
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"answer":"12 million",'
+                                '"used_evidence_ids":["E1"]}'
+                            )
+                        }
+                    }
+                ]
+            },
+        ]
+    )
+    answerer = OllamaAnswererBackend(
+        OpenAICompatibleStructuredClient(
+            OpenAICompatibleConfig(model="text-test"), transport
+        )
+    )
+
+    answer = answerer.answer(answer_input)
+
+    assert answer.used_evidence_ids == ["E1"]
+    assert len(transport.calls) == 2
+    repair_prompt = transport.calls[1][1]["messages"][1]["content"]
+    assert "same Answerer invocation" in repair_prompt
+    assert '"E1"' in repair_prompt
+    assert len(answerer.last_rejected_attempts) == 1
+
+
 def test_checker_repairs_duplicate_evidence_replacement_without_new_read() -> None:
     root = RootQuestion(question_id="root:Q771", text="Which figures use line plots?")
     memory = initialize_evidence_memory(
