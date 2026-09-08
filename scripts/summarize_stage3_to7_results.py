@@ -56,8 +56,12 @@ def _case_metrics(output_dir: Path) -> dict[str, Any]:
     recalled_observations = 0
     reused_evidence = 0
     checker_validation_attempts: list[int] = []
+    checker_repair_calls = 0
     checker_finish_reasons: Counter[str] = Counter()
     for call in _jsonl(output_dir / "checker_calls.jsonl"):
+        checker_repair_calls += bool(
+            (call.get("metadata") or {}).get("rejected_attempts")
+        )
         payload = call.get("input") or {}
         observations = payload.get("observations") or []
         limitations = payload.get("limitations") or []
@@ -76,12 +80,21 @@ def _case_metrics(output_dir: Path) -> dict[str, Any]:
             checker_finish_reasons[str(finish_reason)] += 1
 
     controller_validation_attempts: list[int] = []
+    controller_repair_calls = 0
     for call in _jsonl(output_dir / "controller_calls.jsonl"):
+        controller_repair_calls += bool(
+            (call.get("metadata") or {}).get("rejected_attempts")
+        )
         result = call.get("output") or {}
         trace = result.get("controller_trace") or {}
         metadata = trace.get("metadata") or {}
         if isinstance(metadata.get("validation_attempts"), int):
             controller_validation_attempts.append(metadata["validation_attempts"])
+
+    answerer_repair_calls = sum(
+        bool((call.get("metadata") or {}).get("rejected_attempts"))
+        for call in _jsonl(output_dir / "answerer_calls.jsonl")
+    )
 
     visual_candidates: dict[str, dict[str, Any]] = {}
     for batch in _jsonl(output_dir / "candidate_batches.jsonl"):
@@ -122,8 +135,11 @@ def _case_metrics(output_dir: Path) -> dict[str, Any]:
         "state_only_checker_calls": state_only_calls,
         "recalled_observations": recalled_observations,
         "reused_evidence_ids": reused_evidence,
-        "checker_repair_calls": sum(value > 1 for value in checker_validation_attempts),
-        "controller_repair_calls": sum(value > 1 for value in controller_validation_attempts),
+        "checker_repair_calls": checker_repair_calls
+        + sum(value > 1 for value in checker_validation_attempts),
+        "controller_repair_calls": controller_repair_calls
+        + sum(value > 1 for value in controller_validation_attempts),
+        "answerer_repair_calls": answerer_repair_calls,
         "checker_finish_reasons": dict(checker_finish_reasons),
         "coverage_plan_count": len(coverage_plans),
         "coverage_statuses": dict(
@@ -162,6 +178,7 @@ def _aggregate_cases(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "reused_evidence_ids": sum(row.get("reused_evidence_ids") or 0 for row in succeeded),
         "checker_repair_calls": sum(row.get("checker_repair_calls") or 0 for row in succeeded),
         "controller_repair_calls": sum(row.get("controller_repair_calls") or 0 for row in succeeded),
+        "answerer_repair_calls": sum(row.get("answerer_repair_calls") or 0 for row in succeeded),
         "coverage_plan_cases": sum(bool(row.get("coverage_plan_count")) for row in succeeded),
         "visual_candidates": sum(row.get("visual_candidate_count") or 0 for row in succeeded),
         "visual_placeholders": sum(row.get("visual_placeholder_count") or 0 for row in succeeded),
