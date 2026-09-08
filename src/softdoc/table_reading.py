@@ -209,9 +209,13 @@ class TableObservation(BaseModel):
 
     @model_validator(mode="after")
     def validate_unique_inputs(self) -> Self:
-        input_ids = [source.input_id for source in self.sources]
-        if len(input_ids) != len(set(input_ids)):
-            raise ValueError("Observation input IDs must not contain duplicates")
+        source_refs = [
+            (source.input_id, source.cell_id) for source in self.sources
+        ]
+        if len(source_refs) != len(set(source_refs)):
+            raise ValueError(
+                "Observation source references must not contain exact duplicates"
+            )
         return self
 
 

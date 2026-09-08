@@ -1035,10 +1035,26 @@ def _table_preview(
         if best is not None
         else []
     )
+    alignment_clear = bool(header_cells) and all(
+        _table_row_alignment_clear(header_cells, rows[index][0])
+        for index in output_indexes
+    )
+    if not alignment_clear and output_indexes:
+        lines.append(
+            "Alignment: uncertain; row-column mapping must be verified from the "
+            "table image before using exact values."
+        )
     for index in output_indexes:
         cells, _ = rows[index]
-        prefix = "Matched row" if index == best[1] else "Adjacent row"
-        lines.append(f"{prefix}: " + _format_table_row(header_cells, cells))
+        if alignment_clear:
+            prefix = "Matched row" if index == best[1] else "Adjacent row"
+            formatted = _format_table_row(header_cells, cells)
+        else:
+            prefix = (
+                "Relevant raw row" if index == best[1] else "Adjacent raw row"
+            )
+            formatted = _format_table_row([], cells)
+        lines.append(f"{prefix}: " + formatted)
 
     other_labels = []
     for index, (cells, _) in enumerate(rows):
@@ -1052,6 +1068,38 @@ def _table_preview(
     if other_labels:
         lines.append("Other row labels: " + "; ".join(other_labels))
     return "\n".join(lines), selected_unit.search_unit_id
+
+
+def _table_row_alignment_clear(headers: list[str], cells: list[str]) -> bool:
+    """Return whether a preview row has a safe one-to-one header mapping.
+
+    This is deliberately conservative and affects CandidatePreview wording only.
+    Exact interpretation remains the multimodal Table Reader's responsibility.
+    """
+
+    if not headers or len(headers) != len(cells):
+        return False
+    return not any(_looks_like_fused_table_cell(cell) for cell in cells)
+
+
+def _looks_like_fused_table_cell(value: str) -> bool:
+    """Detect strong parser evidence that several values were fused into one cell."""
+
+    compact = "".join(value.split())
+    if len(compact) < 16:
+        return False
+    # Repeated compact identifiers such as ``8051AH8031AH8052AH`` commonly
+    # result when OCR collapses several rows or columns without delimiters.
+    identifier_boundaries = re.findall(r"(?<=[A-Za-z*])(?=\d{2,})", compact)
+    if len(identifier_boundaries) >= 2:
+        return True
+    # Repeated units or package-like descriptors inside one source cell are
+    # another high-precision sign that the parser merged separate values.
+    repeated_markers = (
+        r"(?:°|℃|℉)",
+        r"(?i)(?:pin|volt|watt|amp|hz|byte|rupee|dollar|percent)",
+    )
+    return any(len(re.findall(pattern, value)) >= 2 for pattern in repeated_markers)
 
 
 def _format_table_row(headers: list[str], cells: list[str]) -> str:

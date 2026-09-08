@@ -340,6 +340,90 @@ def test_table_preview_preserves_rightmost_value_after_long_description() -> Non
     assert len(preview.matched_snippet) <= 640
 
 
+def test_table_preview_marks_fused_cells_alignment_uncertain() -> None:
+    content = (
+        "Part\tPrefix\tPackage Type\n"
+        "8051AH8031AH8052AH8032AH8752BH*\tPDN\t"
+        "40-Pin Plastic DIP40-Pin CERDIP44-Pin PLCC\n"
+        "8751H8751H-8\tD\t40-Pin CERDIP"
+    )
+    unit = SearchUnit(
+        search_unit_id="search-unit:fused-table",
+        document_id=DOCUMENT_ID,
+        element_id="element:fused-table",
+        part_index=0,
+        part_count=1,
+        search_text=content,
+        content_text=content,
+        content_search_char_start=0,
+        content_search_char_end=len(content),
+        source_char_start=0,
+        source_char_end=len(content),
+        page_id="page:fused-table",
+        page_index=0,
+        page_number=1,
+        reading_order=0,
+        element_type=ElementType.TABLE,
+        content_availability=ContentAvailability.MIXED,
+        table_header_cells=["Part", "Prefix", "Package Type"],
+        table_header_source_element_id="element:fused-table",
+        index_version=INDEX_VERSION,
+    )
+    units = SearchUnitBuildResult(
+        document_id=DOCUMENT_ID,
+        index_version=INDEX_VERSION,
+        config=SearchUnitConfig(index_version=INDEX_VERSION),
+        units=[unit],
+    )
+    bm25 = BM25Index(units).search(
+        SubQuestionInput(
+            subquestion_id="Q1",
+            text="How many parts have prefix N?",
+        )
+    )
+    session = SearchSessionBuilder().create(
+        subquestion=SubQuestionInput(
+            subquestion_id="Q1",
+            text="How many parts have prefix N?",
+        ),
+        search_units=units,
+        bm25=bm25,
+    )
+
+    _, batch = SearchSessionNavigator(units).next_batch(session)
+    preview = batch.candidate_previews[0].matched_snippet
+
+    assert "Alignment: uncertain" in preview
+    assert "Relevant raw row:" in preview
+    assert "Part=8051AH8031AH8052AH8032AH8752BH*" not in preview
+    assert "Prefix=PDN" not in preview
+
+
+def test_table_preview_keeps_exact_mapping_for_rectangular_rows() -> None:
+    units = _table_search_units()
+    unit = units.units[0]
+    bm25 = BM25Index(units).search(
+        SubQuestionInput(
+            subquestion_id="Q1",
+            text="How many URL timeout issues are there?",
+        )
+    )
+    session = SearchSessionBuilder().create(
+        subquestion=SubQuestionInput(
+            subquestion_id="Q1",
+            text="How many URL timeout issues are there?",
+        ),
+        search_units=units,
+        bm25=bm25,
+    )
+
+    _, batch = SearchSessionNavigator(units).next_batch(session)
+    preview = batch.candidate_previews[0].matched_snippet
+
+    assert "Alignment: uncertain" not in preview
+    assert "Issues count=504" in preview
+
+
 def test_session_keeps_exact_separate_and_merges_retrieval_sources() -> None:
     units = _search_units()
     session = SearchSessionBuilder().create(

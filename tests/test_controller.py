@@ -16,6 +16,7 @@ from softdoc.controller import (
     ControllerFollowRelationAction,
     ControllerGap,
     ControllerInput,
+    ControllerInputBuilder,
     ControllerReadAdjacentPageAction,
     ControllerReadPageContextAction,
     ControllerReadSourceAction,
@@ -37,15 +38,25 @@ from softdoc.models import (
     ElementType,
     Page,
     Provenance,
+    Relation,
+    RelationSource,
+    RelationStatus,
     RelationType,
 )
 from softdoc.reading_state import (
+    ActionTrace,
+    ActionTraceEntry,
     ActionExecutionStatus,
+    CurrentTarget,
+    EvidenceMemory,
     EvidenceStatus,
+    ExplorationSourceHandle,
+    ObservationStore,
     QuestionStatus,
     ReadingSourceType,
     RootQuestion,
 )
+from softdoc.retrieval.models import SearchUnit
 
 
 def _input(**changes: object) -> ControllerInput:
@@ -186,6 +197,270 @@ def test_relation_endpoint_preview_is_deterministic_and_uses_table_content() -> 
     assert first.section_path == ["Financial Results"]
     assert first.label_or_snippet == "Table 2 — Year Revenue 2023 12 million"
     assert len(first.label_or_snippet) <= 240
+
+
+def test_relation_table_preview_uses_query_conditioned_structured_preview() -> None:
+    table = Element(
+        element_id="element:table:query",
+        document_id="doc:1",
+        page_id="page:2",
+        page_number=2,
+        element_type=ElementType.TABLE,
+        reading_order=3,
+        reference_label="Table 2",
+        html=(
+            "<table><tr><th>Issue</th><th>Count</th></tr>"
+            "<tr><td>URLs unreachable</td><td>17</td></tr>"
+            "<tr><td>URLs timedout</td><td>504</td></tr></table>"
+        ),
+        provenance=Provenance(
+            provenance_id="prov:table:query",
+            adapter="test",
+            source_path=Path("fixture.json"),
+            source_locator="table:query",
+        ),
+    )
+    content = "Issue\tCount\nURLs unreachable\t17\nURLs timedout\t504"
+    unit = SearchUnit(
+        search_unit_id="search-unit:table:query",
+        document_id="doc:1",
+        element_id=table.element_id,
+        part_index=0,
+        part_count=1,
+        search_text=content,
+        content_text=content,
+        content_search_char_start=0,
+        content_search_char_end=len(content),
+        source_char_start=0,
+        source_char_end=len(content),
+        page_id=table.page_id,
+        page_index=1,
+        page_number=2,
+        reading_order=3,
+        element_type=ElementType.TABLE,
+        content_availability=ContentAvailability.STRUCTURED,
+        table_header_cells=["Issue", "Count"],
+        table_header_source_element_id=table.element_id,
+        index_version="search-unit-v1",
+    )
+
+    preview = build_controller_relation_endpoint_preview(
+        table,
+        query_text="How many URL timeout issues are there?",
+        search_units=[unit],
+    )
+
+    assert "Matched row: Issue=URLs timedout | Count=504" in preview.label_or_snippet
+
+
+def test_visual_relation_preview_uses_opened_caption_as_navigation_context() -> None:
+    figure = Element(
+        element_id="element:figure:piers",
+        document_id="doc:1",
+        page_id="page:7",
+        page_number=7,
+        element_type=ElementType.FIGURE,
+        reading_order=4,
+        image_path=Path("assets/figure-piers.png"),
+        content_availability=ContentAvailability.VISUAL_ONLY,
+        provenance=Provenance(
+            provenance_id="prov:figure:piers",
+            adapter="test",
+            source_path=Path("fixture.json"),
+            source_locator="figure:piers",
+        ),
+    )
+    caption = Element(
+        element_id="element:caption:piers",
+        document_id="doc:1",
+        page_id="page:7",
+        page_number=7,
+        element_type=ElementType.CAPTION,
+        reading_order=5,
+        text="Figure 4. Map of ferry piers and the routes connecting them.",
+        provenance=Provenance(
+            provenance_id="prov:caption:piers",
+            adapter="test",
+            source_path=Path("fixture.json"),
+            source_locator="caption:piers",
+        ),
+    )
+
+    preview = build_controller_relation_endpoint_preview(
+        figure,
+        query_text="Which piers are connected by the route?",
+        relation_type=RelationType.CAPTION_OF,
+        relation_context_source=caption,
+    )
+
+    assert preview.source_id == figure.element_id
+    assert preview.element_type == ElementType.FIGURE
+    assert preview.content_availability == ContentAvailability.VISUAL_ONLY
+    assert preview.label_or_snippet == (
+        "Relation caption: Figure 4. Map of ferry piers and the routes connecting them."
+    )
+
+
+def test_weak_visual_relation_does_not_invent_navigation_context() -> None:
+    figure = Element(
+        element_id="element:figure:opaque",
+        document_id="doc:1",
+        page_id="page:8",
+        page_number=8,
+        element_type=ElementType.FIGURE,
+        reading_order=3,
+        image_path=Path("assets/figure-opaque.png"),
+        content_availability=ContentAvailability.VISUAL_ONLY,
+        provenance=Provenance(
+            provenance_id="prov:figure:opaque",
+            adapter="test",
+            source_path=Path("fixture.json"),
+            source_locator="figure:opaque",
+        ),
+    )
+    paragraph = Element(
+        element_id="element:paragraph:nearby",
+        document_id="doc:1",
+        page_id="page:8",
+        page_number=8,
+        element_type=ElementType.PARAGRAPH,
+        reading_order=2,
+        text="Nearby prose that is not a confirmed caption.",
+        provenance=Provenance(
+            provenance_id="prov:paragraph:nearby",
+            adapter="test",
+            source_path=Path("fixture.json"),
+            source_locator="paragraph:nearby",
+        ),
+    )
+
+    preview = build_controller_relation_endpoint_preview(
+        figure,
+        relation_type=RelationType.NEXT_IN_READING_ORDER,
+        relation_context_source=paragraph,
+    )
+
+    assert preview.label_or_snippet == ""
+
+
+def test_controller_builder_exposes_caption_linked_visual_without_descriptor() -> None:
+    figure = Element(
+        element_id="element:figure:linked",
+        document_id="doc:1",
+        page_id="page:7",
+        page_number=7,
+        element_type=ElementType.FIGURE,
+        reading_order=4,
+        image_path=Path("assets/figure-linked.png"),
+        provenance=Provenance(
+            provenance_id="prov:figure:linked",
+            adapter="test",
+            source_path=Path("fixture.json"),
+            source_locator="figure:linked",
+        ),
+    )
+    caption = Element(
+        element_id="element:caption:linked",
+        document_id="doc:1",
+        page_id="page:7",
+        page_number=7,
+        element_type=ElementType.CAPTION,
+        reading_order=5,
+        text="Figure 2. Pipeline using a butterfly as the input case.",
+        provenance=Provenance(
+            provenance_id="prov:caption:linked",
+            adapter="test",
+            source_path=Path("fixture.json"),
+            source_locator="caption:linked",
+        ),
+    )
+    relation = Relation(
+        relation_id="relation:caption-linked",
+        source_id=caption.element_id,
+        target_id=figure.element_id,
+        relation_type=RelationType.CAPTION_OF,
+        confidence=1.0,
+        status=RelationStatus.CONFIRMED,
+        created_by=RelationSource.DETERMINISTIC_RULE,
+    )
+    root = RootQuestion(
+        question_id="root:linked",
+        text="Which organism is used as the input case?",
+    )
+    memory = EvidenceMemory(
+        reading_session_id="reading:linked",
+        root_question_id=root.question_id,
+        current_target=CurrentTarget(
+            question_id=root.question_id,
+            gap_description=root.text,
+        ),
+    )
+    trace = ActionTrace(
+        reading_session_id="reading:linked",
+        root_question_id=root.question_id,
+        entries=[
+            ActionTraceEntry(
+                step_index=0,
+                action_id="action:read-caption",
+                question_id=root.question_id,
+                action_name="READ_SOURCE",
+                target_ids=[caption.element_id],
+                primary_target=ExplorationSourceHandle(
+                    source_id=caption.element_id,
+                    source_type=ReadingSourceType.ELEMENT,
+                    document_id="doc:1",
+                    page_id=caption.page_id,
+                    element_id=caption.element_id,
+                ),
+                execution_status=ActionExecutionStatus.SUCCEEDED,
+            )
+        ],
+    )
+
+    controller_input = ControllerInputBuilder().build(
+        root_question=root,
+        evidence_memory=memory,
+        observation_store=ObservationStore(
+            reading_session_id="reading:linked",
+            root_question_id=root.question_id,
+        ),
+        action_trace=trace,
+        relations=[relation],
+        relation_sources=[caption, figure],
+        readable_source_ids=[caption.element_id, figure.element_id],
+        remaining_action_budget=5,
+    )
+
+    assert len(controller_input.confirmed_relations) == 1
+    visible = controller_input.confirmed_relations[0]
+    assert visible.related_source_preview.source_id == figure.element_id
+    assert "butterfly" in visible.related_source_preview.label_or_snippet
+
+
+def test_long_text_relation_preview_is_centered_on_query_match() -> None:
+    paragraph = Element(
+        element_id="element:paragraph:query",
+        document_id="doc:1",
+        page_id="page:2",
+        page_number=2,
+        element_type=ElementType.PARAGRAPH,
+        reading_order=3,
+        text=("introductory material " * 30) + "critical nebula result is 42",
+        provenance=Provenance(
+            provenance_id="prov:paragraph:query",
+            adapter="test",
+            source_path=Path("fixture.json"),
+            source_locator="paragraph:query",
+        ),
+    )
+
+    preview = build_controller_relation_endpoint_preview(
+        paragraph,
+        query_text="What is the critical nebula result?",
+    )
+
+    assert "critical nebula result is 42" in preview.label_or_snippet
+    assert preview.label_or_snippet.startswith("…")
 
 
 def test_page_relation_endpoint_preview_keeps_page_handle_opaque() -> None:

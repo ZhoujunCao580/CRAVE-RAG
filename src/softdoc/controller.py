@@ -31,8 +31,15 @@ from softdoc.reading_state import (
     ReadingSourceType,
     RootQuestion,
 )
-from softdoc.retrieval.models import AnchorTargetType, SearchBatch, SearchSession
+from softdoc.retrieval.models import (
+    AnchorTargetType,
+    SearchBatch,
+    SearchSession,
+    SearchUnit,
+)
 from softdoc.retrieval.units import html_to_text
+from softdoc.retrieval.tokenization import bm25_token_spans
+from softdoc.visual_retrieval import visual_retrieval_descriptor
 
 
 CONTROLLER_INPUT_VERSION = "controller-input-v0.4"
@@ -539,6 +546,7 @@ class ControllerInputBuilder:
         action_trace: ActionTrace,
         relations: Iterable[Any] = (),
         relation_sources: Iterable[Element | Page] = (),
+        relation_search_units: Iterable[SearchUnit] = (),
         readable_source_ids: Iterable[str] | None = None,
         search_sessions: Iterable[SearchSession] = (),
         visible_search_batch: SearchBatch | None = None,
@@ -558,6 +566,9 @@ class ControllerInputBuilder:
 
         sessions = list(search_sessions)
         source_items = list(relation_sources)
+        relation_units_by_element: dict[str, list[SearchUnit]] = {}
+        for unit in relation_search_units:
+            relation_units_by_element.setdefault(unit.element_id, []).append(unit)
         sources_by_id = {
             _relation_source_id(item): item
             for item in source_items
@@ -651,8 +662,27 @@ class ControllerInputBuilder:
                 if endpoint_source is None:
                     continue
                 endpoint_preview = build_controller_relation_endpoint_preview(
-                    endpoint_source
+                    endpoint_source,
+                    query_text=(
+                        evidence_memory.current_target.gap_description
+                        if evidence_memory.current_target is not None
+                        else root_question.text
+                    ),
+                    search_units=relation_units_by_element.get(
+                        related_source_preview, []
+                    ),
+                    relation_type=relation.relation_type,
+                    relation_context_source=sources_by_id.get(focus.source_id),
                 )
+                if (
+                    endpoint_preview.source_type == ReadingSourceType.ELEMENT
+                    and not endpoint_preview.label_or_snippet.strip()
+                ):
+                    # An opaque handle with no distinguishing content cannot
+                    # help the Controller choose a relation. Keep the canonical
+                    # Relation internally until a descriptor or text preview
+                    # makes its other endpoint actionable.
+                    continue
                 if relation.status.value == "confirmed":
                     confirmed.append(
                         ControllerConfirmedRelation(
@@ -793,6 +823,11 @@ def _relation_source_id(source: Element | Page) -> str:
 
 def build_controller_relation_endpoint_preview(
     source: Element | Page,
+    *,
+    query_text: str | None = None,
+    search_units: Iterable[SearchUnit] = (),
+    relation_type: RelationType | None = None,
+    relation_context_source: Element | Page | None = None,
 ) -> ControllerRelationEndpointPreview:
     if isinstance(source, Page):
         return ControllerRelationEndpointPreview(
@@ -805,23 +840,76 @@ def build_controller_relation_endpoint_preview(
         )
 
     components: list[str] = []
-    for value in (
-        source.reference_label,
-        source.text,
-        html_to_text(source.html or ""),
+    descriptor = (
+        visual_retrieval_descriptor(source)
+        if source.element_type in {ElementType.FIGURE, ElementType.CHART}
+        else None
+    )
+    table_preview = ""
+    table_units = list(search_units)
+    if source.element_type == ElementType.TABLE and table_units:
+        # Import here to keep the frozen Controller models independent of the
+        # retrieval session module during module initialization.
+        from softdoc.retrieval.session import _table_preview
+
+        table_preview, _ = _table_preview(
+            query_text=query_text or source.reference_label or "table",
+            units=table_units,
+            display_label=source.reference_label,
+        )
+        table_preview = table_preview or ""
+    relation_context = ""
+    if (
+        relation_type in {RelationType.CAPTION_OF, RelationType.FOOTNOTE_OF}
+        and isinstance(relation_context_source, Element)
+        and relation_context_source.element_type
+        in {ElementType.CAPTION, ElementType.FOOTNOTE}
     ):
+        context_text = _normalize_preview_text(
+            relation_context_source.reference_label
+            or relation_context_source.text
+            or html_to_text(relation_context_source.html or "")
+        )
+        if context_text:
+            context_label = (
+                "Relation caption"
+                if relation_context_source.element_type == ElementType.CAPTION
+                else "Relation footnote"
+            )
+            relation_context = f"{context_label}: {context_text}"
+
+    values = (
+        source.reference_label,
+        relation_context,
+        descriptor.search_summary if descriptor is not None else None,
+        table_preview,
+        source.text,
+        html_to_text(source.html or "") if not table_preview else None,
+    )
+    for value in values:
         normalized = _normalize_preview_text(value or "")
         if normalized and all(
             normalized.casefold() != item.casefold() for item in components
         ):
             components.append(normalized)
+    combined = " — ".join(components)
+    if query_text and source.element_type in {
+        ElementType.PARAGRAPH,
+        ElementType.CAPTION,
+        ElementType.FOOTNOTE,
+        ElementType.LIST,
+        ElementType.CODE,
+        ElementType.ALGORITHM,
+        ElementType.EQUATION,
+    }:
+        combined = _query_centered_relation_preview(combined, query_text)
     return ControllerRelationEndpointPreview(
         source_id=source.element_id,
         source_type=ReadingSourceType.ELEMENT,
         page_id=source.page_id,
         element_type=source.element_type,
         section_path=list(source.section_path or []),
-        label_or_snippet=_truncate_preview(" — ".join(components)),
+        label_or_snippet=_truncate_preview(combined),
         content_availability=source.content_availability,
     )
 
@@ -838,6 +926,38 @@ def _truncate_preview(value: str) -> str:
     if boundary >= _RELATION_ENDPOINT_PREVIEW_LIMIT // 2:
         shortened = shortened[:boundary]
     return shortened.rstrip(" ,;:-") + "…"
+
+
+def _query_centered_relation_preview(value: str, query_text: str) -> str:
+    """Center a compact relation preview on the first matching query term."""
+
+    normalized = _normalize_preview_text(value)
+    if len(normalized) <= _RELATION_ENDPOINT_PREVIEW_LIMIT:
+        return normalized
+    terms = [
+        span.term
+        for span in bm25_token_spans(query_text)
+        if len(span.term) > 2
+    ]
+    folded = normalized.casefold()
+    positions = [folded.find(term) for term in terms]
+    positions = [position for position in positions if position >= 0]
+    if not positions:
+        return normalized
+    anchor = min(positions)
+    # Reserve room for leading/trailing ellipses so the generic truncator does
+    # not clip the query-bearing tail a second time.
+    window_limit = _RELATION_ENDPOINT_PREVIEW_LIMIT - 2
+    half = window_limit // 2
+    start = max(0, anchor - half)
+    end = min(len(normalized), start + window_limit)
+    start = max(0, end - window_limit)
+    snippet = normalized[start:end].strip()
+    if start:
+        snippet = "…" + snippet.lstrip(" ,;:-")
+    if end < len(normalized):
+        snippet = snippet.rstrip(" ,;:-") + "…"
+    return snippet
 
 
 def validate_controller_action(

@@ -111,8 +111,16 @@ Prompt、split、检索配额或 action budget。
 - 全量扫描可见 Relation：非 Page 的可读另一端不得为空。
 - Paragraph/Caption/Footnote 使用 query-centered Text Preview；Table 使用 TablePreview；视觉元素使用
   缓存 `search_summary`。
+- 对已确认的 `caption_of` / `footnote_of`，如果当前已打开端是 Caption/Footnote、另一端是视觉元素，
+  将当前 Caption/Footnote 原文作为另一端的确定性导航上下文；已有缓存 `search_summary` 只作补充。
+  不为展示 Relation 额外调用 VLM。Controller 选择 `FOLLOW_RELATION` 后，Visual Reader 才按本次
+  `local_problem` 读取真实图片。弱 `next_in_reading_order` 不得把附近普通文本伪装成图片描述。
 - `contains -> Page` 只保留为 SoftDoc 内部层级/provenance，不出现在 Controller 可见关系中。
 - 用 `Q171, Q396` 核对 Relation 另一端与 Candidate 的 `source_id/type/page_id` 一致。
+- 服务器真实模型 smoke：`Q444, Q837, Q838`。旧空 Preview 均被 Caption 导航上下文替换，Controller
+  3/3 选择正确 `FOLLOW_RELATION`，Visual Reader 3/3 成功读取真实图片。`Q838` 仅从当前 Chart
+  提取到 2013 数值，却没有为不在该图中的 Streaming 年份输出 limitation；归入 Reader
+  limitation/local-problem 边界，不视为 Relation 失败，后续不得缓存问题相关 Reader Observation。
 
 #### 1E. Exact Anchor
 
@@ -148,6 +156,11 @@ Prompt、split、检索配额或 action budget。
 - 通过：原 aggregate HTML 留在 Provenance；仅在行归属唯一、顺序完整、无跨页 rowspan 时拆片并
   建 confirmed `continued_on`；后续片段继承 confirmed header。无法确认时不拆、不继承，Reader
   保存问题相关可见行并输出 `missing_header_context`，不得猜行列或单位。
+- **Q658 暂缓项：**一次服务器真实模型调用已经输出 `missing_header_context`，但只写了
+  `description`，漏掉契约要求的 `relevant_visible_content`，因此被运行时校验拒绝。System/User Prompt
+  已明确要求该字段；根因是当前生成阶段的 JSON Schema 不能表达“选择该 limitation 类型时必须同时
+  提供可见内容”这一跨字段条件。后续只在同一次 Table Reader 调用内比较 discriminated schema 与一次
+  完整 JSON repair；不得重新 READ、不得消耗 Controller action，也不得为 Q658 写单题规则。
 
 #### 2C. 页面边界
 
@@ -164,30 +177,48 @@ Prompt、split、检索配额或 action budget。
 
 ### 阶段 3：Checker、状态机与 Controller 合法性
 
-本阶段优先使用保存的 Reader Observation 和 checkpoint；不重新检索或重读。
+本阶段按风险分层，不把本地已经通过的确定性状态机测试搬到服务器重复执行：
+
+- **本地确定性测试**验证 Schema、ID allowlist、Evidence delta 原子应用、状态转换、预算与 resume；
+- **服务器模型测试**只验证 Qwen/vLLM 是否能在真实 Prompt 下作出正确的语义判断、生成合法 JSON，以及这些
+  输出能否通过同一套确定性 validator；
+- 优先使用保存的 Reader Observation 和 checkpoint，不重新检索或重读；只有明确标注“完整流程”的小样本
+  才允许从 Planner/Controller 开始运行。
 
 #### 3A. Checker provenance（P07）
 
 - `Q76, Q79, Q101, Q169, Q378, Q421, Q543, Q620, Q711, Q732, Q747, Q748, Q775, Q844, Q857, Q954`。
 - 模型不输出 `used_for_evidence`；程序应用 Evidence delta 后从最终 Evidence 的
   `observation_ids` 反向派生。
-- 通过：16 题不再出现 provenance mismatch；未引用 Observation 保持 false，不能偷偷进入 Evidence。
+- **本地已完成：**模型输出 Schema 已删除 `used_for_evidence`；派生逻辑、add/replace/remove、未引用
+  Observation 保持 false、非法引用原子拒绝均已有单元和集成测试。该逻辑不依赖 GPU 或模型能力。
+- **服务器策略：不单独运行 3A。**后续 3B/3C/3E 的真实 Checker 输出会顺带经过同一 provenance
+  validator；只在这些测试重新出现 mismatch 时才重开 3A，不再把 16 题全部重复跑一遍。
 
 #### 3B. Root finalization 与 Root 状态派生
 
 - 收尾回放：`Q957, Q24, Q10, Q647, Q649, Q76, Q600, Q380, Q34, Q839, Q841, Q451, Q457, Q29, Q119, Q611, Q726`。
 - Root 状态矛盾：`Q15, Q840, Q1074`。
-- 通过：最后一个子问题 satisfied 后自动切 Root，Root 原题成为初始 gap，同一个 Checker 执行
-  state-only recheck；不新增 READ/Controller step。Checker 只输出 current target 状态，Root 状态
-  由 Environment 派生。
+- **本地已完成：**最后一个子问题 satisfied 后自动切 Root、Root 原题成为初始 gap、state-only recheck
+  不新增 READ/Controller step，以及 `root_status` 由 Environment 从 current-target 结果确定性派生。
+- **服务器必须验证模型语义：**先用保存的收尾 checkpoint 对 `Q24, Q76, Q380, Q611` 调用真实 Checker，
+  检查完整 EvidenceMemory 能否得到合理的 ready 或具体 Root gap；再对 `Q24, Q76` 各跑一次小型完整流程，
+  确认模型输出、状态转换、Controller 后续动作和 Answerer 可以真正连通。其余案例只在代表样本失败时扩展。
+- **通过：**不存在 Root/current-target 矛盾；已有充分 Evidence 时进入 Answerer，不充分时生成具体可执行的
+  Root gap，而不是通用包装语或错误 STOP。
 
 #### 3C. Target-switch Evidence recheck 与 bounded Observation Recall
 
 - 主正例：`Q611`。
 - 真实回归：`Q374, Q375, Q728, Q838, Q951`。
 - 合成边界：旧 Evidence 无关、部分支持、非法 reused Evidence ID、state-only 非空 delta、修改非当前 target。
-- 通过：正常 READ 只判断当前 target；切 target 后先复核完整 EvidenceMemory，再最多召回 3 条去重的
-  未接纳旧 Observation。两次均不伪造 Reader、不新增 action、不扣预算；误满足率必须为 0。
+- **本地已完成：**正常 READ 只判断当前 target；切 target 后先做 Evidence-only recheck，再最多召回 3 条
+  去重的未接纳旧 Observation；两次均不伪造 Reader、不新增 action、不扣预算。非法 reused ID、非空
+  state-only delta、修改非当前 target 均由 validator 拒绝。
+- **服务器必须验证模型语义：**使用保存状态跑 `Q611, Q375, Q838`，分别覆盖旧 Evidence 可复用、旧
+  Observation 可召回和无关历史不得误用；保存 Checker 原始输入输出、`reused_evidence_ids`、Recall 选择与
+  Evidence 变化。随后只对 `Q611` 跑一次完整多 target 流程，确认真实 target 切换时会自动触发两级复核。
+- **通过：**应复用的事实进入新 target；无关事实不进入；误满足率为 0；不因 recheck 额外消耗动作预算。
 
 #### 3D. 不可见 source ID 的受控恢复
 
@@ -195,18 +226,26 @@ Prompt、split、检索配额或 action budget。
 - 当前 Candidate/Anchor 才能 `READ_SOURCE`；Page 用 `READ_PAGE_CONTEXT`；Relation endpoint 用合法
   relation action；历史 ID 不是当前句柄。
 - validator 拒绝后同一次 Controller 调用最多 repair 一次，不做模糊 ID 匹配，不增加 action/READ。
+- **本地已完成：**动作权限、历史 ID 隔离、禁止模糊匹配和同一次调用最多一次 repair 的确定性边界已有测试。
+- **服务器仅做模型复测：**回放六个代表性旧 ControllerInput，比较第一次合法率与一次 repair 后合法率；
+  不再重跑全部 55 题。
 - 通过：报告首次合法率、一次 repair 后合法率、错误类别和剩余失败数；动作合法不等于答案正确。
 
 #### 3E. P10 Checker 结构 repair
 
 - `Q771`：同一 Evidence duplicate replace。
 - `Q165`：Observation ID 多抄一个字符。
+- **本地已完成：**duplicate replace 检测、Observation allowlist 与“repair 不新增 READ/action”的边界已有测试。
+- **服务器必须验证模型输出：**仅复测 `Q771, Q165`，保存首次 raw JSON、validator error、repair Prompt 与
+  第二次 raw JSON。
 - 通过：同调用最多一次完整 JSON repair；合法 ID 必须从 allowlist 精确复制；保存第一次 raw output 与
   validator error；不重新 READ、不新增 action。P09 EOF 不进入该 repair。
 
 #### 3F. P09 JSON 截断只复测、不预改
 
-- Checker：`Q80, Q859`；Answerer：`Q327, Q642`。
+- Checker：`Q80, Q859`；Answerer：`Q327, Q642`；Table Reader：`Q468, Q364`。
+- **服务器模型测试：**该问题取决于 vLLM finish reason、实际 token usage 与 Qwen 输出长度，本地 Schema
+  测试不能替代，因此保留四题定向复测。
 - 先用当前 Prompt、token cap 和 vLLM JSON Schema 定向复测，并保存 `finish_reason/token_usage/raw output`。
 - 只有仍发生 EOF 才决定紧凑输出、提高对应组件 token cap 或同调用受控重试；不得猜补残缺 JSON。
 
@@ -214,6 +253,10 @@ Prompt、split、检索配额或 action budget。
 
 - 真实 Gold=Not answerable：`Q877, Q699, Q365, Q176, Q165, Q842, Q124, Q695, Q447, Q952, Q388, Q577, Q612, Q323`。
 - 另用一个可 resume 的 budget checkpoint。
+- **本地已完成：**terminal fallback 的输出格式、内部失败状态保留以及 resume 后可被真实答案替换均由
+  确定性测试覆盖。
+- **服务器策略：不单独跑 14 题。**在阶段3最终组合 smoke 中各保留一个 `stopped_incomplete` 和一个
+  `budget_exhausted` 案例，确认落盘结果即可。
 - 通过：最终 `budget_exhausted/stopped_incomplete` 产生规范
   `{"answer":"Not answerable","used_evidence_ids":[]}`，但内部失败状态和轨迹保留；resume 后若 ready，
   必须由真实 Answerer 结果替换 fallback。

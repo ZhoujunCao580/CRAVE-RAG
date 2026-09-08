@@ -718,6 +718,43 @@ def test_confirmed_joint_read_can_create_one_observation_grounded_in_both_fragme
     ]
 
 
+def test_one_table_observation_can_reference_distinct_cells_from_same_input() -> None:
+    result = TableReadResult.model_validate(
+        {
+            "observations": [
+                {
+                    "text": "Revenue was 10 in 2022 and 12 in 2023.",
+                    "sources": [
+                        {"input_id": "I1", "cell_id": "table:1#r1c1"},
+                        {"input_id": "I1", "cell_id": "table:1#r1c2"},
+                    ],
+                }
+            ],
+            "limitations": [],
+        }
+    )
+
+    assert len(result.observations[0].sources) == 2
+
+
+def test_one_table_observation_rejects_exact_duplicate_source_reference() -> None:
+    with pytest.raises(ValueError, match="exact duplicates"):
+        TableReadResult.model_validate(
+            {
+                "observations": [
+                    {
+                        "text": "Revenue was 10 in 2022.",
+                        "sources": [
+                            {"input_id": "I1", "cell_id": "table:1#r1c1"},
+                            {"input_id": "I1", "cell_id": "table:1#r1c1"},
+                        ],
+                    }
+                ],
+                "limitations": [],
+            }
+        )
+
+
 def test_unrelated_table_inputs_can_return_limitation_without_false_merge() -> None:
     request = TableReadRequest(
         action_id="action:1",
