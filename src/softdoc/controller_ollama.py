@@ -108,7 +108,7 @@ class ControllerGeneration(SoftDocModel):
 
 
 _ACTION_ADAPTER = TypeAdapter(ControllerAction)
-_MAX_CONTROLLER_VALIDATION_ATTEMPTS = 2
+_MAX_CONTROLLER_VALIDATION_ATTEMPTS = 3
 
 
 def _visible_read_source_ids(controller_input: ControllerInput) -> list[str]:
@@ -130,6 +130,7 @@ def _build_controller_repair_user_prompt(
     *,
     rejected_content: str,
     validation_error: str,
+    forbid_source_actions: bool = False,
 ) -> str:
     """Build one bounded repair request without relaxing source visibility."""
 
@@ -156,6 +157,16 @@ def _build_controller_repair_user_prompt(
         ),
         "historical_non_actionable_ids": historical_only_ids,
     }
+    final_recovery = (
+        "\nFinal recovery rule:\n"
+        "- Two source-bearing actions have already failed deterministic validation. "
+        "For this final retry, do not use READ_SOURCE, FOLLOW_RELATION, "
+        "EXPLORE_CANDIDATE_RELATION, READ_ADJACENT_PAGE, or READ_PAGE_CONTEXT.\n"
+        "- Return a legal SEARCH new/next/switch action, or STOP only when no "
+        "promising route remains.\n"
+        if forbid_source_actions
+        else ""
+    )
     return (
         "The previous Controller action was rejected by the deterministic "
         "validator. Return one complete corrected action JSON. The retry is part "
@@ -172,7 +183,9 @@ def _build_controller_repair_user_prompt(
         "- Use READ_PAGE_CONTEXT with a page_context_base_page_id; never pass a "
         "Page ID to READ_SOURCE.\n"
         "- Do not guess, repair, or fuzzy-match an ID. Choose a complete ID exactly "
-        "as listed, or choose another legal action.\n\n"
+        "as listed, or choose another legal action.\n"
+        + final_recovery
+        + "\n"
         f"Rejected action:\n{rejected_content}\n\n"
         "ControllerInput remains unchanged:\n"
         + build_controller_user_prompt(controller_input)
@@ -249,6 +262,9 @@ class OllamaControllerBackend:
                     controller_input,
                     rejected_content=content,
                     validation_error=str(exc),
+                    forbid_source_actions=(
+                        attempt + 1 == _MAX_CONTROLLER_VALIDATION_ATTEMPTS
+                    ),
                 )
                 continue
 
@@ -359,6 +375,9 @@ class VLLMControllerBackend:
                 controller_input,
                 rejected_content=raw_content,
                 validation_error=validation_error,
+                forbid_source_actions=(
+                    attempt + 1 == _MAX_CONTROLLER_VALIDATION_ATTEMPTS
+                ),
             )
 
         raise AssertionError("Controller validation loop ended without a result")

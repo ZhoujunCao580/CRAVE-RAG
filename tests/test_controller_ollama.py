@@ -161,12 +161,15 @@ def test_ollama_controller_rejects_invented_handle() -> None:
     with pytest.raises(OllamaControllerError, match="not visible"):
         backend.decide(controller_input())
 
-    assert len(transport.calls) == 2
+    assert len(transport.calls) == 3
     repair_prompt = transport.calls[1][1]["messages"][1]["content"]
     assert "element:invented" in repair_prompt
     assert '"read_source_ids"' in repair_prompt
     assert "element:table:1" in repair_prompt
     assert "Do not guess, repair, or fuzzy-match an ID" in repair_prompt
+    final_prompt = transport.calls[2][1]["messages"][1]["content"]
+    assert "Final recovery rule" in final_prompt
+    assert "do not use READ_SOURCE" in final_prompt
 
 
 def test_ollama_controller_repairs_historical_id_without_spending_an_action() -> None:
@@ -372,6 +375,41 @@ def test_vllm_controller_repairs_relation_endpoint_to_relation_action() -> None:
         client.calls[1]["user_prompt"].split("Current actionable permissions:\n", 1)[1]
         .split("\n\nPermission rules:", 1)[0]
     )["read_source_ids"]
+
+
+def test_vllm_controller_final_repair_uses_non_source_action() -> None:
+    state = controller_input()
+    client = FakeStructuredClient(
+        [
+            {
+                "action": "READ_SOURCE",
+                "source_ids": ["element:old-batch"],
+                "local_problem": "Read the reported revenue.",
+            },
+            {
+                "action": "READ_SOURCE",
+                "source_ids": ["element:old-batch"],
+                "local_problem": "Read the reported revenue.",
+            },
+            {
+                "action": "SEARCH",
+                "operation": "next",
+                "search_session_id": "search:1",
+            },
+        ]
+    )
+    backend = VLLMControllerBackend(
+        OpenAICompatibleConfig(model="fake"),
+        client=client,
+    )
+
+    generation = backend.generate(state)
+
+    assert generation.action.action.value == "SEARCH"
+    assert generation.metadata["validation_attempts"] == 3
+    assert len(generation.metadata["rejected_attempts"]) == 2
+    assert "Final recovery rule" in client.calls[2]["user_prompt"]
+    assert "do not use READ_SOURCE" in client.calls[2]["user_prompt"]
 
 
 def test_ollama_controller_reports_missing_message_content() -> None:
