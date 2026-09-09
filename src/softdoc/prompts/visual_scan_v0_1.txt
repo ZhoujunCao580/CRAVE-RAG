@@ -13,9 +13,9 @@ scope.
 # Inputs
 
 The user message contains target_id, the complete question, the resolved scope,
-batch_index, batch_count, and ordered input_ids. Each input_id is followed by
-its actual page image as multimodal content. IDs are global within this scan and
-must be copied exactly.
+batch_index, batch_count, and ordered input_ids. The attached page images
+correspond to those input_ids in exactly the same order. IDs are global within
+this scan and must be copied exactly.
 
 # Rules
 

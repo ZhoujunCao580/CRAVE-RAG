@@ -171,6 +171,13 @@ def test_table_reader_prompt_requires_complete_local_enumeration() -> None:
     assert "add a limitation" in prompt
 
 
+def test_visual_scan_prompt_maps_ordered_images_to_global_input_ids() -> None:
+    prompt = " ".join(get_prompt("visual_scan").canonical_text.split())
+
+    assert "correspond to those input_ids in exactly the same order" in prompt
+    assert "exactly one assessment for every supplied input_id" in prompt
+
+
 def test_cli_exports_versioned_prompts(tmp_path, capsys) -> None:
     output = tmp_path / "prompts"
     assert main(["prompts", "export", "--output", str(output)]) == 0
