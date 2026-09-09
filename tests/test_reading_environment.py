@@ -741,6 +741,11 @@ def test_materialized_table_view_can_be_read_again_by_its_visible_source_id(
     assert repeated.source_id == first.source_id
     assert repeated.element_id == "table:1"
     assert repeated.table_view_id == first.table_view_id
+    focus = environment._primary_handle(first.source_id)
+    assert focus.source_id == first.source_id
+    assert focus.source_type == ReadingSourceType.TABLE_VIEW
+    assert focus.element_id == "table:1"
+    assert focus.table_view_id == first.table_view_id
 
 
 def test_visual_scan_runs_in_fixed_page_batches_without_controller_budget(

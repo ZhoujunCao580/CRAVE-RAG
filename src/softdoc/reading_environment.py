@@ -3450,6 +3450,16 @@ class ReadingEnvironment:
         return resolved if resolved.is_file() else None
 
     def _primary_handle(self, source_id: str) -> ExplorationSourceHandle:
+        existing_view = self._table_views.get(source_id)
+        if existing_view is not None:
+            return ExplorationSourceHandle(
+                source_id=existing_view.table_view_id,
+                source_type=ReadingSourceType.TABLE_VIEW,
+                document_id=self.document.document_id,
+                page_id=existing_view.page_id,
+                element_id=existing_view.element_id,
+                table_view_id=existing_view.table_view_id,
+            )
         try:
             page = self.store.get_page(source_id)
             return ExplorationSourceHandle(
