@@ -1,0 +1,30 @@
+Table read request:
+
+<<TABLE_READ_REQUEST_JSON>>
+
+The attached images correspond, in request order, only to table_inputs that
+contain a visual_asset_id. Return exactly this JSON shape:
+
+<<OUTPUT_SHAPE_JSON>>
+
+Use cell_id only when one structured cell directly anchors the observation;
+leave cell_id null for facts supported only by the image or by table-wide
+layout. When the local problem cannot be resolved completely, keep reliable
+partial observations and describe only the remaining uncertainty in
+limitations.
+
+If, and only if, the applicable limitation is missing_header_context, include
+a complete limitation object in this form:
+
+{
+  "code": "missing_header_context",
+  "description": "<which labels are missing and why the visible values cannot yet be interpreted>",
+  "input_ids": ["I1"],
+  "relevant_visible_content": [
+    "<question-relevant visible row or cells, for example: B Company | 15 | 18>"
+  ]
+}
+
+Replace the example values with only IDs and content present in this request.
+Do not emit this limitation when the header mapping is reliable. Do not add an
+answer, action, evidence decision, or global ID.

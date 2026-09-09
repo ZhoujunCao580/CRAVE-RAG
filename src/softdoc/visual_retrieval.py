@@ -265,7 +265,40 @@ def apply_visual_retrieval_result(
     generator_model: str,
     prompt_version: str,
 ) -> list[VisualRetrievalDescriptor]:
-    """Atomically attach validated search metadata to its source Elements."""
+    """Attach descriptors for explicit offline/ablation workflows.
+
+    The canonical baseline keeps its descriptor cache external and uses
+    ``materialize_visual_retrieval_descriptors`` so retrieval text cannot be
+    changed by cache state.
+    """
+
+    descriptors = materialize_visual_retrieval_descriptors(
+        document,
+        request,
+        result,
+        generator_model=generator_model,
+        prompt_version=prompt_version,
+    )
+    elements_by_id = {element.element_id: element for element in document.elements}
+    for descriptor in descriptors:
+        element = elements_by_id[descriptor.element_id]
+        element.summary = descriptor.search_summary
+        element.keywords = list(descriptor.keywords)
+        element.metadata[VISUAL_RETRIEVAL_METADATA_KEY] = descriptor.model_dump(
+            mode="json"
+        )
+    return descriptors
+
+
+def materialize_visual_retrieval_descriptors(
+    document: Document,
+    request: VisualRetrievalRequest,
+    result: VisualRetrievalResult,
+    *,
+    generator_model: str,
+    prompt_version: str,
+) -> list[VisualRetrievalDescriptor]:
+    """Validate descriptors without mutating the SoftDoc or retrieval corpus."""
 
     if request.document_id != document.document_id:
         raise ValueError("Visual retrieval request belongs to another Document")
@@ -281,7 +314,6 @@ def apply_visual_retrieval_result(
         )
 
     descriptors: list[VisualRetrievalDescriptor] = []
-    target_elements: list[Element] = []
     for draft in result.descriptors:
         visual_input = inputs_by_id[draft.input_id]
         element = elements_by_id.get(visual_input.element_id)
@@ -318,14 +350,6 @@ def apply_visual_retrieval_result(
                 search_summary=draft.search_summary,
                 keywords=draft.keywords,
             )
-        )
-        target_elements.append(element)
-
-    for element, descriptor in zip(target_elements, descriptors, strict=True):
-        element.summary = descriptor.search_summary
-        element.keywords = list(descriptor.keywords)
-        element.metadata[VISUAL_RETRIEVAL_METADATA_KEY] = descriptor.model_dump(
-            mode="json"
         )
     return descriptors
 

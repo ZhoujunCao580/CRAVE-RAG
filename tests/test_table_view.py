@@ -119,6 +119,25 @@ def test_only_existing_html_images_become_visual_assets(tmp_path: Path) -> None:
     }
 
 
+def test_outer_visual_normalizes_windows_relative_path(tmp_path: Path) -> None:
+    asset = tmp_path / "assets" / "elements" / "table.png"
+    asset.parent.mkdir(parents=True)
+    asset.write_bytes(b"fixture")
+
+    result = TableMaterializer().materialize(
+        _element(
+            "<table><tr><td>A</td></tr></table>",
+            image_path=Path(r"assets\elements\table.png"),
+        ),
+        document_root=tmp_path,
+    )
+
+    assert result.view.outer_visual_path == Path("assets/elements/table.png")
+    assert TableViewIssueCode.MISSING_OUTER_VISUAL not in {
+        issue.issue_code for issue in result.issues
+    }
+
+
 def test_empty_html_produces_empty_view_without_failing(tmp_path: Path) -> None:
     result = TableMaterializer().materialize(
         _element(None, image_path=Path("missing.jpg")),

@@ -1,7 +1,7 @@
 """Auditable coverage requirements, page scopes, and source inventories.
 
-Coverage questions (counts, exhaustive lists, extrema, and complements) need a
-different completion contract from ordinary semantic QA.  This module keeps
+Coverage questions (counts and exhaustive lists) need a different completion
+contract from ordinary semantic QA.  This module keeps
 that contract deterministic without pretending that PDF page numbers are
 always unambiguous:
 
@@ -194,7 +194,7 @@ class CoverageItemAssessment(SoftDocModel):
     verdict: CoverageItemVerdict
     matched_count: int | None = Field(default=None, ge=0)
     matched_values: list[str] = Field(default_factory=list)
-    observation_ids: list[str] = Field(default_factory=list)
+    observation_ids: list[str]
     rationale: str = Field(min_length=1)
 
     @field_validator("matched_values")
@@ -469,7 +469,13 @@ _FIRST_PAGES = re.compile(
 )
 _LAST_PAGE = re.compile(r"^\s*(?:the\s+)?last\s+page\s*$", re.IGNORECASE)
 _WHOLE_DOCUMENT = re.compile(
-    r"^\s*(?:the\s+)?(?:whole|entire|full)\s+(?:document|pdf|report)\s*$",
+    r"^\s*(?:"
+    r"(?:the\s+)?(?:whole|entire|full)\s+(?:document|pdf|report)"
+    r"|(?:this|the)\s+(?:document|pdf|report)"
+    r"|(?:throughout|across)\s+(?:this|the)\s+(?:document|pdf|report)"
+    r"|all\b.+\b(?:in|across|throughout|from)\s+(?:this|the)\s+"
+    r"(?:document|pdf|report)"
+    r")\s*$",
     re.IGNORECASE,
 )
 

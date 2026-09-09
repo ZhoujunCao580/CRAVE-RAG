@@ -10,11 +10,11 @@ from softdoc.prompts import load_prompt_text
 # Frozen after the Conservative + Deferred design review. Any semantic change
 # requires an explicit new version and a new evaluation; do not patch this
 # prompt in response to individual dataset errors.
-INITIAL_PLANNER_PROMPT_VERSION = "planner-v0.22"
+INITIAL_PLANNER_PROMPT_VERSION = "planner-v0.25"
 _PLANNER_SYSTEM_TEMPLATE = (
     load_prompt_text("planner_v0_21.txt")
     + "\n\n"
-    + load_prompt_text("planner_v0_22_coverage_addendum.txt")
+    + load_prompt_text("planner_v0_25_visual_scan.txt")
 )
 
 

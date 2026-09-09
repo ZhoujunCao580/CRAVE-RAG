@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from softdoc.coverage_reasoning import (
     CoverageBatchCheckInput,
     CoverageBatchCheckResult,
@@ -186,6 +188,55 @@ def test_structural_count_is_only_emitted_for_literal_matching_types(
         parsed_document,
     )
     assert semantic_inventory.structural_count is None
+
+
+@pytest.mark.parametrize(
+    "scope_text",
+    [
+        "this report",
+        "the document",
+        "throughout this report",
+        "all charts in this report",
+        "all 12 references in this report",
+    ],
+)
+def test_explicit_whole_document_scope_variants_resolve_all_physical_pages(
+    parsed_document,
+    scope_text: str,
+) -> None:
+    resolution = CoverageScopeResolver().resolve(
+        _requirement(scope_text),
+        parsed_document,
+    )
+
+    assert resolution.status == CoverageScopeStatus.RESOLVED
+    assert resolution.chosen_namespace == PageNumberNamespace.WHOLE_DOCUMENT
+    assert resolution.requires_review is False
+    assert [page.page_id for page in resolution.resolved_pages] == [
+        page.page_id
+        for page in sorted(
+            parsed_document.pages,
+            key=lambda item: (item.page_index, item.page_id),
+        )
+    ]
+
+
+def test_section_scoped_phrase_is_not_misread_as_whole_document(
+    parsed_document,
+) -> None:
+    resolution = CoverageScopeResolver().resolve(
+        _requirement("all figures in Section 2 of this report"),
+        parsed_document,
+    )
+
+    assert resolution.status == CoverageScopeStatus.UNRESOLVED
+    assert resolution.decision_reason == "unsupported_scope_expression"
+
+
+def test_coverage_assessment_schema_requires_observation_ids() -> None:
+    schema = CoverageItemAssessment.model_json_schema()
+
+    assert "observation_ids" in schema["required"]
 
 
 def test_confirmed_cross_page_table_fragments_count_once(parsed_document) -> None:

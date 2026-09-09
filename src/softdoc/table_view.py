@@ -391,7 +391,15 @@ class TableMaterializer:
                 )
             )
             return None
-        resolved = visual_path if visual_path.is_absolute() else document_root / visual_path
+        # SoftDocs may be authored on Windows and read on a Linux inference
+        # host.  POSIX treats a backslash as a literal character, so normalize
+        # persisted relative paths exactly as visual retrieval does.
+        normalized_path = Path(str(visual_path).replace("\\", "/"))
+        resolved = (
+            normalized_path
+            if normalized_path.is_absolute()
+            else document_root / normalized_path
+        )
         if not resolved.is_file():
             issues.append(
                 TableViewIssue(
@@ -401,4 +409,4 @@ class TableMaterializer:
                 )
             )
             return None
-        return visual_path
+        return normalized_path

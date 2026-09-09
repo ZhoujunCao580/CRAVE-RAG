@@ -8,13 +8,32 @@ import socket
 import subprocess
 
 import pytest
+from PIL import Image
 
 from scripts.run_model_batch import (
+    BASELINE_RUNTIME_PROFILE,
+    _PersistentRuntime,
     _batch_lock_path,
     _group_cases_by_document,
+    _validate_batch_args,
+    _validate_runtime_profile,
     build_case_command,
     load_cases,
     run_batch,
+)
+from softdoc.models import ElementType
+from softdoc.retrieval import (
+    CandidatePreview,
+    PreviewMatchScope,
+    RetrievalSource,
+    SearchBatch,
+    SnippetSource,
+)
+from softdoc.visual_retrieval import (
+    VISUAL_RETRIEVAL_METADATA_KEY,
+    VisualRetrievalDraft,
+    VisualRetrievalResult,
+    build_visual_retrieval_request,
 )
 
 
@@ -45,9 +64,12 @@ def _args(tmp_path: Path) -> argparse.Namespace:
         visual_search_index=None,
         visual_search_model=None,
         visual_descriptor_cache=None,
+        visual_descriptor_on_demand=False,
+        visual_descriptor_max_tokens=256,
         multimodal_table_reader=False,
         visual_search_device="cuda",
         visual_similarity_chunk_elements=16_000_000,
+        runtime_profile=None,
     )
 
 
@@ -241,6 +263,257 @@ def test_group_cases_by_document_is_stable() -> None:
     grouped = _group_cases_by_document(cases)
 
     assert [item["case_id"] for item in grouped] == ["A1", "A2", "B1"]
+
+
+def test_on_demand_descriptor_enriches_only_frozen_visual_preview_and_caches(
+    parsed_document, tmp_path: Path
+) -> None:
+    document = parsed_document.model_copy(deep=True)
+    figure = next(
+        item for item in document.elements if item.element_type == ElementType.FIGURE
+    )
+    image_path = tmp_path / "figure.png"
+    Image.new("RGB", (80, 60), color=(220, 230, 240)).save(image_path)
+    figure.image_path = image_path
+    figure.crop_image_path = None
+    figure.summary = None
+    figure.keywords = []
+    figure.metadata.pop(VISUAL_RETRIEVAL_METADATA_KEY, None)
+    request = build_visual_retrieval_request(
+        document, tmp_path, element_ids={figure.element_id}
+    )
+    visual_input = request.visual_inputs[0]
+    page = next(item for item in document.pages if item.page_id == figure.page_id)
+    placeholder = "figure candidate matched from visual content"
+    preview = CandidatePreview(
+        element_id=figure.element_id,
+        element_type=figure.element_type,
+        page_id=figure.page_id,
+        page_number=page.page_index + 1,
+        section_path=list(figure.section_path),
+        matched_snippet=placeholder,
+        snippet_char_start=0,
+        snippet_char_end=len(placeholder),
+        snippet_truncated=False,
+        snippet_source=SnippetSource.VISUAL_METADATA,
+        snippet_source_id=visual_input.visual_asset_id,
+        visual_asset_id=visual_input.visual_asset_id,
+        matched_by=[RetrievalSource.VISUAL_DENSE],
+        preview_source=RetrievalSource.VISUAL_DENSE,
+        match_scope=PreviewMatchScope.UNKNOWN,
+        visual_rank=1,
+        content_availability=figure.content_availability,
+    )
+    batch = SearchBatch(
+        search_session_id="search:test",
+        candidate_previews=[preview],
+        next_cursor=1,
+        exhausted=True,
+    )
+
+    class FakeBackend:
+        prompt_version = "visual-retrieval-v0.1"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def describe(self, current_request):
+            self.calls += 1
+            return VisualRetrievalResult(
+                descriptors=[
+                    VisualRetrievalDraft(
+                        input_id=current_request.visual_inputs[0].input_id,
+                        search_summary=(
+                            "A waterfront map labels several piers along the bay."
+                        ),
+                        keywords=["waterfront", "piers", "bay map"],
+                    )
+                ]
+            )
+
+    backend = FakeBackend()
+    runtime = _PersistentRuntime.__new__(_PersistentRuntime)
+    runtime.args = argparse.Namespace(
+        visual_model="mock-vlm",
+        visual_descriptor_cache=tmp_path / "descriptors.jsonl",
+    )
+    runtime._visual_descriptor_backend = backend
+    runtime._visual_descriptor_lock = __import__("threading").RLock()
+    runtime._case_context = __import__("threading").local()
+    runtime._case_context.visual_descriptor_calls = []
+    runtime._visual_descriptor_records = {}
+
+    enriched = runtime._enrich_visual_candidate_batch(document, tmp_path, batch)
+    cached = runtime._enrich_visual_candidate_batch(document, tmp_path, batch)
+
+    assert [item.element_id for item in enriched.candidate_previews] == [
+        figure.element_id
+    ]
+    assert "piers" in enriched.candidate_previews[0].matched_snippet
+    assert "piers" in cached.candidate_previews[0].matched_snippet
+    assert backend.calls == 1
+    assert len(runtime._case_context.visual_descriptor_calls) == 1
+    assert runtime._case_context.visual_descriptor_calls[0]["error"] is None
+    rows = (tmp_path / "descriptors.jsonl").read_text(
+        encoding="utf-8"
+    ).splitlines()
+    assert len(rows) == 1
+    assert json.loads(rows[0])["element_id"] == figure.element_id
+    assert figure.summary is None
+    assert figure.keywords == []
+    assert VISUAL_RETRIEVAL_METADATA_KEY not in figure.metadata
+
+
+def test_descriptor_failure_keeps_frozen_preview_and_records_error(
+    parsed_document, tmp_path: Path
+) -> None:
+    document = parsed_document.model_copy(deep=True)
+    figure = next(
+        item for item in document.elements if item.element_type == ElementType.FIGURE
+    )
+    image_path = tmp_path / "figure.png"
+    Image.new("RGB", (80, 60), color=(220, 230, 240)).save(image_path)
+    figure.image_path = image_path
+    figure.crop_image_path = None
+    request = build_visual_retrieval_request(
+        document, tmp_path, element_ids={figure.element_id}
+    )
+    visual_input = request.visual_inputs[0]
+    page = next(item for item in document.pages if item.page_id == figure.page_id)
+    placeholder = "figure candidate matched from visual content"
+    batch = SearchBatch(
+        search_session_id="search:test",
+        candidate_previews=[
+            CandidatePreview(
+                element_id=figure.element_id,
+                element_type=figure.element_type,
+                page_id=figure.page_id,
+                page_number=page.page_index + 1,
+                section_path=list(figure.section_path),
+                matched_snippet=placeholder,
+                snippet_char_start=0,
+                snippet_char_end=len(placeholder),
+                snippet_truncated=False,
+                snippet_source=SnippetSource.VISUAL_METADATA,
+                snippet_source_id=visual_input.visual_asset_id,
+                visual_asset_id=visual_input.visual_asset_id,
+                matched_by=[RetrievalSource.VISUAL_DENSE],
+                preview_source=RetrievalSource.VISUAL_DENSE,
+                match_scope=PreviewMatchScope.UNKNOWN,
+                visual_rank=1,
+                content_availability=figure.content_availability,
+            )
+        ],
+        next_cursor=1,
+        exhausted=True,
+    )
+
+    class FailingBackend:
+        prompt_version = "visual-retrieval-v0.1"
+
+        def describe(self, _):
+            raise RuntimeError("temporary VLM failure")
+
+    runtime = _PersistentRuntime.__new__(_PersistentRuntime)
+    runtime.args = argparse.Namespace(
+        visual_model="mock-vlm",
+        visual_descriptor_cache=tmp_path / "descriptors.jsonl",
+    )
+    runtime._visual_descriptor_backend = FailingBackend()
+    runtime._visual_descriptor_lock = __import__("threading").RLock()
+    runtime._case_context = __import__("threading").local()
+    runtime._case_context.visual_descriptor_calls = []
+    runtime._visual_descriptor_records = {}
+
+    enriched = runtime._enrich_visual_candidate_batch(document, tmp_path, batch)
+
+    assert enriched.candidate_previews[0].matched_snippet == placeholder
+    assert "temporary VLM failure" in runtime._case_context.visual_descriptor_calls[0][
+        "error"
+    ]
+    assert not (tmp_path / "descriptors.jsonl").exists()
+
+
+def test_descriptor_diagnostics_survive_later_case_failure(tmp_path: Path) -> None:
+    runtime = _PersistentRuntime.__new__(_PersistentRuntime)
+    runtime.args = argparse.Namespace(run_key_prefix="test")
+    runtime._case_context = __import__("threading").local()
+
+    def fake_search_resources(_document_dir: str):
+        runtime._record_visual_descriptor_call(
+            {
+                "component": "visual_retrieval",
+                "error": "temporary VLM failure",
+            }
+        )
+        return object(), object()
+
+    class FailingRunner:
+        def run(self, **_):
+            raise RuntimeError("later QA failure")
+
+    runtime._search_resources = fake_search_resources
+    runtime._runner = lambda: FailingRunner()
+    output = tmp_path / "failed-case"
+
+    with pytest.raises(RuntimeError, match="later QA failure"):
+        runtime.run_case(
+            {
+                "case_id": "Q-test",
+                "document_dir": str(tmp_path / "document"),
+                "question": "What happened?",
+            },
+            output,
+        )
+
+    rows = (output / "visual_descriptor_calls.jsonl").read_text(
+        encoding="utf-8"
+    ).splitlines()
+    assert len(rows) == 1
+    assert json.loads(rows[0])["error"] == "temporary VLM failure"
+
+
+def test_baseline_runtime_profile_rejects_missing_modules(tmp_path: Path) -> None:
+    args = _args(tmp_path)
+    args.runtime_profile = BASELINE_RUNTIME_PROFILE
+
+    with pytest.raises(ValueError, match="profile.*incomplete"):
+        _validate_runtime_profile(args)
+
+
+def test_baseline_runtime_profile_accepts_complete_architecture(tmp_path: Path) -> None:
+    args = _args(tmp_path)
+    index = tmp_path / "visual-index"
+    (index / "shards").mkdir(parents=True)
+    (index / "config.json").write_text(
+        json.dumps({"model": "visual-index-model"}), encoding="utf-8"
+    )
+    (index / "state.json").write_text(
+        json.dumps({"state": "completed", "pending_image_count": 0}),
+        encoding="utf-8",
+    )
+    (index / "assets.jsonl").write_text("{}\n", encoding="utf-8")
+    (index / "shards" / "shard-00000.npz").write_bytes(b"fixture")
+    args.runtime_profile = BASELINE_RUNTIME_PROFILE
+    args.execution_mode = "persistent"
+    args.inference_backend = "vllm"
+    args.dense = True
+    args.visual_search_index = index
+    args.visual_descriptor_cache = tmp_path / "descriptors.jsonl"
+    args.visual_descriptor_on_demand = True
+    args.multimodal_table_reader = True
+
+    _validate_runtime_profile(args)
+
+
+def test_descriptor_cache_cannot_be_silently_ignored_in_subprocess_mode(
+    tmp_path: Path,
+) -> None:
+    args = _args(tmp_path)
+    args.visual_descriptor_cache = tmp_path / "descriptors.jsonl"
+
+    with pytest.raises(ValueError, match="requires --execution-mode persistent"):
+        _validate_batch_args(args)
 
 
 def test_persistent_batch_reuses_one_runtime_and_writes_manifest(

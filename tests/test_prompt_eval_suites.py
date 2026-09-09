@@ -117,6 +117,7 @@ def test_exported_output_schemas_match_runtime(tmp_path: Path) -> None:
     assert {path.name for path in written} == {
         "planner_output.schema.json",
         "visual_retrieval_output.schema.json",
+        "visual_scan_output.schema.json",
         "visual_reader_output.schema.json",
         "checker_output.schema.json",
         "coverage_checker_output.schema.json",

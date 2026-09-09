@@ -64,7 +64,8 @@ and current_gap is present.
   reading_locations as a source_id.
   For a Figure or Chart with generated visual retrieval metadata,
   matched_snippet contains its compact search_summary. This summary is only a
-  retrieval and source-selection clue: it may omit answer-bearing visual detail
+  post-retrieval source-selection clue shown in CandidatePreview: it never
+  participates in BM25/Dense ranking, may omit answer-bearing visual detail,
   and must not be treated as an Observation or Evidence. READ the source before
   using facts from it.
   A visual candidate may be promising when the required information is likely
@@ -109,14 +110,24 @@ and current_gap is present.
    Start a new SearchSession when the existing routes are irrelevant, exhausted,
    or recent feedback shows that a different query is needed.
 
+   After a READ_SOURCE, FOLLOW_RELATION, EXPLORE_CANDIDATE_RELATION, or
+   READ_PAGE_CONTEXT result changes current_gap to a materially different
+   missing fact, re-evaluate every currently visible candidate against the new
+   gap before paging. If a visible candidate directly addresses the new gap,
+   read it. If none does and the active SearchSession query does not cover the
+   new missing fact, start a new SearchSession using the new gap. Do not
+   continue an older SearchSession merely because it has_more=true.
+
 5. Use EXPLORE_CANDIDATE_RELATION only when the uncertain target is useful
    enough to justify its reading cost. Exploring it does not confirm that the
    Relation is true.
 
-6. Use SEARCH with operation "next" when the current batch is not promising
-   and that SearchSession has more candidates. Use "switch" when another
-   existing SearchSession is more promising. Start a "new" SearchSession only
-   when a different query is justified by the current gap.
+6. Use SEARCH with operation "next" only when the current batch is not
+   promising, that SearchSession has more candidates, and its existing query
+   still pursues the same unresolved information need expressed by current_gap.
+   has_more=true alone never justifies paging. Use "switch" when another
+   existing SearchSession is more promising. Start a "new" SearchSession when
+   a different query is justified by the current gap or recent feedback.
 
 7. Treat an action as a repetition when it uses the same target or query for the
    same local problem after producing no useful result. Retry only when recent

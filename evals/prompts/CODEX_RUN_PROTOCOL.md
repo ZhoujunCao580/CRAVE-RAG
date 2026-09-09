@@ -18,8 +18,8 @@ A/B evaluation later uses independent API requests with fixed parameters.
 
 | Component | Prompt | Output Schema | Model inputs |
 | --- | --- | --- | --- |
-| Planner | `src/softdoc/prompts/planner_v0_21.txt` + `src/softdoc/prompts/planner_v0_22_coverage_addendum.txt` | `evals/prompts/schemas/planner_output.schema.json` | `evals/prompts/planner/model_inputs/planner_cases_v1.jsonl` |
-| Controller | `src/softdoc/prompts/controller_policy_v0_12.txt` | `evals/prompts/schemas/controller_output.schema.json` | `evals/prompts/controller/model_inputs/controller_cases_v1.jsonl` |
+| Planner | `src/softdoc/prompts/planner_v0_21.txt` + `src/softdoc/prompts/planner_v0_24_legacy_coverage_disabled.txt` | `evals/prompts/schemas/planner_output.schema.json` | `evals/prompts/planner/model_inputs/planner_cases_v1.jsonl` |
+| Controller | `src/softdoc/prompts/controller_policy_v0_13.txt` | `evals/prompts/schemas/controller_output.schema.json` | `evals/prompts/controller/model_inputs/controller_cases_v1.jsonl` |
 | Visual Reader | `src/softdoc/prompts/visual_reader_v0_5.txt` | `evals/prompts/schemas/visual_reader_output.schema.json` | `evals/prompts/visual_reader/model_inputs/visual_reader_cases_v1.jsonl` |
 | Checker | `src/softdoc/prompts/checker_v2_2.txt` | `evals/prompts/schemas/checker_output.schema.json` | `evals/prompts/checker/model_inputs/checker_cases_v1.jsonl` |
 | Answerer | `src/softdoc/prompts/answerer_v0_8.txt` | `evals/prompts/schemas/answerer_output.schema.json` | `evals/prompts/answerer/model_inputs/answerer_cases_v1.jsonl` |
@@ -75,8 +75,8 @@ Reviewer only:
 ```powershell
 python -m scripts.validate_prompt_run `
   --component planner `
-  --input .runlogs/prompt_eval/planner/planner-v0.22/<run_id>/raw_outputs.jsonl `
-  --output .runlogs/prompt_eval/planner/planner-v0.22/<run_id>
+  --input .runlogs/prompt_eval/planner/planner-v0.24/<run_id>/raw_outputs.jsonl `
+  --output .runlogs/prompt_eval/planner/planner-v0.24/<run_id>
 ```
 
 The validator writes `schema_validation.jsonl` and `schema_summary.json` next

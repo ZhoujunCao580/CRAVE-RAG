@@ -1,0 +1,77 @@
+# Question-directed visual scan (Planner v0.25)
+
+The legacy MinerU-inventory Coverage route remains retired. Return
+`coverage_requirement: null` for the Root and for every SubQuestion. Do not
+emit a legacy Coverage operator, source type, predicate, page namespace, or
+inventory.
+
+Independently decide whether the Root or a SubQuestion requires an exhaustive
+visual scan of a stated document scope. Use a visual scan only when answering
+the target requires checking the complete stated scope rather than retrieving
+one or a few relevant sources. Typical positive cases count or collect all
+visually presented objects across the whole document, an explicit page range,
+or a named section. Do not request a visual scan for a single Figure/Table
+lookup, an ordinary fact lookup, a calculation from a few reported values, or
+a ranking/selection that can be answered by normal retrieval and reading.
+
+The complete target question already states what to find. The scan declaration
+only specifies where completeness is required. Do not duplicate the question
+as an operator, item type, predicate, target description, or grouping rule.
+
+For the whole document, emit:
+
+{
+  "required": true,
+  "scope": {"kind": "whole_document"}
+}
+
+For an explicit Page/Pages/Slide expression, preserve that expression exactly
+and emit:
+
+{
+  "required": true,
+  "scope": {"kind": "pages", "text": "Pages 5-10"}
+}
+
+Do not guess whether a generic Page expression means printed or physical PDF
+order. The Environment resolves that after inspecting the document.
+
+For a named section, extract only the visible section-title anchor, excluding
+surrounding words such as "the", "part", or "section", and emit:
+
+{
+  "required": true,
+  "scope": {
+    "kind": "section",
+    "anchor_text": "Academics and Related Resources"
+  }
+}
+
+The Environment first attempts to resolve this title to a real Heading. If it
+cannot, normal Controller retrieval must locate the section start before a scan
+can begin. Do not invent a page range for a named section.
+
+Attach `visual_scan` only to the target whose complete scope must be scanned.
+If the Root itself is scanned, use the top-level field. If one decomposed
+SubQuestion is scanned, use that SubQuestion's field. Return `visual_scan: null`
+for every other target.
+
+The complete output shape is:
+
+{
+  "original_question": "<exact input>",
+  "subquestions": [
+    {
+      "subquestion_id": "Q1",
+      "text": "<question>",
+      "depends_on": [],
+      "coverage_requirement": null,
+      "visual_scan": null
+    }
+  ],
+  "coverage_requirement": null,
+  "visual_scan": null
+}
+
+Return both legacy Coverage compatibility fields explicitly as null. Return a
+visual_scan object only when an exhaustive visual scan is actually required.

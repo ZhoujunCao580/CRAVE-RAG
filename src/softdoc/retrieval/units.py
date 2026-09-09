@@ -16,7 +16,6 @@ from softdoc.retrieval.models import (
     SkippedSearchElement,
 )
 from softdoc.retrieval.tokenization import TokenSpan, chunk_token_spans
-from softdoc.visual_retrieval import visual_retrieval_descriptor
 
 
 _BOUNDARY_END = frozenset(".!?。！？;；:")
@@ -188,50 +187,19 @@ def _searchable_content(
     if element.element_type in {ElementType.FIGURE, ElementType.CHART}:
         if element.metadata.get("generated_visual_text") is True:
             text = ""
-        descriptor = visual_retrieval_descriptor(element)
-        descriptor_text = _descriptor_text(descriptor)
-        body = _join_unique([label, text, descriptor_text])
-        return (
-            body,
-            section_path,
-            descriptor.descriptor_id if descriptor is not None else None,
-        )
+        return _join_unique([label, text]), section_path, None
 
     if element.element_type == ElementType.TABLE:
         table_text = html_to_text(element.html or "")
-        descriptor = visual_retrieval_descriptor(element)
-        descriptor_text = _descriptor_text(descriptor)
-        body = _join_unique([table_text, text, descriptor_text])
+        body = _join_unique([table_text, text])
         if not body:
             body = label
             context = section_path
         else:
             context = _clean_components([*section_path, label])
-        return (
-            body,
-            context,
-            descriptor.descriptor_id if descriptor is not None else None,
-        )
+        return body, context, None
 
     return text, section_path, None
-
-
-def _descriptor_text(descriptor: object | None) -> str:
-    if descriptor is None:
-        return ""
-    search_summary = _normalize_text(getattr(descriptor, "search_summary", ""))
-    keywords = _clean_components(getattr(descriptor, "keywords", []))
-    keyword_text = ", ".join(keywords)
-    return _join_unique(
-        [
-            (
-                f"Visual search summary: {search_summary}"
-                if search_summary
-                else ""
-            ),
-            f"Visual retrieval keywords: {keyword_text}" if keyword_text else "",
-        ]
-    )
 
 
 def _display_label(element: Element) -> str | None:

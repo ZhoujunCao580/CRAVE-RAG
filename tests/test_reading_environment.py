@@ -199,6 +199,18 @@ class ScriptedSemanticCoverageChecker(PredicateChecker):
         )
 
 
+class FailingSemanticCoverageChecker(PredicateChecker):
+    def __init__(self) -> None:
+        super().__init__(lambda _text: False)
+        self.coverage_call_count = 0
+
+    def check_coverage(
+        self, checker_input: CoverageBatchCheckInput
+    ) -> CoverageBatchCheckResult:
+        self.coverage_call_count += 1
+        raise ValueError("truncated Coverage Checker JSON")
+
+
 class CoverageFigureReader:
     def read(self, context: ReaderContext) -> ReaderOutput:
         return ReaderOutput(
@@ -1892,6 +1904,7 @@ def test_plan_coverage_scope_is_persisted_and_can_be_overridden(
         reader=DeterministicContentReader(),
         checker=PredicateChecker(lambda _text: False),
         answerer=EvidenceAnswerer(),
+        config=ReadingEnvironmentConfig(enable_legacy_coverage=True),
     ).run_with_plan(
         root_question_id="root:coverage",
         plan=plan,
@@ -1917,6 +1930,7 @@ def test_plan_coverage_scope_is_persisted_and_can_be_overridden(
         checker=PredicateChecker(lambda _text: False),
         answerer=EvidenceAnswerer(),
         config=ReadingEnvironmentConfig(
+            enable_legacy_coverage=True,
             coverage_namespace_overrides={
                 "root:coverage": PageNumberNamespace.PHYSICAL_PAGE_ORDER
             }
@@ -1933,6 +1947,62 @@ def test_plan_coverage_scope_is_persisted_and_can_be_overridden(
         document.pages[1].page_id,
     ]
     assert second.coverage_plans[0].inventory.status == CoverageInventoryStatus.COMPLETE
+
+
+def test_legacy_coverage_interface_is_disconnected_by_default(
+    tmp_path: Path,
+) -> None:
+    document = _document(
+        tmp_path,
+        page_element_specs=[
+            [
+                {
+                    "element_id": "figure:1",
+                    "element_type": ElementType.FIGURE,
+                    "visual": True,
+                }
+            ]
+        ],
+    )
+    plan = InitialPlan(
+        original_question="How many figures are in the entire document?",
+        subquestions=[],
+        coverage_requirement=CoverageRequirement(
+            operator=CoverageOperator.COUNT,
+            scope_text="entire document",
+            item_type="figure",
+            source_type=CoverageSourceType.FIGURE,
+        ),
+        planner_trace=PlannerTrace(
+            backend_name="legacy",
+            model="scripted",
+            prompt_version="planner-v0.23",
+        ),
+    )
+    controller = QueueController(
+        [{"action": "STOP", "reason": "Legacy Coverage is disconnected."}]
+    )
+
+    result = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=controller,
+        reader=DeterministicContentReader(),
+        checker=PredicateChecker(lambda _text: False),
+        answerer=EvidenceAnswerer(),
+    ).run_with_plan(
+        root_question_id="root:legacy-coverage-disabled",
+        plan=plan,
+        run_key="legacy-coverage-disabled",
+    )
+
+    assert result.coverage_plans == []
+    assert [item.action_name for item in result.action_trace.entries] == ["STOP"]
+    assert controller.inputs[0].remaining_action_budget == 7
+    assert any(
+        item.code == "legacy_coverage_interface_disabled"
+        for item in result.diagnostics
+    )
 
 
 def test_complete_structural_inventory_becomes_grounded_evidence_without_models(
@@ -1980,6 +2050,7 @@ def test_complete_structural_inventory_becomes_grounded_evidence_without_models(
         reader=DeterministicContentReader(),
         checker=PredicateChecker(lambda _text: False),
         answerer=EvidenceAnswerer(),
+        config=ReadingEnvironmentConfig(enable_legacy_coverage=True),
     ).run_with_plan(
         root_question_id="root:structural-count",
         plan=plan,
@@ -2042,6 +2113,7 @@ def test_semantic_item_count_requires_coverage_checker_backend(
         reader=DeterministicContentReader(),
         checker=PredicateChecker(lambda _text: False),
         answerer=EvidenceAnswerer(),
+        config=ReadingEnvironmentConfig(enable_legacy_coverage=True),
     ).run_with_plan(
         root_question_id="root:semantic-count",
         plan=plan,
@@ -2049,10 +2121,12 @@ def test_semantic_item_count_requires_coverage_checker_backend(
     )
 
     assert result.status == ReadingRunStatus.STOPPED_INCOMPLETE
-    assert result.action_trace.entries == []
+    assert [item.action_name for item in result.action_trace.entries] == ["STOP"]
     assert result.coverage_plans[0].inventory.structural_count is None
     assert any(
-        item.code == "coverage_semantic_checker_unavailable"
+        item.code == "coverage_deferred_to_controller"
+        and item.metadata["deferred_reason_code"]
+        == "coverage_semantic_checker_unavailable"
         for item in result.diagnostics
     )
 
@@ -2089,7 +2163,13 @@ def test_semantic_count_inspects_every_item_before_completing(
         reader=CoverageFigureReader(),
         checker=checker,
         answerer=EvidenceAnswerer(),
-        config=ReadingEnvironmentConfig(coverage_batch_size=1, action_budget=3),
+        # Two Environment-owned Coverage batches must not consume the single
+        # Controller SEARCH/READ action available to this run.
+        config=ReadingEnvironmentConfig(
+            enable_legacy_coverage=True,
+            coverage_batch_size=1,
+            action_budget=1,
+        ),
     ).run_with_plan(
         root_question_id="root:semantic-count-complete",
         plan=plan,
@@ -2112,7 +2192,96 @@ def test_semantic_count_inspects_every_item_before_completing(
     assert result.action_trace.entries[1].metadata["coverage_status"] == "complete"
 
 
-def test_unresolved_semantic_item_blocks_completion_and_can_resume(
+def test_collect_all_uses_same_inventory_but_emits_collection_evidence(
+    tmp_path: Path,
+) -> None:
+    document = _document(
+        tmp_path,
+        page_element_specs=[
+            [{"element_id": "figure:1", "element_type": ElementType.FIGURE, "visual": True}],
+            [{"element_id": "figure:2", "element_type": ElementType.FIGURE, "visual": True}],
+        ],
+    )
+    plan = InitialPlan(
+        original_question="List all people shown in the figures.",
+        subquestions=[],
+        coverage_requirement=CoverageRequirement(
+            operator=CoverageOperator.COLLECT_ALL,
+            scope_text="entire document",
+            item_type="person",
+            source_type=CoverageSourceType.FIGURE,
+        ),
+        planner_trace=PlannerTrace(
+            backend_name="teacher", model="scripted", prompt_version="planner-v0.23"
+        ),
+    )
+    result = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=RejectingController(),
+        reader=CoverageFigureReader(),
+        checker=ScriptedSemanticCoverageChecker({"figure:1": 1, "figure:2": 1}),
+        answerer=EvidenceAnswerer(),
+        config=ReadingEnvironmentConfig(
+            enable_legacy_coverage=True,
+            coverage_batch_size=2,
+            action_budget=2,
+        ),
+    ).run_with_plan(
+        root_question_id="root:collect-all",
+        plan=plan,
+        run_key="collect-all",
+    )
+
+    assert result.status == ReadingRunStatus.READY
+    statement = result.evidence_memory.evidence[0].statement
+    assert "exhaustive matched-value collection" in statement
+    assert "person-figure:1-1" in statement
+    assert "person-figure:2-1" in statement
+
+
+def test_unsupported_legacy_coverage_operator_defers_to_controller(
+    tmp_path: Path,
+) -> None:
+    document = _document(tmp_path, page_element_specs=[[]])
+    plan = InitialPlan(
+        original_question="Which page has the most figures?",
+        subquestions=[],
+        coverage_requirement=CoverageRequirement(
+            operator=CoverageOperator.ARGMAX,
+            scope_text="entire document",
+            item_type="page",
+            source_type=CoverageSourceType.PAGE,
+        ),
+        planner_trace=PlannerTrace(
+            backend_name="legacy", model="scripted", prompt_version="planner-v0.22"
+        ),
+    )
+    result = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=QueueController(
+            [{"action": "STOP", "reason": "Normal retrieval route was attempted."}]
+        ),
+        reader=DeterministicContentReader(),
+        checker=PredicateChecker(lambda _text: False),
+        answerer=EvidenceAnswerer(),
+        config=ReadingEnvironmentConfig(enable_legacy_coverage=True),
+    ).run_with_plan(
+        root_question_id="root:legacy-operator",
+        plan=plan,
+        run_key="legacy-operator",
+    )
+
+    assert [item.action_name for item in result.action_trace.entries] == ["STOP"]
+    assert any(
+        item.code == "coverage_deferred_to_controller"
+        and item.metadata["deferred_reason_code"] == "coverage_operator_not_implemented"
+        for item in result.diagnostics
+    )
+
+
+def test_unresolved_semantic_item_falls_back_to_controller_without_ending_question(
     tmp_path: Path,
 ) -> None:
     document = _document(
@@ -2138,11 +2307,17 @@ def test_unresolved_semantic_item_blocks_completion_and_can_resume(
     first = ReadingEnvironment(
         document,
         asset_root=tmp_path,
-        controller=RejectingController(),
+        controller=QueueController(
+            [{"action": "STOP", "reason": "Normal fallback route exhausted."}]
+        ),
         reader=CoverageFigureReader(),
         checker=ScriptedSemanticCoverageChecker({"figure:1": 1, "figure:2": None}),
         answerer=EvidenceAnswerer(),
-        config=ReadingEnvironmentConfig(coverage_batch_size=2, action_budget=2),
+        config=ReadingEnvironmentConfig(
+            enable_legacy_coverage=True,
+            coverage_batch_size=2,
+            action_budget=2,
+        ),
     ).run_with_plan(
         root_question_id="root:semantic-count-resume",
         plan=plan,
@@ -2154,29 +2329,69 @@ def test_unresolved_semantic_item_blocks_completion_and_can_resume(
     assert first.coverage_plans[0].execution.unresolved_inventory_ids == ["figure:2"]
     assert first.evidence_memory.evidence == []
     assert any(
-        item.code == "coverage_semantic_items_unresolved"
+        item.code == "coverage_semantic_items_unresolved_fallback"
         for item in first.diagnostics
     )
+    assert [item.action_name for item in first.action_trace.entries] == [
+        "INSPECT_COVERAGE_BATCH",
+        "STOP",
+    ]
 
-    retry_checker = ScriptedSemanticCoverageChecker({"figure:2": 2})
-    second = ReadingEnvironment(
+
+def test_coverage_checker_batch_error_falls_back_to_controller(
+    tmp_path: Path,
+) -> None:
+    document = _document(
+        tmp_path,
+        page_element_specs=[
+            [{"element_id": "figure:1", "element_type": ElementType.FIGURE, "visual": True}]
+        ],
+    )
+    plan = InitialPlan(
+        original_question="How many people are shown in all figures?",
+        subquestions=[],
+        coverage_requirement=CoverageRequirement(
+            operator=CoverageOperator.COUNT,
+            scope_text="entire document",
+            item_type="person",
+            source_type=CoverageSourceType.FIGURE,
+        ),
+        planner_trace=PlannerTrace(
+            backend_name="teacher", model="scripted", prompt_version="planner-v0.23"
+        ),
+    )
+    checker = FailingSemanticCoverageChecker()
+    controller = QueueController(
+        [{"action": "STOP", "reason": "Normal fallback route exhausted."}]
+    )
+    result = ReadingEnvironment(
         document,
         asset_root=tmp_path,
-        controller=RejectingController(),
+        controller=controller,
         reader=CoverageFigureReader(),
-        checker=retry_checker,
+        checker=checker,
         answerer=EvidenceAnswerer(),
-        config=ReadingEnvironmentConfig(coverage_batch_size=2, action_budget=2),
-    ).resume(first, additional_action_budget=1)
+        config=ReadingEnvironmentConfig(
+            enable_legacy_coverage=True,
+            action_budget=3,
+        ),
+    ).run_with_plan(
+        root_question_id="root:coverage-batch-fallback",
+        plan=plan,
+        run_key="coverage-batch-fallback",
+    )
 
-    assert second.status == ReadingRunStatus.READY
-    assert second.coverage_plans[0].execution.status == CoverageExecutionStatus.COMPLETE
-    assert second.coverage_plans[0].execution.matched_count == 3
-    assert len(retry_checker.coverage_inputs) == 1
-    assert [
-        item.inventory_id
-        for item in retry_checker.coverage_inputs[0].inventory_items
-    ] == ["figure:2"]
+    assert checker.coverage_call_count == 1
+    assert controller.inputs[0].remaining_action_budget == 3
+    assert [item.action_name for item in result.action_trace.entries] == [
+        "INSPECT_COVERAGE_BATCH",
+        "STOP",
+    ]
+    assert any(
+        item.code == "coverage_batch_failed_fallback"
+        and item.metadata["error_type"] == "ValueError"
+        for item in result.diagnostics
+    )
 
 
 def test_namespace_override_can_recover_a_checkpoint_without_replaying_models(
@@ -2205,19 +2420,27 @@ def test_namespace_override_can_recover_a_checkpoint_without_replaying_models(
     first = ReadingEnvironment(
         document,
         asset_root=tmp_path,
-        controller=RejectingController(),
+        controller=QueueController(
+            [{"action": "STOP", "reason": "Awaiting namespace correction."}]
+        ),
         reader=DeterministicContentReader(),
         checker=PredicateChecker(lambda _text: False),
         answerer=EvidenceAnswerer(),
-        config=ReadingEnvironmentConfig(action_budget=1),
+        config=ReadingEnvironmentConfig(
+            enable_legacy_coverage=True,
+            action_budget=1,
+        ),
     ).run_with_plan(
         root_question_id="root:override-resume",
         plan=plan,
         run_key="override-resume",
     )
-    assert first.status == ReadingRunStatus.STOPPED_INCOMPLETE
+    assert first.status == ReadingRunStatus.BUDGET_EXHAUSTED
     assert first.coverage_plans[0].inventory.status == CoverageInventoryStatus.BLOCKED
-    assert first.action_trace.entries == []
+    assert all(
+        item.action_name != "COUNT_INVENTORY"
+        for item in first.action_trace.entries
+    )
 
     second = ReadingEnvironment(
         document,
@@ -2227,12 +2450,17 @@ def test_namespace_override_can_recover_a_checkpoint_without_replaying_models(
         checker=PredicateChecker(lambda _text: False),
         answerer=EvidenceAnswerer(),
         config=ReadingEnvironmentConfig(
+            enable_legacy_coverage=True,
             action_budget=1,
             coverage_namespace_overrides={
                 "root:override-resume": PageNumberNamespace.PHYSICAL_PAGE_ORDER
             },
         ),
-    ).resume(first, additional_action_budget=1)
+    ).run_with_plan(
+        root_question_id="root:override-resume",
+        plan=plan,
+        run_key="override-after-review",
+    )
 
     assert second.status == ReadingRunStatus.READY
     assert [item.action_name for item in second.action_trace.entries] == [

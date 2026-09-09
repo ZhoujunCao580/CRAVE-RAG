@@ -26,6 +26,10 @@ from softdoc.visual_retrieval import (
     VISUAL_RETRIEVAL_PROMPT_VERSION,
     VISUAL_RETRIEVAL_SYSTEM_PROMPT,
 )
+from softdoc.visual_scan_prompt import (
+    VISUAL_SCAN_PROMPT_VERSION,
+    VISUAL_SCAN_SYSTEM_PROMPT,
+)
 from softdoc.table_reading import (
     MULTIMODAL_TABLE_READER_PROMPT_VERSION,
     MULTIMODAL_TABLE_READER_SYSTEM_PROMPT,
@@ -42,6 +46,12 @@ class PromptComponent(StrEnum):
     CONTROLLER = "controller"
     MULTIMODAL_TABLE_READER = "multimodal_table_reader"
     COVERAGE_CHECKER = "coverage_checker"
+    VISUAL_SCAN = "visual_scan"
+
+
+class PromptLifecycle(StrEnum):
+    ACTIVE = "active"
+    LEGACY_INACTIVE = "legacy_inactive"
 
 
 @dataclass(frozen=True)
@@ -52,6 +62,7 @@ class PromptSpec:
     source_module: str
     canonical_text: str
     renderer: Callable[[str], str] | None = None
+    lifecycle: PromptLifecycle = PromptLifecycle.ACTIVE
 
     @property
     def sha256(self) -> str:
@@ -72,6 +83,7 @@ class PromptSpec:
             "version": self.version,
             "prompt_kind": self.prompt_kind,
             "source_module": self.source_module,
+            "lifecycle": self.lifecycle.value,
             "sha256": self.sha256,
             "character_count": len(self.canonical_text),
         }
@@ -141,6 +153,14 @@ PROMPT_REGISTRY: dict[PromptComponent, PromptSpec] = {
         prompt_kind="system_prompt",
         source_module="softdoc.coverage_prompt",
         canonical_text=COVERAGE_CHECKER_SYSTEM_PROMPT,
+        lifecycle=PromptLifecycle.LEGACY_INACTIVE,
+    ),
+    PromptComponent.VISUAL_SCAN: PromptSpec(
+        component=PromptComponent.VISUAL_SCAN,
+        version=VISUAL_SCAN_PROMPT_VERSION,
+        prompt_kind="system_prompt",
+        source_module="softdoc.visual_scan_prompt",
+        canonical_text=VISUAL_SCAN_SYSTEM_PROMPT,
     ),
 }
 
@@ -151,7 +171,14 @@ def get_prompt(component: PromptComponent | str) -> PromptSpec:
     return PROMPT_REGISTRY[PromptComponent(component)]
 
 
-def prompt_manifest() -> list[dict[str, str | int]]:
-    """Return a deterministic, serializable manifest for experiment logging."""
+def prompt_manifest(
+    *, include_inactive: bool = False
+) -> list[dict[str, str | int]]:
+    """Return active runtime bindings, optionally including legacy prompts."""
 
-    return [PROMPT_REGISTRY[item].manifest() for item in PromptComponent]
+    return [
+        PROMPT_REGISTRY[item].manifest()
+        for item in PromptComponent
+        if include_inactive
+        or PROMPT_REGISTRY[item].lifecycle == PromptLifecycle.ACTIVE
+    ]

@@ -85,7 +85,14 @@ def build_parser() -> argparse.ArgumentParser:
         "prompts", help="List, inspect, or export frozen model prompts"
     )
     prompt_subparsers = prompts.add_subparsers(dest="prompt_command", required=True)
-    prompt_subparsers.add_parser("list", help="Print the prompt manifest")
+    prompt_list = prompt_subparsers.add_parser(
+        "list", help="Print the active prompt manifest"
+    )
+    prompt_list.add_argument(
+        "--include-inactive",
+        action="store_true",
+        help="Also list retained legacy prompts that are not used at runtime.",
+    )
     prompt_show = prompt_subparsers.add_parser("show", help="Print one prompt")
     prompt_show.add_argument("component", choices=[item.value for item in PromptComponent])
     prompt_show.add_argument(
@@ -93,9 +100,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Root question required when rendering the dynamic Planner prompt",
     )
     prompt_export = prompt_subparsers.add_parser(
-        "export", help="Export the complete prompt manifest and prompt text"
+        "export", help="Export active prompt bindings and prompt text"
     )
     prompt_export.add_argument("--output", type=Path, required=True)
+    prompt_export.add_argument(
+        "--include-inactive",
+        action="store_true",
+        help="Also export retained legacy prompts that are not used at runtime.",
+    )
 
     doctor = subparsers.add_parser(
         "doctor", help="Check a fresh machine for runtime or training readiness"
@@ -105,7 +117,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     run_model = subparsers.add_parser(
         "run-model",
-        help="Run Planner, retrieval, Controller, Reader, Checker, and Answerer",
+        help=(
+            "Run a low-level single-case component/debug loop; canonical "
+            "baselines use scripts/run_model_batch.py --runtime-profile "
+            "crave-baseline-v1"
+        ),
     )
     run_model.add_argument("document_dir", type=Path, help="Serialized SoftDoc directory")
     question_group = run_model.add_mutually_exclusive_group(required=True)
@@ -280,7 +296,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "prompts":
         if args.prompt_command == "list":
-            print(json.dumps(prompt_manifest(), indent=2, ensure_ascii=False))
+            print(
+                json.dumps(
+                    prompt_manifest(include_inactive=args.include_inactive),
+                    indent=2,
+                    ensure_ascii=False,
+                )
+            )
             return 0
         if args.prompt_command == "show":
             spec = get_prompt(args.component)
@@ -293,8 +315,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         if args.prompt_command == "export":
             args.output.mkdir(parents=True, exist_ok=True)
-            manifest = prompt_manifest()
-            for item in PromptComponent:
+            manifest = prompt_manifest(include_inactive=args.include_inactive)
+            for manifest_item in manifest:
+                item = PromptComponent(str(manifest_item["component"]))
                 spec = get_prompt(item)
                 text = (
                     spec.render("<ROOT_QUESTION>")

@@ -13,7 +13,9 @@ from softdoc.models import (
     RelationStatus,
     RelationType,
 )
-from softdoc.retrieval import BM25Index, SearchUnitBuilder, SubQuestionInput
+from softdoc.retrieval import (
+    SearchUnitBuilder,
+)
 from softdoc.visual_retrieval import (
     VISUAL_RETRIEVAL_METADATA_KEY,
     VisualRetrievalDraft,
@@ -51,7 +53,7 @@ def _visual_document(parsed_document, tmp_path: Path):
     return document, figure
 
 
-def test_visual_description_becomes_auditable_bm25_search_metadata(
+def test_visual_description_never_enters_text_search_units(
     parsed_document,
     tmp_path: Path,
 ) -> None:
@@ -83,19 +85,42 @@ def test_visual_description_becomes_auditable_bm25_search_metadata(
     figure_units = [
         unit for unit in units.units if unit.element_id == figure.element_id
     ]
-    bm25 = BM25Index(units).search(
-        SubQuestionInput(subquestion_id="Q1", text="Orion quarterly revenue")
-    )
-
     assert figure.text is None
     assert figure.summary == result.descriptors[0].search_summary
     assert figure.keywords == result.descriptors[0].keywords
     assert descriptors[0].purpose == "search_only"
     assert visual_retrieval_descriptor(figure) == descriptors[0]
-    assert len(figure_units) == 1
-    assert figure_units[0].visual_descriptor_id == descriptors[0].descriptor_id
-    assert "Visual search summary" in figure_units[0].search_text
-    assert bm25.candidates[0].element_id == figure.element_id
+    assert figure_units == []
+
+
+def test_visual_description_is_preview_only_by_default(
+    parsed_document,
+    tmp_path: Path,
+) -> None:
+    document, figure = _visual_document(parsed_document, tmp_path)
+    request = build_visual_retrieval_request(document, tmp_path)
+    visual_input = next(
+        item for item in request.visual_inputs if item.element_id == figure.element_id
+    )
+    apply_visual_retrieval_result(
+        document,
+        request,
+        VisualRetrievalResult(
+            descriptors=[
+                VisualRetrievalDraft(
+                    input_id=visual_input.input_id,
+                    search_summary="A map labels several piers along a waterfront.",
+                    keywords=["waterfront", "piers", "map"],
+                )
+            ]
+        ),
+        generator_model="mock-vlm",
+        prompt_version="visual-retrieval-prompt-draft",
+    )
+
+    units = SearchUnitBuilder().build(document)
+
+    assert not [unit for unit in units.units if unit.element_id == figure.element_id]
 
 
 def test_visual_request_resolves_windows_style_relative_asset_path(

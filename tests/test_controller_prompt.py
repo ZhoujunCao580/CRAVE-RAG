@@ -15,7 +15,7 @@ from softdoc.reading_state import EvidenceStatus, RootQuestion
 
 
 def test_controller_prompt_is_frozen_to_current_action_contract() -> None:
-    assert CONTROLLER_PROMPT_VERSION == "controller-policy-v0.12"
+    assert CONTROLLER_PROMPT_VERSION == "controller-policy-v0.13"
     assert "Treat ControllerInput as read-only" in CONTROLLER_SYSTEM_PROMPT
     assert "currently actionable for that specific action" in CONTROLLER_SYSTEM_PROMPT
     assert "Return only the action JSON matching the provided Schema" in (
@@ -57,6 +57,13 @@ def test_controller_prompt_uses_flexible_route_selection_and_scoped_recheck() ->
     assert "navigation clue, not\n  Evidence" in CONTROLLER_SYSTEM_PROMPT
     assert "existing routes are irrelevant, exhausted" in CONTROLLER_SYSTEM_PROMPT
     assert "specific recoverable failure" in CONTROLLER_SYSTEM_PROMPT
+    assert "re-evaluate every currently visible candidate against the new" in (
+        CONTROLLER_SYSTEM_PROMPT
+    )
+    assert "Do not\n   continue an older SearchSession merely because it has_more=true" in (
+        CONTROLLER_SYSTEM_PROMPT
+    )
+    assert "has_more=true alone never justifies paging" in CONTROLLER_SYSTEM_PROMPT
 
 
 def test_controller_prompt_scopes_page_context_to_a_visible_page_and_real_need() -> None:
@@ -99,9 +106,8 @@ def test_controller_prompt_maps_preview_handles_without_exposing_page_as_source(
         "Candidate position does not\n  guarantee relevance or source type."
         in CONTROLLER_SYSTEM_PROMPT
     )
-    assert "matched_snippet contains its compact search_summary" in (
-        CONTROLLER_SYSTEM_PROMPT
-    )
+    assert "matched_snippet contains its compact search_summary" in CONTROLLER_SYSTEM_PROMPT
+    assert "it never\n  participates in BM25/Dense ranking" in CONTROLLER_SYSTEM_PROMPT
     assert "must not be treated as an Observation or Evidence" in (
         CONTROLLER_SYSTEM_PROMPT
     )

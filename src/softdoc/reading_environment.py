@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 import re
-from typing import Any, Protocol, Self
+from typing import Any, Callable, Protocol, Self
 
 from pydantic import Field, model_validator
 
@@ -164,6 +164,21 @@ _RECALL_STOPWORDS = frozenset(
 )
 
 
+# Coverage traversal is an Environment-owned completeness procedure rather
+# than a Controller decision.  Keep these entries in ActionTrace for audit and
+# replay, but do not charge them against the Controller SEARCH/READ budget.
+_NON_BUDGETED_ACTION_NAMES = frozenset(
+    {"COUNT_INVENTORY", "INSPECT_COVERAGE_BATCH"}
+)
+
+
+def _budgeted_action_count(trace: ActionTrace) -> int:
+    return sum(
+        entry.action_name not in _NON_BUDGETED_ACTION_NAMES
+        for entry in trace.entries
+    )
+
+
 class ReaderObservationDraft(SoftDocModel):
     """Reader-owned fact before the Environment assigns a global ID."""
 
@@ -252,6 +267,10 @@ class ReadingEnvironmentConfig(SoftDocModel):
     action_budget: int = Field(default=7, ge=1, le=100)
     recent_action_limit: int = Field(default=5, ge=0)
     observation_recall_limit: int = Field(default=3, ge=0, le=10)
+    # The MinerU-inventory Coverage implementation is retained only so old
+    # artifacts and focused regression tests remain readable. New runs keep
+    # it disconnected while the question-directed VLM route is designed.
+    enable_legacy_coverage: bool = False
     coverage_batch_size: int = Field(default=5, ge=1, le=16)
     search: SearchSessionConfig = Field(default_factory=SearchSessionConfig)
     coverage_namespace_overrides: dict[str, PageNumberNamespace] = Field(
@@ -330,6 +349,7 @@ class DocumentSearchService:
         dense_backend: DenseSearchBackend | None = None,
         visual_backend: VisualSearchBackend | None = None,
         config: SearchSessionConfig | None = None,
+        batch_enricher: Callable[[SearchBatch], SearchBatch] | None = None,
     ) -> None:
         self.document = document
         self.search_units = search_units or SearchUnitBuilder().build(document)
@@ -339,6 +359,20 @@ class DocumentSearchService:
         self.visual_backend = visual_backend
         self.builder = SearchSessionBuilder(config)
         self.navigator = SearchSessionNavigator(self.search_units)
+        self.batch_enricher = batch_enricher
+
+    def _enrich_batch(self, batch: SearchBatch) -> SearchBatch:
+        if self.batch_enricher is None:
+            return batch
+        enriched = self.batch_enricher(batch)
+        if [item.element_id for item in enriched.candidate_previews] != [
+            item.element_id for item in batch.candidate_previews
+        ]:
+            raise ValueError(
+                "A SearchBatch enricher may update previews but must not rerank, "
+                "add, or remove frozen candidates"
+            )
+        return enriched
 
     def lookup_exact(self, question: SubQuestionInput) -> ExactLookupResult:
         return self.exact_lookup.lookup(question, self.document)
@@ -360,10 +394,12 @@ class DocumentSearchService:
             dense=dense,
             visual=visual,
         )
-        return self.navigator.next_batch(session)
+        session, batch = self.navigator.next_batch(session)
+        return session, self._enrich_batch(batch)
 
     def next_batch(self, session: SearchSession) -> tuple[SearchSession, SearchBatch]:
-        return self.navigator.next_batch(session)
+        session, batch = self.navigator.next_batch(session)
+        return session, self._enrich_batch(batch)
 
     def mark_opened(self, session: SearchSession, element_id: str) -> SearchSession:
         return self.navigator.mark_opened(session, element_id)
@@ -490,6 +526,7 @@ class ReadingEnvironment:
         self._controller_inputs: list[ControllerInput] = []
         self._exact_results: list[ExactLookupResult] = []
         self._coverage_plans: list[QuestionCoveragePlan] = []
+        self._coverage_fallback_question_ids: set[str] = set()
         self._stop_reason: str | None = None
         self._action_limit = self.config.action_budget
 
@@ -515,13 +552,29 @@ class ReadingEnvironment:
             root_question.question_id,
             *[item.question_id for item in memory.questions],
         }
-        unknown_coverage_questions = set(coverage_requirements or {}).difference(
-            known_question_ids
-        )
-        if unknown_coverage_questions:
-            raise ValueError(
-                "Coverage requirements reference unknown questions: "
-                + ", ".join(sorted(unknown_coverage_questions))
+        requested_coverage = coverage_requirements or {}
+        if self.config.enable_legacy_coverage:
+            unknown_coverage_questions = set(requested_coverage).difference(
+                known_question_ids
+            )
+            if unknown_coverage_questions:
+                raise ValueError(
+                    "Coverage requirements reference unknown questions: "
+                    + ", ".join(sorted(unknown_coverage_questions))
+                )
+        elif requested_coverage:
+            self._diagnostics.append(
+                EnvironmentDiagnostic(
+                    code="legacy_coverage_interface_disabled",
+                    description=(
+                        "The retired MinerU-inventory Coverage interface was "
+                        "ignored. This run continues through the ordinary "
+                        "Controller SEARCH/READ route."
+                    ),
+                    metadata={
+                        "ignored_question_ids": sorted(requested_coverage),
+                    },
+                )
             )
         observations = ObservationStore(
             reading_session_id=session_id,
@@ -531,7 +584,9 @@ class ReadingEnvironment:
             reading_session_id=session_id,
             root_question_id=root_question.question_id,
         )
-        self._prepare_coverage_plans(coverage_requirements or {})
+        self._prepare_coverage_plans(
+            requested_coverage if self.config.enable_legacy_coverage else {}
+        )
         return self._continue_run(
             root_question=root_question,
             memory=memory,
@@ -585,7 +640,10 @@ class ReadingEnvironment:
             raise ValueError("Resume Root Question does not match EvidenceMemory")
         if previous.evidence_memory.root_status == EvidenceStatus.READY:
             raise ValueError("A ready EvidenceMemory must not be resumed")
-        action_limit = len(previous.action_trace.entries) + additional_action_budget
+        action_limit = (
+            _budgeted_action_count(previous.action_trace)
+            + additional_action_budget
+        )
         if action_limit > 100:
             raise ValueError("A resumed run may contain at most 100 actions")
 
@@ -612,6 +670,7 @@ class ReadingEnvironment:
         self._controller_inputs = []
         self._exact_results = []
         self._coverage_plans = []
+        self._coverage_fallback_question_ids = set()
         self._stop_reason = None
         self._action_limit = self.config.action_budget
 
@@ -705,12 +764,31 @@ class ReadingEnvironment:
             item.model_copy(deep=True)
             for item in previous.exact_lookup_results
         ]
-        self._prepare_coverage_plans(
-            {
-                item.question_id: item.requirement
-                for item in previous.coverage_plans
-            }
-        )
+        if self.config.enable_legacy_coverage:
+            self._prepare_coverage_plans(
+                {
+                    item.question_id: item.requirement
+                    for item in previous.coverage_plans
+                }
+            )
+        elif previous.coverage_plans:
+            self._coverage_plans = []
+            self._coverage_fallback_question_ids = set()
+            self._diagnostics.append(
+                EnvironmentDiagnostic(
+                    code="legacy_coverage_resume_disabled",
+                    description=(
+                        "Legacy Coverage state was not resumed; ordinary "
+                        "Controller execution continues from the persisted "
+                        "reading state."
+                    ),
+                    metadata={
+                        "ignored_question_ids": sorted(
+                            item.question_id for item in previous.coverage_plans
+                        )
+                    },
+                )
+            )
         previous_plans = {item.question_id: item for item in previous.coverage_plans}
         self._coverage_plans = [
             plan.model_copy(
@@ -728,6 +806,21 @@ class ReadingEnvironment:
             else plan
             for plan in self._coverage_plans
         ]
+        self._coverage_fallback_question_ids = (
+            {
+                item.question_id
+                for item in previous.diagnostics
+                if item.code
+                in {
+                    "coverage_deferred_to_controller",
+                    "coverage_batch_failed_fallback",
+                    "coverage_semantic_items_unresolved_fallback",
+                }
+                and item.question_id is not None
+            }
+            if self.config.enable_legacy_coverage
+            else set()
+        )
 
     @staticmethod
     def _resumable_coverage_execution(
@@ -788,8 +881,9 @@ class ReadingEnvironment:
                         code="coverage_scope_not_resolved",
                         description=(
                             "Coverage scope was not fully resolved; deterministic "
-                            "coverage completion is blocked and no partial count "
-                            "may be treated as complete."
+                            "coverage completion is unavailable and no partial "
+                            "result may be treated as complete. Normal Controller "
+                            "execution remains available."
                         ),
                         question_id=question_id,
                         metadata={
@@ -1041,7 +1135,7 @@ class ReadingEnvironment:
         while (
             memory.root_status != EvidenceStatus.READY
             and self._stop_reason is None
-            and len(trace.entries) < action_limit
+            and _budgeted_action_count(trace) < action_limit
         ):
             target = memory.current_target
             if target is None:
@@ -1064,8 +1158,7 @@ class ReadingEnvironment:
             if inspected:
                 self._validate_state(observations, memory, trace)
                 continue
-            if self._block_unavailable_coverage(target.question_id):
-                break
+            self._defer_unavailable_coverage(target.question_id)
             if target.question_id not in self._activated_question_ids:
                 self._activated_question_ids.add(target.question_id)
                 observations, memory, trace, routed = self._route_exact_anchors(
@@ -1395,7 +1488,7 @@ class ReadingEnvironment:
         observations: ObservationStore,
         trace: ActionTrace,
     ) -> tuple[ObservationStore, EvidenceMemory, ActionTrace, bool]:
-        """Read and judge one bounded batch from a semantic count inventory."""
+        """Read and judge one bounded count/collect-all inventory batch."""
 
         target = memory.current_target
         if target is None:
@@ -1406,9 +1499,11 @@ class ReadingEnvironment:
         )
         if (
             plan is None
+            or target.question_id in self._coverage_fallback_question_ids
             or plan.inventory.status != CoverageInventoryStatus.COMPLETE
             or plan.inventory.structural_count is not None
-            or plan.requirement.operator != CoverageOperator.COUNT
+            or plan.requirement.operator
+            not in {CoverageOperator.COUNT, CoverageOperator.COLLECT_ALL}
             or plan.execution.status
             in {CoverageExecutionStatus.COMPLETE, CoverageExecutionStatus.BLOCKED}
         ):
@@ -1578,16 +1673,21 @@ class ReadingEnvironment:
         )
 
         check_error: Exception | None = None
+        batch_result = None
+        updated_plan = plan
+        # The model backend owns one same-invocation contract-repair attempt,
+        # including malformed/truncated JSON.  The Environment must not start a
+        # second outer retry loop (which could multiply paid model calls); if
+        # the repaired call still fails, only this Coverage route is disabled.
         try:
+            candidate_result = checker_method(checker_input)
             batch_result = validate_coverage_batch_result(
-                checker_input, checker_method(checker_input)
+                checker_input, candidate_result
             )
             updated_plan = apply_coverage_batch_result(plan, batch_result)
             self._replace_coverage_plan(updated_plan)
         except Exception as exc:
             check_error = exc
-            batch_result = None
-            updated_plan = plan
 
         if (
             batch_result is not None
@@ -1710,15 +1810,20 @@ class ReadingEnvironment:
 
         if check_error is not None:
             description = f"Semantic Coverage Checker failed: {check_error}"
-            self._stop_reason = description
+            self._coverage_fallback_question_ids.add(target.question_id)
             self._diagnostics.append(
                 EnvironmentDiagnostic(
-                    code="coverage_semantic_check_failed",
-                    description=description,
+                    code="coverage_batch_failed_fallback",
+                    description=(
+                        description
+                        + " Coverage was disabled for this target and normal "
+                        "Controller SEARCH/READ execution remains available."
+                    ),
                     action_id=current_action_id,
                     question_id=target.question_id,
                     metadata={
-                        "inventory_ids": [item.inventory_id for item in batch_items]
+                        "inventory_ids": [item.inventory_id for item in batch_items],
+                        "error_type": type(check_error).__name__,
                     },
                 )
             )
@@ -1727,11 +1832,15 @@ class ReadingEnvironment:
                 "Semantic coverage remains incomplete because one or more "
                 "canonical inventory items could not be resolved."
             )
-            self._stop_reason = description
+            self._coverage_fallback_question_ids.add(target.question_id)
             self._diagnostics.append(
                 EnvironmentDiagnostic(
-                    code="coverage_semantic_items_unresolved",
-                    description=description,
+                    code="coverage_semantic_items_unresolved_fallback",
+                    description=(
+                        description
+                        + " Coverage was disabled for this target and normal "
+                        "Controller SEARCH/READ execution remains available."
+                    ),
                     action_id=current_action_id,
                     question_id=target.question_id,
                     metadata={
@@ -1751,8 +1860,18 @@ class ReadingEnvironment:
             )
         return next_observations, next_memory, next_trace, True
 
-    def _block_unavailable_coverage(self, question_id: str) -> bool:
-        """Block only unsafe or unsupported coverage paths."""
+    def _defer_unavailable_coverage(self, question_id: str) -> bool:
+        """Defer an unavailable static plan to ordinary Controller execution.
+
+        A Planner Coverage annotation is an optimization hint, not authority to
+        terminate an otherwise answerable question.  Unsupported operators,
+        unresolved scopes, and unavailable semantic backends are therefore
+        recorded once and disabled for this target without setting
+        ``_stop_reason``.
+        """
+
+        if question_id in self._coverage_fallback_question_ids:
+            return True
 
         plan = next(
             (item for item in self._coverage_plans if item.question_id == question_id),
@@ -1767,10 +1886,13 @@ class ReadingEnvironment:
                 "unresolved or requires a page-namespace review. Apply an "
                 "explicit namespace override before resuming."
             )
-        elif plan.requirement.operator != CoverageOperator.COUNT:
+        elif plan.requirement.operator not in {
+            CoverageOperator.COUNT,
+            CoverageOperator.COLLECT_ALL,
+        }:
             code = "coverage_operator_not_implemented"
             description = (
-                "This Coverage version executes semantic counts only; the "
+                "This Coverage version executes count and collect_all only; the "
                 f"operator {plan.requirement.operator.value!r} remains unsupported."
             )
         elif plan.execution.status == CoverageExecutionStatus.BLOCKED:
@@ -1787,11 +1909,15 @@ class ReadingEnvironment:
             )
         else:
             return False
-        self._stop_reason = description
+        self._coverage_fallback_question_ids.add(question_id)
         self._diagnostics.append(
             EnvironmentDiagnostic(
-                code=code,
-                description=description,
+                code="coverage_deferred_to_controller",
+                description=(
+                    description
+                    + " The static Coverage path was disabled for this target; "
+                    "normal Controller SEARCH/READ execution remains available."
+                ),
                 question_id=question_id,
                 metadata={
                     "scope_text": plan.requirement.scope_text,
@@ -1801,6 +1927,7 @@ class ReadingEnvironment:
                     "scope_status": plan.scope_resolution.status.value,
                     "requires_review": plan.scope_resolution.requires_review,
                     "coverage_status": plan.execution.status.value,
+                    "deferred_reason_code": code,
                 },
             )
         )
@@ -1887,16 +2014,26 @@ class ReadingEnvironment:
         count = plan.execution.matched_count
         values = plan.execution.matched_values
         predicate = plan.requirement.predicate or "no additional predicate"
-        value_suffix = (
-            " Matched values: " + "; ".join(values) + "." if values else ""
-        )
+        if plan.requirement.operator == CoverageOperator.COLLECT_ALL:
+            collection = "; ".join(values) if values else "<empty collection>"
+            result_sentence = (
+                f"The exhaustive matched-value collection for "
+                f"{plan.requirement.item_type!r} under criterion {predicate!r} "
+                f"contains {count} item(s): {collection}."
+            )
+        else:
+            value_suffix = (
+                " Matched values: " + "; ".join(values) + "." if values else ""
+            )
+            result_sentence = (
+                f"The exact semantic count of {plan.requirement.item_type!r} "
+                f"under criterion {predicate!r} is {count}.{value_suffix}"
+            )
         return (
             f"Exhaustively inspected all {len(plan.inventory.items)} canonical "
             f"{plan.requirement.source_type.value} source(s) in resolved scope "
-            f"{plan.requirement.scope_text!r}. The exact semantic count of "
-            f"{plan.requirement.item_type!r} under criterion {predicate!r} is "
-            f"{count}. Every inventory item has a matched or not_matched verdict; "
-            f"zero items remain unresolved.{value_suffix}"
+            f"{plan.requirement.scope_text!r}. {result_sentence} Every inventory "
+            "item has a matched or not_matched verdict; zero items remain unresolved."
         )
 
     def _replace_coverage_plan(self, updated: QuestionCoveragePlan) -> None:
@@ -2985,7 +3122,7 @@ class ReadingEnvironment:
             search_sessions=self._sessions.values(),
             visible_search_batch=visible_batch,
             remaining_action_budget=(
-                self._action_limit - len(trace.entries)
+                max(0, self._action_limit - _budgeted_action_count(trace))
             ),
             recent_action_limit=self.config.recent_action_limit,
         )

@@ -108,7 +108,8 @@ python scripts/evaluate_prompts.py \
 
 All outputs go under `.runlogs/` by default and include a prompt manifest.
 
-Run the complete loop after copying or generating a serialized SoftDoc:
+For a low-level single-case component smoke after copying or generating a
+serialized SoftDoc:
 
 ```bash
 softdoc run-model /workspace/data/softdoc/example \
@@ -138,6 +139,12 @@ The default transport remains Ollama-compatible HTTP. The core runner uses
 injectable backend protocols, so adding another hosted transport does not
 require changing the reading state machine.
 
+`softdoc run-model` is not the canonical baseline launcher: it has no
+persistent visual descriptor cache/on-demand enrichment contract. Use it only
+for component debugging. Canonical end-to-end runs, including a one-question
+smoke, must use `scripts/run_model_batch.py` with
+`--runtime-profile crave-baseline-v1`.
+
 First run one question. Only after its `run_manifest.json`, stage-call JSONL,
 Reader limitations, and Evidence transitions look sensible should you start a
 batch.
@@ -155,24 +162,40 @@ Then run:
 
 ```bash
 python scripts/run_model_batch.py \
+  --runtime-profile crave-baseline-v1 \
   --cases /workspace/data/pilot_cases.jsonl \
   --path-root /workspace \
   --output-root /workspace/runs/pilot-01 \
-  --text-model qwen3:8b \
-  --visual-model qwen3-vl:4b \
+  --execution-mode persistent \
+  --inference-backend vllm \
+  --base-url http://127.0.0.1:8000/v1 \
+  --text-model Qwen/Qwen3.5-27B \
+  --visual-model Qwen/Qwen3.5-27B \
   --dense \
   --dense-device cuda \
+  --embedding-cache /workspace/cache/e5 \
   --visual-search-index /workspace/cache/visual-retrieval/colsmol-500m \
+  --visual-descriptor-cache /workspace/cache/visual-descriptors/qwen35-27b-v0-1/descriptors.jsonl \
+  --visual-descriptor-on-demand \
+  --multimodal-table-reader \
   --case-timeout 3600
 ```
 
-Each case invokes the canonical `softdoc run-model` entry point in an isolated
-process. One malformed model response is recorded as a failed case but does not
-discard later cases. `batch_manifest.json` is rewritten after every case and
-the command returns a nonzero exit code if any case failed. Per-case process
-logs are stored under `_logs/` instead of bloating the manifest. Use a new
-output directory for every rerun; existing nonempty outputs are never
-overwritten.
+The named profile fails before the first question if persistent vLLM, Dense,
+the completed visual index, preview-only descriptor cache/on-demand generation,
+or the multimodal Table Reader is missing. Visual descriptions are added only
+to the two visual candidate previews after each mixed batch is frozen; they do
+not become BM25/Dense corpus text. One malformed model response is recorded as
+a failed case but does not discard later cases. `batch_manifest.json` is
+rewritten after every case and the command returns a nonzero exit code if any
+case failed. Use a new output directory for every rerun; existing nonempty
+outputs are never overwritten.
+
+SoftDocs created on Windows may persist relative asset paths such as
+`assets\elements\...`. Both visual-descriptor loading and multimodal Table
+outer-crop loading normalize these paths at runtime on Linux. Do not rewrite
+the serialized corpus with ad hoc `sed` commands after a Pod migration; the
+cross-platform normalization is covered by repository tests.
 
 For throughput experiments against vLLM, `scripts/run_model_batch.py` also
 supports `--execution-mode persistent --workers 2` (or 4 after a two-worker
@@ -252,9 +275,10 @@ script for these artifacts. Do not commit credentials or copyrighted corpora.
 3. Build and run `softdoc datasets audit` for the installed corpus. Transfer
    one SoftDoc and also run `softdoc validate` while diagnosing individual
    document failures.
-4. Confirm the Ollama-compatible endpoint and both model names respond.
-5. Run exactly one `softdoc run-model` question and inspect all stage logs.
-6. Run the small batch with a fresh output directory.
+4. Confirm the vLLM OpenAI-compatible endpoint and model name respond.
+5. Run exactly one case through `scripts/run_model_batch.py` with
+   `--runtime-profile crave-baseline-v1`, then inspect all stage logs.
+6. Run the small batch with the same named profile and a fresh output directory.
 7. Review Controller and Checker decisions before exporting any SFT rows.
 8. Train a tiny smoke adapter before committing to a long QLoRA run.
 

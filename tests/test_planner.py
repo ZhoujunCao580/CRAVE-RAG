@@ -134,6 +134,51 @@ def test_coverage_requirement_survives_planner_validation() -> None:
     assert result.coverage_requirement.source_type.value == "figure"
 
 
+def test_visual_scan_requirement_survives_planner_validation() -> None:
+    question = 'How many QR codes are shown in the "Academics and Related Resources" section?'
+    payload = _plan(question, [])
+    payload["visual_scan"] = {
+        "required": True,
+        "scope": {
+            "kind": "section",
+            "anchor_text": "Academics and Related Resources",
+        },
+    }
+
+    result = InitialPlanner(MockPlannerBackend(payload)).create_plan(question)
+
+    assert result.visual_scan is not None
+    assert result.visual_scan.scope.kind == "section"
+    assert result.visual_scan.scope.anchor_text == "Academics and Related Resources"
+
+
+def test_visual_scan_can_belong_to_one_subquestion() -> None:
+    question = "How many maps appear, and what countries do they cover?"
+    payload = _plan(
+        question,
+        [
+            {
+                **_subquestion("Q1", "How many maps appear in the whole document?"),
+                "visual_scan": {
+                    "required": True,
+                    "scope": {"kind": "whole_document"},
+                },
+            },
+            _subquestion(
+                "Q2",
+                "What countries do the maps identified by Q1 cover?",
+                depends_on=["Q1"],
+            ),
+        ],
+    )
+
+    result = InitialPlanner(MockPlannerBackend(payload)).create_plan(question)
+
+    assert result.visual_scan is None
+    assert result.subquestions[0].visual_scan is not None
+    assert result.subquestions[1].visual_scan is None
+
+
 def test_independent_facts_are_parallel_not_artificially_sequential() -> None:
     question = "What were the revenues in 2022 and 2023?"
     backend = MockPlannerBackend(
@@ -418,17 +463,20 @@ def test_prompt_defines_empty_parallel_and_dependent_plans() -> None:
     assert "Figure 6" not in prompt
 
 
-def test_planner_v022_prompt_is_frozen() -> None:
+def test_planner_v025_prompt_is_frozen() -> None:
     prompt = build_initial_planner_prompt("FROZEN PLANNER PROMPT SNAPSHOT")
     system = build_initial_planner_system_prompt()
-    assert INITIAL_PLANNER_PROMPT_VERSION == "planner-v0.22"
-    assert "Coverage requirement extension (Planner v0.22)" in system
-    assert "Do not convert printed page" in system
-    assert "labels to physical PDF positions" in system
+    compact_system = " ".join(system.split())
+    assert INITIAL_PLANNER_PROMPT_VERSION == "planner-v0.25"
+    assert "Question-directed visual scan (Planner v0.25)" in system
+    assert "Return `coverage_requirement: null`" in compact_system
+    assert '"kind": "section"' in system
+    assert '"anchor_text": "Academics and Related Resources"' in system
+    assert "Do not guess whether a generic Page expression" in compact_system
     assert "verify semantic closure" in system
     assert "without another unstated factual input" in system
     assert sha256(prompt.encode("utf-8")).hexdigest() == (
-        "90ff1a1f699836e554497bf51a0cf61d7646f9c9e81b209a2139faf0d2b00c87"
+        "9a43f3b5c812715596991028292e387cb6bba22ac30bbf7c51a04c700698fbd9"
     )
 
 

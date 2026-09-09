@@ -80,6 +80,7 @@ class InitialPlanner:
                         original_question=rejected.original_question,
                         subquestions=[],
                         coverage_requirement=rejected.coverage_requirement,
+                        visual_scan=rejected.visual_scan,
                     )
                     warnings.append(
                         PlannerWarning(
@@ -122,6 +123,7 @@ class InitialPlanner:
             original_question=stripped_question,
             subquestions=draft.subquestions,
             coverage_requirement=draft.coverage_requirement,
+            visual_scan=draft.visual_scan,
             planner_trace=PlannerTrace(
                 backend_name=self._backend.backend_name,
                 model=response.model,

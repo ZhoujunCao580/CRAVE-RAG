@@ -80,58 +80,26 @@ After validation, the program adds `planner_trace` and stores an `InitialPlan`:
   "planner_trace": {
     "backend_name": "ollama",
     "model": "qwen3:8b",
-    "prompt_version": "planner-v0.22",
+    "prompt_version": "planner-v0.24",
     "warnings": [],
     "metadata": {}
   }
 }
 ```
 
-Coverage-style targets use a static Planner annotation such as:
+The MinerU-inventory Coverage interface is retired from active runs. In
+`planner-v0.24`, the Root and every SubQuestion must return
+`coverage_requirement: null`. `ReadingEnvironmentConfig.enable_legacy_coverage`
+defaults to `false`; therefore even a stale Planner output containing a legacy
+Coverage object cannot invoke `COUNT_INVENTORY`, `INSPECT_COVERAGE_BATCH`, or
+`coverage-checker-v0.1`. The question continues through ordinary Controller
+SEARCH/READ and a `legacy_coverage_interface_disabled` diagnostic is persisted.
 
-```json
-{
-  "required": true,
-  "operator": "count",
-  "scope_text": "Pages 18-19",
-  "item_type": "person",
-  "source_type": "figure",
-  "predicate": null
-}
-```
-
-The Planner preserves `scope_text` and never chooses printed versus physical
-page numbering. The Environment resolves it to canonical `page_id` values,
-persists both interpretations when they differ, and blocks a complete inventory
-until an explicit namespace override resolves the ambiguity.
-
-For semantic counts, such as people inside figures, the Environment reads the
-canonical inventory in bounded batches and sends the resulting Observations to
-the frozen `coverage-checker-v0.1` contract. The Coverage Checker returns one
-item-local verdict for every supplied `inventory_id`:
-
-```json
-{
-  "action_id": "action:coverage:1",
-  "assessments": [
-    {
-      "inventory_id": "figure:1",
-      "verdict": "matched",
-      "matched_count": 2,
-      "matched_values": [],
-      "observation_ids": ["obs:coverage:1"],
-      "rationale": "Two distinct people are visible."
-    }
-  ]
-}
-```
-
-The model cannot output a global count, readiness flag, or completion claim.
-The Environment accepts `complete` only after every canonical inventory item
-has a grounded `matched` or `not_matched` verdict. Any `unresolved` item blocks
-the final count; resuming retries only unresolved items. The persisted
-`QuestionCoveragePlan.execution` plus the final Evidence provenance is the
-machine-readable completeness proof.
+The old Coverage schemas, models, prompt, and execution code remain available
+only for loading historical artifacts and explicit regression tests. Such tests
+must opt in with `enable_legacy_coverage=true`. They are not part of the current
+runtime contract. A replacement question-directed VLM route will receive a new
+versioned contract after its scope and output design is frozen.
 
 ## 2. Visual retrieval indexing
 
@@ -266,7 +234,7 @@ failed reads. The canonical stored form for this example is:
 
 ### Multimodal Table Reader
 
-The optional `multimodal-table-reader-v0.2` backend receives every available
+The optional `multimodal-table-reader-v0.3` backend receives every available
 representation of each selected canonical Table: structured cells or
 parser-extracted text, the original table crop when available, deterministic
 page metadata, and conservative header/fragment context. The Controller's

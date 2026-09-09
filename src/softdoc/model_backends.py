@@ -264,8 +264,8 @@ class OllamaStructuredClient:
         return result
 
 
-def _is_p10_checker_contract_error(exc: Exception) -> bool:
-    """Limit automatic repair to the two audited P10 contract failures.
+def _is_checker_contract_error(exc: Exception) -> bool:
+    """Limit automatic repair to audited, mechanically repairable failures.
 
     P09 truncation is deliberately excluded until its targeted re-test has run.
     Infrastructure failures and unrelated semantic validation errors also pass
@@ -280,6 +280,10 @@ def _is_p10_checker_contract_error(exc: Exception) -> bool:
             and "Observation exactly once and no others" in message
         )
         or "Checker delta references unavailable Observations" in message
+        or "A satisfied state-only target recheck must identify reused Evidence"
+        in message
+        or "reused_evidence_ids are allowed only during a SubQuestion recheck"
+        in message
     )
 
 
@@ -338,8 +342,13 @@ def _build_checker_contract_repair_prompt(
             *checker_input.recalled_observations,
         ]
     ]
-    existing_evidence_ids = [
-        item.evidence_id for item in checker_input.evidence_memory.evidence
+    existing_evidence_view = [
+        {
+            "evidence_id": item.evidence_id,
+            "statement": item.statement,
+            "supports_question_ids": item.supports_question_ids,
+        }
+        for item in checker_input.evidence_memory.evidence
     ]
     return (
         original_user_prompt
@@ -353,7 +362,7 @@ def _build_checker_contract_repair_prompt(
         + json.dumps(presented_observation_ids, ensure_ascii=False, indent=2)
         + "\nExisting Evidence IDs that may be replaced or removed (copy "
         "exactly):\n"
-        + json.dumps(existing_evidence_ids, ensure_ascii=False, indent=2)
+        + json.dumps(existing_evidence_view, ensure_ascii=False, indent=2)
         + "\nRepair rules:\n"
         + "- Assess every allowed Observation ID exactly once and no other ID.\n"
         + "- Reference only allowed Observation IDs in Evidence updates.\n"
@@ -362,6 +371,50 @@ def _build_checker_contract_repair_prompt(
         "them into one unambiguous final replacement.\n"
         + "- Do not silently select an arbitrary duplicate and do not alter "
         "factual content merely to satisfy the schema.\n"
+        + "- During a state-only SubQuestion recheck, keep every Evidence update "
+        "array empty. If existing Evidence fully satisfies current_target, copy "
+        "each supporting evidence_id exactly into reused_evidence_ids. If it "
+        "does not, return incomplete with an empty reused_evidence_ids list and "
+        "a specific remaining gap.\n"
+        + "- Outside a state-only SubQuestion recheck, reused_evidence_ids must "
+        "be empty.\n"
+        + "Rejected response:\n"
+        + rejected_content
+    )
+
+
+def _build_coverage_checker_contract_repair_prompt(
+    *,
+    checker_input: CoverageBatchCheckInput,
+    original_user_prompt: str,
+    rejected_content: str,
+    validation_error: str,
+) -> str:
+    observations_by_item: dict[str, list[str]] = {}
+    for item in checker_input.inventory_items:
+        allowed_sources = set(item.source_ids).union(item.page_ids)
+        observations_by_item[item.inventory_id] = [
+            observation.observation_id
+            for observation in checker_input.observations
+            if allowed_sources.intersection(observation.source_ids)
+            or set(item.page_ids).intersection(observation.page_ids)
+        ]
+    return (
+        original_user_prompt
+        + "\n\nThe previous Coverage Checker response was rejected by the "
+        "deterministic contract validator. Repair only the contract error and "
+        "return one complete strict JSON object again. Do not change the "
+        "inventory, invent content, or claim overall completion.\n"
+        + f"Validation error: {validation_error}\n"
+        + "Allowed grounded Observation IDs for each inventory item:\n"
+        + json.dumps(observations_by_item, ensure_ascii=False, indent=2)
+        + "\nRepair rules:\n"
+        + "- Assess every supplied inventory_id exactly once.\n"
+        + "- A matched or not_matched verdict must cite at least one allowed "
+        "Observation ID for that inventory item.\n"
+        + "- If no supplied Observation supports a reliable verdict, use "
+        "unresolved and do not claim a count.\n"
+        + "- Copy every ID exactly.\n"
         + "Rejected response:\n"
         + rejected_content
     )
@@ -386,7 +439,7 @@ class OllamaEvidenceCheckerBackend:
                 )
                 return materialize_evidence_check_decision(checker_input, decision)
             except Exception as exc:
-                if not _is_p10_checker_contract_error(exc):
+                if not _is_checker_contract_error(exc):
                     raise
                 raw_content = _last_checker_raw_content(self.client, exc)
                 self.last_rejected_attempts.append(
@@ -411,13 +464,40 @@ class OllamaEvidenceCheckerBackend:
     ) -> CoverageBatchCheckResult:
         """Judge one bounded inventory batch without claiming completeness."""
 
-        result = self.client.generate(
-            component="coverage_checker",
-            system_prompt=COVERAGE_CHECKER_SYSTEM_PROMPT,
-            user_prompt=checker_input.model_dump_json(indent=2),
-            output_model=CoverageBatchCheckResult,
-        )
-        return validate_coverage_batch_result(checker_input, result)
+        original_user_prompt = checker_input.model_dump_json(indent=2)
+        user_prompt = original_user_prompt
+        self.last_rejected_attempts = []
+        for attempt in range(2):
+            try:
+                result = self.client.generate(
+                    component="coverage_checker",
+                    system_prompt=COVERAGE_CHECKER_SYSTEM_PROMPT,
+                    user_prompt=user_prompt,
+                    output_model=CoverageBatchCheckResult,
+                )
+                return validate_coverage_batch_result(checker_input, result)
+            except Exception as exc:
+                raw_content = _last_component_raw_content(
+                    self.client,
+                    exc,
+                    component="coverage_checker",
+                )
+                if raw_content is None or attempt == 1:
+                    raise
+                self.last_rejected_attempts.append(
+                    {
+                        "raw_content": raw_content,
+                        "validation_error": str(exc),
+                    }
+                )
+                user_prompt = _build_coverage_checker_contract_repair_prompt(
+                    checker_input=checker_input,
+                    original_user_prompt=original_user_prompt,
+                    rejected_content=raw_content,
+                    validation_error=str(exc),
+                )
+
+        raise AssertionError("Coverage Checker repair loop exited without a result")
 
 
 class OllamaAnswererBackend:

@@ -15,7 +15,7 @@ from softdoc.prompts import load_prompt_text
 
 InputId = Annotated[str, Field(min_length=1, pattern=r"^I[1-9][0-9]*$")]
 
-MULTIMODAL_TABLE_READER_PROMPT_VERSION = "multimodal-table-reader-v0.2"
+MULTIMODAL_TABLE_READER_PROMPT_VERSION = "multimodal-table-reader-v0.3"
 
 
 class TableHeaderStatus(StrEnum):
@@ -292,7 +292,7 @@ MULTIMODAL_TABLE_READER_SYSTEM_PROMPT = load_prompt_text(
     "multimodal_table_reader_v0_2_system.txt"
 )
 MULTIMODAL_TABLE_READER_USER_PROMPT_TEMPLATE = load_prompt_text(
-    "multimodal_table_reader_v0_2_user.txt"
+    "multimodal_table_reader_v0_3_user.txt"
 )
 
 

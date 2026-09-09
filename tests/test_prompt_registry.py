@@ -4,7 +4,12 @@ from pathlib import Path
 import pytest
 
 from softdoc.cli import main
-from softdoc.prompt_registry import PromptComponent, get_prompt, prompt_manifest
+from softdoc.prompt_registry import (
+    PromptComponent,
+    PromptLifecycle,
+    get_prompt,
+    prompt_manifest,
+)
 from softdoc.prompts import load_prompt_text
 
 
@@ -13,9 +18,21 @@ PROMPT_DIRECTORY = Path(__file__).parents[1] / "src" / "softdoc" / "prompts"
 
 def test_registry_contains_every_model_facing_prompt() -> None:
     manifest = prompt_manifest()
-    assert [item["component"] for item in manifest] == [item.value for item in PromptComponent]
+    assert [item["component"] for item in manifest] == [
+        item.value
+        for item in PromptComponent
+        if item != PromptComponent.COVERAGE_CHECKER
+    ]
+    assert all(item["lifecycle"] == "active" for item in manifest)
     assert all(len(str(item["sha256"])) == 64 for item in manifest)
     assert all(item["version"] for item in manifest)
+
+    complete_catalog = prompt_manifest(include_inactive=True)
+    assert [item["component"] for item in complete_catalog] == [
+        item.value for item in PromptComponent
+    ]
+    coverage = get_prompt(PromptComponent.COVERAGE_CHECKER)
+    assert coverage.lifecycle == PromptLifecycle.LEGACY_INACTIVE
 
 
 def test_registry_renders_dynamic_and_static_prompts() -> None:
@@ -37,11 +54,14 @@ def test_registry_text_comes_from_central_versioned_prompt_assets() -> None:
     assert get_prompt("visual_retrieval").canonical_text == load_prompt_text(
         "visual_retrieval_v0_1.txt"
     ).removesuffix("\n")
+    assert get_prompt("visual_scan").canonical_text == load_prompt_text(
+        "visual_scan_v0_1.txt"
+    )
     assert get_prompt("checker").canonical_text == load_prompt_text(
         "checker_v2_4.txt"
     ).removesuffix("\n")
     assert get_prompt("controller").canonical_text == load_prompt_text(
-        "controller_policy_v0_12.txt"
+        "controller_policy_v0_13.txt"
     )
     assert get_prompt("answerer").canonical_text == load_prompt_text(
         "answerer_v0_8.txt"
@@ -50,7 +70,7 @@ def test_registry_text_comes_from_central_versioned_prompt_assets() -> None:
     assert table_reader.canonical_text == (
         load_prompt_text("multimodal_table_reader_v0_2_system.txt")
         + "\n# User message template\n\n"
-        + load_prompt_text("multimodal_table_reader_v0_2_user.txt")
+        + load_prompt_text("multimodal_table_reader_v0_3_user.txt")
     )
     assert table_reader.prompt_kind == "system_and_user_prompt_template"
     assert "<ROOT_QUESTION>" in get_prompt("planner").canonical_text
@@ -71,15 +91,16 @@ def test_prompt_directory_contains_only_current_assets() -> None:
 
     assert current == {
         "planner_v0_21.txt",
-        "planner_v0_22_coverage_addendum.txt",
+        "planner_v0_25_visual_scan.txt",
         "visual_retrieval_v0_1.txt",
         "visual_reader_v0_5.txt",
         "checker_v2_4.txt",
-        "controller_policy_v0_12.txt",
+        "controller_policy_v0_13.txt",
         "answerer_v0_8.txt",
         "multimodal_table_reader_v0_2_system.txt",
-        "multimodal_table_reader_v0_2_user.txt",
+        "multimodal_table_reader_v0_3_user.txt",
         "coverage_checker_v0_1.txt",
+        "visual_scan_v0_1.txt",
     }
     assert not (PROMPT_DIRECTORY / "archive").exists()
 
@@ -133,11 +154,41 @@ def test_controller_prompt_explains_missing_table_header_recovery() -> None:
     assert "Do not combine merely adjacent or unrelated tables" in prompt
 
 
+def test_table_reader_user_prompt_shows_complete_missing_header_example() -> None:
+    prompt = get_prompt("multimodal_table_reader").canonical_text
+
+    assert '"code": "missing_header_context"' in prompt
+    assert '"input_ids": ["I1"]' in prompt
+    assert '"relevant_visible_content": [' in prompt
+    assert "Do not emit this limitation when the header mapping is reliable" in prompt
+
+
 def test_cli_exports_versioned_prompts(tmp_path, capsys) -> None:
     output = tmp_path / "prompts"
     assert main(["prompts", "export", "--output", str(output)]) == 0
     manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
-    assert len(manifest) == len(PromptComponent)
+    assert len(manifest) == len(PromptComponent) - 1
+    assert not any(item["component"] == "coverage_checker" for item in manifest)
     for item in manifest:
         assert (output / f'{item["component"]}__{item["version"]}.txt').is_file()
+    assert "Exported" in capsys.readouterr().out
+
+
+def test_cli_can_explicitly_export_inactive_prompts(tmp_path, capsys) -> None:
+    output = tmp_path / "all-prompts"
+    assert main(
+        [
+            "prompts",
+            "export",
+            "--output",
+            str(output),
+            "--include-inactive",
+        ]
+    ) == 0
+    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+    coverage = next(
+        item for item in manifest if item["component"] == "coverage_checker"
+    )
+    assert coverage["lifecycle"] == "legacy_inactive"
+    assert (output / "coverage_checker__coverage-checker-v0.1.txt").is_file()
     assert "Exported" in capsys.readouterr().out

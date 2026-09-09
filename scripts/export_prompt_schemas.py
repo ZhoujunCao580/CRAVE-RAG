@@ -14,6 +14,7 @@ from softdoc.planning.models import PlannerDraft
 from softdoc.reading_state import EvidenceCheckDecision
 from softdoc.visual_reading import VisualReadResult
 from softdoc.visual_retrieval import VisualSearchIdentity
+from softdoc.visual_scan import VisualScanBatchResult
 
 
 OUTPUT_DIR = Path("evals/prompts/schemas")
@@ -24,6 +25,7 @@ def export_schemas(output_dir: Path = OUTPUT_DIR) -> list[Path]:
         "planner_output.schema.json": PlannerDraft.model_json_schema(),
         "visual_reader_output.schema.json": VisualReadResult.model_json_schema(),
         "visual_retrieval_output.schema.json": VisualSearchIdentity.model_json_schema(),
+        "visual_scan_output.schema.json": VisualScanBatchResult.model_json_schema(),
         "checker_output.schema.json": EvidenceCheckDecision.model_json_schema(),
         "coverage_checker_output.schema.json": (
             CoverageBatchCheckResult.model_json_schema()

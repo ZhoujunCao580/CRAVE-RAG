@@ -70,8 +70,8 @@ python scripts/audit_reading_environment_v0.py --softdoc-root <SOFTDOC_ROOT>
 This replay checks interfaces and state transitions; it is not a model-quality
 benchmark.
 
-With the required Ollama text and visual models available, run the complete
-model-backed loop on one serialized SoftDoc:
+With the required Ollama text and visual models available, run a low-level
+single-case component smoke on one serialized SoftDoc:
 
 ```bash
 softdoc run-model <SOFTDOC_OUTPUT_DIR> \
@@ -80,6 +80,11 @@ softdoc run-model <SOFTDOC_OUTPUT_DIR> \
   --text-model qwen3:8b \
   --visual-model qwen3-vl:4b
 ```
+
+`softdoc run-model` deliberately remains a lightweight component/debug entry
+point. It does not provide the frozen-batch visual descriptor cache or
+on-demand preview enrichment, so it must not be used to report the canonical
+full-architecture baseline.
 
 Add `--dense` to combine BM25 with multilingual-E5 Dense retrieval. Dense
 dependencies are optional, so the default command remains lightweight and uses
@@ -91,16 +96,45 @@ When a completed visual embedding index is available, add
 five-card batch draws three candidates from BM25/Dense weighted RRF and two
 from visual retrieval, deduplicates them, and presents one stable mixed list.
 The Controller sees candidate content, not route quotas or rank metadata.
+Visual summaries are attached only after a candidate batch is frozen. They are
+Controller-facing preview text and never enter the BM25/Dense SearchUnit corpus.
+
+Use the fail-fast named profile for every canonical baseline, including a
+one-question end-to-end smoke:
+
+```bash
+python scripts/run_model_batch.py \
+  --runtime-profile crave-baseline-v1 \
+  --execution-mode persistent \
+  --cases <GOLD_FREE_CASES_JSONL> \
+  --path-root <PATH_ROOT> \
+  --output-root <NEW_OUTPUT_DIR> \
+  --inference-backend vllm \
+  --base-url http://127.0.0.1:8000/v1 \
+  --text-model Qwen/Qwen3.5-27B \
+  --visual-model Qwen/Qwen3.5-27B \
+  --dense \
+  --embedding-cache <DENSE_CACHE_DIR> \
+  --visual-search-index <COMPLETED_VISUAL_INDEX_DIR> \
+  --visual-descriptor-cache <DESCRIPTOR_CACHE_JSONL> \
+  --visual-descriptor-on-demand \
+  --multimodal-table-reader
+```
+
+The profile aborts before any question runs if a required module or completed
+visual index is missing.
 
 ## Prompts and Evaluations
 
 Editable, versioned prompt text lives together under
 [`src/softdoc/prompts/`](src/softdoc/prompts/README.md). The registry remains
-the runtime discovery and hashing interface for all eight model-facing prompts,
-including the Multimodal Table Reader and Coverage Checker:
+the runtime discovery and hashing interface for the seven active model-facing
+prompts. The retired Coverage Checker remains available only as an explicitly
+exported `legacy_inactive` historical prompt:
 
 ```bash
 softdoc prompts list
+softdoc prompts list --include-inactive
 softdoc prompts show controller
 softdoc prompts show planner --question "How did revenue change?"
 softdoc prompts export --output .runlogs/prompts

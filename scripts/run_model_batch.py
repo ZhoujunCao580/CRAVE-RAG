@@ -1,10 +1,11 @@
 """Run model-backed questions without aborting the whole batch.
 
 The batch manifest contains no Gold answer or Gold evidence fields. Each case
-can either invoke the canonical ``softdoc run-model`` entry point in an isolated
-process or use a persistent in-process runtime.  Persistent mode loads text and
-visual retrieval models once, caches one search service per document, and can
-run several independent trajectories concurrently.
+can either invoke the low-level ``softdoc run-model`` entry point in an isolated
+process or use a persistent in-process runtime.  The named baseline profile is
+the canonical full-architecture entry point: it loads retrieval models once,
+caches one search service per document, and can run several independent
+trajectories concurrently.
 """
 
 from __future__ import annotations
@@ -29,6 +30,101 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 ROOT = Path(__file__).resolve().parents[1]
 CASE_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+BASELINE_RUNTIME_PROFILE = "crave-baseline-v1"
+
+
+def _validate_runtime_profile(args: argparse.Namespace) -> None:
+    """Fail fast when a named experiment profile would omit a core module."""
+
+    profile = getattr(args, "runtime_profile", None)
+    if profile is None:
+        return
+    if profile != BASELINE_RUNTIME_PROFILE:
+        raise ValueError(f"Unknown runtime profile: {profile}")
+
+    errors: list[str] = []
+    if args.execution_mode != "persistent":
+        errors.append("--execution-mode persistent")
+    if args.inference_backend != "vllm":
+        errors.append("--inference-backend vllm")
+    if not args.dense:
+        errors.append("--dense")
+    if args.visual_search_index is None:
+        errors.append("--visual-search-index PATH")
+    if args.visual_descriptor_cache is None:
+        errors.append("--visual-descriptor-cache PATH")
+    if not args.visual_descriptor_on_demand:
+        errors.append("--visual-descriptor-on-demand")
+    if not args.multimodal_table_reader:
+        errors.append("--multimodal-table-reader")
+    if errors:
+        raise ValueError(
+            f"Runtime profile {profile!r} is incomplete; required settings: "
+            + ", ".join(errors)
+        )
+
+    index_root = Path(args.visual_search_index)
+    required_index_entries = ("config.json", "state.json", "assets.jsonl", "shards")
+    missing_index_entries = [
+        name for name in required_index_entries if not (index_root / name).exists()
+    ]
+    if missing_index_entries:
+        raise ValueError(
+            f"Runtime profile {profile!r} visual index is incomplete at "
+            f"{index_root}: missing {missing_index_entries}"
+        )
+    try:
+        index_config = json.loads(
+            (index_root / "config.json").read_text(encoding="utf-8")
+        )
+        index_state = json.loads(
+            (index_root / "state.json").read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            f"Runtime profile {profile!r} cannot read visual index metadata: {exc}"
+        ) from exc
+    if index_state.get("state") != "completed" or index_state.get(
+        "pending_image_count"
+    ) not in (None, 0):
+        raise ValueError(
+            f"Runtime profile {profile!r} requires a completed visual index"
+        )
+    configured_model = index_config.get("model")
+    if args.visual_search_model and configured_model != args.visual_search_model:
+        raise ValueError(
+            "--visual-search-model does not match visual index config.json: "
+            f"{args.visual_search_model!r} != {configured_model!r}"
+        )
+    if not any((index_root / "shards").glob("*.npz")):
+        raise ValueError(
+            f"Runtime profile {profile!r} visual index has no embedding shards"
+        )
+    cache_path = Path(args.visual_descriptor_cache)
+    if cache_path.exists() and not cache_path.is_file():
+        raise ValueError("--visual-descriptor-cache must be a JSONL file path")
+
+
+def _validate_batch_args(args: argparse.Namespace) -> None:
+    """Validate cross-option contracts for CLI and programmatic callers."""
+
+    _validate_runtime_profile(args)
+    if args.visual_search_index is not None and not args.dense:
+        raise ValueError("--visual-search-index requires --dense")
+    if args.visual_descriptor_cache is not None and args.execution_mode != "persistent":
+        raise ValueError(
+            "--visual-descriptor-cache requires --execution-mode persistent; "
+            "the canonical full architecture is the persistent batch runner, "
+            "including for one-question smoke tests"
+        )
+    if args.visual_descriptor_on_demand and args.execution_mode != "persistent":
+        raise ValueError(
+            "--visual-descriptor-on-demand requires --execution-mode persistent"
+        )
+    if args.visual_descriptor_on_demand and args.visual_search_index is None:
+        raise ValueError(
+            "--visual-descriptor-on-demand requires --visual-search-index"
+        )
 
 
 def _batch_lock_path(
@@ -135,6 +231,21 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+
+
+def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
+    """Atomically persist diagnostic rows, including failed QA trajectories."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(
+        "".join(
+            json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n"
+            for row in rows
+        ),
         encoding="utf-8",
     )
     temporary.replace(path)
@@ -271,6 +382,7 @@ def run_batch(
     args: argparse.Namespace,
     executor: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> dict[str, Any]:
+    _validate_batch_args(args)
     with _BatchRunLock(cases, args):
         if getattr(args, "execution_mode", "subprocess") == "persistent":
             if executor is not subprocess.run:
@@ -316,21 +428,68 @@ class _PersistentRuntime:
         self._dense_encoder = None
         self._embedding_cache = None
         self._visual_model = None
-        self._visual_descriptor_records: dict[str, dict[str, Any]] = {}
+        self._visual_descriptor_backend = None
+        self._visual_descriptor_lock = threading.RLock()
+        self._case_context = threading.local()
+        self._visual_descriptor_records: dict[
+            tuple[str, str, str, str, str], dict[str, Any]
+        ] = {}
         descriptor_cache = getattr(args, "visual_descriptor_cache", None)
         if descriptor_cache is not None and Path(descriptor_cache).is_file():
+            from softdoc.visual_retrieval import VisualRetrievalDescriptor
+
             for line_number, line in enumerate(
                 Path(descriptor_cache).read_text(encoding="utf-8").splitlines(), 1
             ):
                 if not line.strip():
                     continue
                 row = json.loads(line)
-                element_id = row.get("element_id")
-                if not isinstance(element_id, str) or not element_id:
+                document_id = row.get("document_id")
+                if not isinstance(document_id, str) or not document_id:
                     raise ValueError(
-                        f"{descriptor_cache}:{line_number}: missing element_id"
+                        f"{descriptor_cache}:{line_number}: missing document_id"
                     )
-                self._visual_descriptor_records[element_id] = row
+                descriptor = VisualRetrievalDescriptor.model_validate(
+                    {
+                        name: row.get(name)
+                        for name in VisualRetrievalDescriptor.model_fields
+                    }
+                )
+                key = (
+                    document_id,
+                    descriptor.element_id,
+                    descriptor.visual_asset_sha256,
+                    descriptor.generator_model,
+                    descriptor.prompt_version,
+                )
+                self._visual_descriptor_records[key] = row
+        if getattr(args, "visual_descriptor_on_demand", False):
+            if descriptor_cache is None:
+                raise ValueError(
+                    "--visual-descriptor-on-demand requires "
+                    "--visual-descriptor-cache"
+                )
+            if args.inference_backend != "vllm":
+                raise ValueError(
+                    "On-demand visual descriptions currently require the "
+                    "OpenAI-compatible vLLM backend"
+                )
+            from softdoc.model_backends import OllamaVisualRetrievalBackend
+            from softdoc.openai_compatible import (
+                OpenAICompatibleConfig,
+                OpenAICompatibleStructuredClient,
+            )
+
+            self._visual_descriptor_backend = OllamaVisualRetrievalBackend(
+                OpenAICompatibleStructuredClient(
+                    OpenAICompatibleConfig(
+                        model=args.visual_model,
+                        base_url=args.base_url,
+                        timeout_seconds=args.timeout,
+                        max_tokens=args.visual_descriptor_max_tokens,
+                    )
+                )
+            )
         if args.dense:
             self._dense_encoder = HuggingFaceE5Encoder(
                 model_name=args.dense_model,
@@ -367,7 +526,6 @@ class _PersistentRuntime:
             if cached is not None:
                 return cached
             document = load_document(Path(document_dir))
-            self._apply_visual_descriptor_cache(document, Path(document_dir))
             search_service = None
             if self.args.dense:
                 search_units = SearchUnitBuilder().build(document)
@@ -406,66 +564,196 @@ class _PersistentRuntime:
                     dense_backend=dense_index,
                     visual_backend=visual_index,
                     config=config,
+                    batch_enricher=(
+                        lambda batch: self._enrich_visual_candidate_batch(
+                            document, Path(document_dir), batch
+                        )
+                        if (
+                            self._visual_descriptor_backend is not None
+                            or getattr(self.args, "visual_descriptor_cache", None)
+                            is not None
+                        )
+                        else batch
+                    ),
                 )
             resources = (document, search_service)
             self._services[document_dir] = resources
             return resources
 
-    def _apply_visual_descriptor_cache(self, document: Any, document_dir: Path) -> int:
-        """Attach validated persisted search-only descriptions before indexing."""
+    def _enrich_visual_candidate_batch(
+        self, document: Any, document_dir: Path, batch: Any
+    ) -> Any:
+        """Describe only the already-frozen visual slots and never rerank them."""
 
-        if not self._visual_descriptor_records:
-            return 0
+        from softdoc.retrieval import (
+            CandidatePreview,
+            RetrievalSource,
+            SearchBatch,
+            SnippetSource,
+        )
         from softdoc.visual_retrieval import (
-            VisualRetrievalDraft,
+            VISUAL_RETRIEVAL_PROMPT_VERSION,
+            VisualRetrievalDescriptor,
             VisualRetrievalResult,
-            apply_visual_retrieval_result,
             build_visual_retrieval_request,
+            materialize_visual_retrieval_descriptors,
         )
 
-        element_ids = {item.element_id for item in document.elements}
-        selected = [
-            row
-            for element_id, row in self._visual_descriptor_records.items()
-            if element_id in element_ids
+        visual_previews = [
+            item
+            for item in batch.candidate_previews
+            if item.preview_source == RetrievalSource.VISUAL_DENSE
+            and item.visual_asset_id is not None
+            and item.snippet_source == SnippetSource.VISUAL_METADATA
         ]
-        if not selected:
-            return 0
-        request = build_visual_retrieval_request(
-            document,
-            document_dir,
-            element_ids={row["element_id"] for row in selected},
-        )
-        request_by_element = {
-            item.element_id: item for item in request.visual_inputs
-        }
-        drafts = []
-        for row in selected:
-            request_item = request_by_element.get(row["element_id"])
-            if (
-                request_item is None
-                or request_item.visual_asset_sha256 != row.get("visual_asset_sha256")
-            ):
-                continue
-            drafts.append(
-                VisualRetrievalDraft(
-                    input_id=request_item.input_id,
-                    search_summary=row["search_summary"],
-                    keywords=row.get("keywords", []),
-                )
+        if not visual_previews:
+            return batch
+
+        with self._visual_descriptor_lock:
+            requested_ids = {item.element_id for item in visual_previews}
+            request = build_visual_retrieval_request(
+                document, document_dir, element_ids=requested_ids
             )
-        if not drafts:
-            return 0
-        apply_visual_retrieval_result(
-            document,
-            request,
-            VisualRetrievalResult(descriptors=drafts),
-            generator_model=selected[0].get("generator_model", self.args.visual_model),
-            prompt_version=selected[0].get(
-                "prompt_version", "visual-retrieval-v0.1"
-            ),
-        )
-        return len(drafts)
+            request_ids = {item.element_id for item in request.visual_inputs}
+            for missing_id in sorted(requested_ids - request_ids):
+                self._record_visual_descriptor_call(
+                    {
+                        "component": "visual_retrieval",
+                        "source": "environment",
+                        "input": {"element_id": missing_id},
+                        "output": None,
+                        "error": "visual_asset_unavailable",
+                        "elapsed_seconds": 0.0,
+                    }
+                )
+
+            prompt_version = (
+                self._visual_descriptor_backend.prompt_version
+                if self._visual_descriptor_backend is not None
+                else VISUAL_RETRIEVAL_PROMPT_VERSION
+            )
+            descriptors_by_element: dict[str, VisualRetrievalDescriptor] = {}
+            for request_item in request.visual_inputs:
+                key = (
+                    document.document_id,
+                    request_item.element_id,
+                    request_item.visual_asset_sha256,
+                    self.args.visual_model,
+                    prompt_version,
+                )
+                cached_row = self._visual_descriptor_records.get(key)
+                if cached_row is not None:
+                    descriptor = VisualRetrievalDescriptor.model_validate(
+                        {
+                            name: cached_row.get(name)
+                            for name in VisualRetrievalDescriptor.model_fields
+                        }
+                    )
+                    descriptors_by_element[descriptor.element_id] = descriptor
+                    continue
+                if self._visual_descriptor_backend is None:
+                    continue
+
+                single_request = request.model_copy(
+                    update={"visual_inputs": [request_item]}
+                )
+                started = time.perf_counter()
+                try:
+                    generated = self._visual_descriptor_backend.describe(
+                        single_request
+                    )
+                    if {
+                        item.input_id for item in generated.descriptors
+                    } != {request_item.input_id}:
+                        raise ValueError(
+                            "Visual descriptor response must cover its one input exactly"
+                        )
+                    descriptor = materialize_visual_retrieval_descriptors(
+                        document,
+                        single_request,
+                        VisualRetrievalResult(
+                            descriptors=list(generated.descriptors)
+                        ),
+                        generator_model=self.args.visual_model,
+                        prompt_version=prompt_version,
+                    )[0]
+                except Exception as exc:
+                    self._record_visual_descriptor_call(
+                        {
+                            "component": "visual_retrieval",
+                            "source": "model",
+                            "input": single_request.model_dump(mode="json"),
+                            "output": None,
+                            "error": f"{type(exc).__name__}: {exc}",
+                            "elapsed_seconds": round(
+                                time.perf_counter() - started, 3
+                            ),
+                        }
+                    )
+                    # Preview enrichment is optional metadata.  Preserve the
+                    # frozen candidate and let the QA trajectory continue.
+                    continue
+
+                self._record_visual_descriptor_call(
+                    {
+                        "component": "visual_retrieval",
+                        "source": "model",
+                        "input": single_request.model_dump(mode="json"),
+                        "output": generated.model_dump(mode="json"),
+                        "error": None,
+                        "elapsed_seconds": round(
+                            time.perf_counter() - started, 3
+                        ),
+                    }
+                )
+                descriptors_by_element[descriptor.element_id] = descriptor
+                row = descriptor.model_dump(mode="json")
+                row["document_id"] = document.document_id
+                row["softdoc_dir"] = str(document_dir)
+                self._visual_descriptor_records[key] = row
+                cache_path = Path(self.args.visual_descriptor_cache)
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                with cache_path.open("a", encoding="utf-8") as handle:
+                    handle.write(
+                        json.dumps(row, ensure_ascii=False, separators=(",", ":"))
+                        + "\n"
+                    )
+                    handle.flush()
+                    os.fsync(handle.fileno())
+
+            updated = []
+            for preview in batch.candidate_previews:
+                descriptor = descriptors_by_element.get(preview.element_id)
+                if (
+                    descriptor is None
+                    or preview.snippet_source != SnippetSource.VISUAL_METADATA
+                ):
+                    updated.append(preview)
+                    continue
+                text = " ".join(descriptor.search_summary.split())
+                payload = preview.model_dump(mode="json")
+                payload.update(
+                    {
+                        "matched_snippet": text,
+                        "snippet_char_start": 0,
+                        "snippet_char_end": len(text),
+                        "snippet_truncated": False,
+                    }
+                )
+                updated.append(CandidatePreview.model_validate(payload))
+            return SearchBatch.model_validate(
+                {
+                    **batch.model_dump(mode="json"),
+                    "candidate_previews": [
+                        item.model_dump(mode="json") for item in updated
+                    ],
+                }
+            )
+
+    def _record_visual_descriptor_call(self, record: dict[str, Any]) -> None:
+        records = getattr(self._case_context, "visual_descriptor_calls", None)
+        if records is not None:
+            records.append(record)
 
     def _runner(self) -> Any:
         from softdoc.controller_ollama import VLLMControllerBackend
@@ -530,16 +818,26 @@ class _PersistentRuntime:
     def run_case(self, case: dict[str, Any], output: Path) -> None:
         from softdoc.model_runner import write_model_pipeline_run
 
-        document, search_service = self._search_resources(case["document_dir"])
-        result = self._runner().run(
-            document=document,
-            asset_root=Path(case["document_dir"]),
-            question=case["question"],
-            run_key=case.get("run_key") or f"{self.args.run_key_prefix}-{case['case_id']}",
-            question_id=case.get("question_id"),
-            search_service=search_service,
-        )
-        write_model_pipeline_run(result, output)
+        self._case_context.visual_descriptor_calls = []
+        try:
+            document, search_service = self._search_resources(case["document_dir"])
+            result = self._runner().run(
+                document=document,
+                asset_root=Path(case["document_dir"]),
+                question=case["question"],
+                run_key=(
+                    case.get("run_key")
+                    or f"{self.args.run_key_prefix}-{case['case_id']}"
+                ),
+                question_id=case.get("question_id"),
+                search_service=search_service,
+            )
+            write_model_pipeline_run(result, output)
+        finally:
+            records = list(self._case_context.visual_descriptor_calls)
+            if records:
+                _write_jsonl(output / "visual_descriptor_calls.jsonl", records)
+            self._case_context.visual_descriptor_calls = None
 
 
 def _run_callable_with_peak_vram(call: Callable[[], None]) -> int | None:
@@ -583,6 +881,7 @@ def _run_persistent_batch_unlocked(
         "succeeded": 0,
         "failed": 0,
         "runtime": {
+            "runtime_profile": getattr(args, "runtime_profile", None),
             "execution_mode": "persistent",
             "workers": args.workers,
             "grouped_by_document": True,
@@ -599,6 +898,9 @@ def _run_persistent_batch_unlocked(
                 str(args.visual_descriptor_cache)
                 if getattr(args, "visual_descriptor_cache", None)
                 else None
+            ),
+            "visual_descriptor_on_demand": getattr(
+                args, "visual_descriptor_on_demand", False
             ),
             "multimodal_table_reader": getattr(
                 args, "multimodal_table_reader", False
@@ -703,6 +1005,7 @@ def _run_batch_unlocked(
         "succeeded": 0,
         "failed": 0,
         "runtime": {
+            "runtime_profile": getattr(args, "runtime_profile", None),
             "base_url": args.base_url,
             "inference_backend": args.inference_backend,
             "text_model": args.text_model,
@@ -813,6 +1116,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--action-budget", type=int, default=7)
     parser.add_argument("--run-key-prefix", default="batch-v0")
     parser.add_argument(
+        "--runtime-profile",
+        choices=(BASELINE_RUNTIME_PROFILE,),
+        help=(
+            "Named fail-fast architecture contract. crave-baseline-v1 requires "
+            "persistent vLLM, Dense + Visual Dense, preview-only descriptor "
+            "cache/on-demand generation, and the multimodal Table Reader."
+        ),
+    )
+    parser.add_argument(
         "--execution-mode",
         choices=("subprocess", "persistent"),
         default="subprocess",
@@ -834,8 +1146,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--visual-descriptor-cache",
         type=Path,
-        help="Validated JSONL cache of search-only visual descriptions.",
+        help=(
+            "Validated JSONL cache of Controller-preview-only visual "
+            "descriptions; never BM25/Dense corpus text."
+        ),
     )
+    parser.add_argument(
+        "--visual-descriptor-on-demand",
+        action="store_true",
+        help=(
+            "After each 3-text+2-visual batch is frozen, generate and cache "
+            "descriptions only for its visible visual candidates."
+        ),
+    )
+    parser.add_argument("--visual-descriptor-max-tokens", type=int, default=256)
     parser.add_argument("--multimodal-table-reader", action="store_true")
     parser.add_argument(
         "--visual-search-device", choices=("cpu", "cuda"), default="cuda"
@@ -918,8 +1242,7 @@ def _run_with_peak_vram(
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.visual_search_index is not None and not args.dense:
-        raise ValueError("--visual-search-index requires --dense")
+    _validate_batch_args(args)
     cases = load_cases(args.cases, path_root=args.path_root.resolve())
     manifest = run_batch(cases=cases, args=args)
     print(

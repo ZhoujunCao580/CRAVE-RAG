@@ -376,7 +376,10 @@ def test_model_runner_records_and_reloads_semantic_coverage_calls(
         reader=DeterministicContentReader(),
         checker=SemanticCoverageChecker(),
         answerer=EvidenceAnswerer(),
-        environment_config=ReadingEnvironmentConfig(action_budget=2),
+        environment_config=ReadingEnvironmentConfig(
+            enable_legacy_coverage=True,
+            action_budget=2,
+        ),
     )
 
     run = runner.run(

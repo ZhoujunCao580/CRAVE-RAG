@@ -158,6 +158,7 @@ from softdoc.visual_retrieval import (
     apply_visual_retrieval_result,
     build_visual_retrieval_request,
     enrich_visual_retrieval,
+    materialize_visual_retrieval_descriptors,
     visual_retrieval_descriptor,
     visual_retrieval_user_prompt,
 )
@@ -448,6 +449,7 @@ __all__ = [
     "apply_visual_retrieval_result",
     "build_visual_retrieval_request",
     "enrich_visual_retrieval",
+    "materialize_visual_retrieval_descriptors",
     "visual_retrieval_descriptor",
     "visual_retrieval_user_prompt",
     "HeadingAction",

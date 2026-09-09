@@ -8,6 +8,7 @@ from pydantic import Field, field_validator, model_validator
 
 from softdoc.coverage_reasoning import CoverageRequirement
 from softdoc.models import SoftDocModel
+from softdoc.visual_scan import VisualScanRequirement
 
 
 def _clean_unique_strings(values: list[str], *, field_name: str) -> list[str]:
@@ -31,6 +32,7 @@ class PlannedSubQuestion(SoftDocModel):
     text: str = Field(min_length=1)
     depends_on: list[str] = Field(default_factory=list)
     coverage_requirement: CoverageRequirement | None = None
+    visual_scan: VisualScanRequirement | None = None
 
     @field_validator("subquestion_id", "text")
     @classmethod
@@ -57,6 +59,7 @@ class PlannerDraft(SoftDocModel):
     original_question: str = Field(min_length=1)
     subquestions: list[PlannedSubQuestion]
     coverage_requirement: CoverageRequirement | None = None
+    visual_scan: VisualScanRequirement | None = None
 
     @field_validator("original_question")
     @classmethod

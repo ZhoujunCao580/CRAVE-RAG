@@ -30,6 +30,7 @@ from softdoc.openai_compatible import (
 )
 from softdoc.reading_environment import ReaderContext
 from softdoc.reading_state import (
+    CurrentTarget,
     EvidenceItem,
     EvidenceCheckInput,
     ObservationSourceRef,
@@ -38,6 +39,7 @@ from softdoc.reading_state import (
     ReadingSourceType,
     ReadRepresentation,
     RootQuestion,
+    QuestionState,
     StoredObservation,
     initialize_evidence_memory,
 )
@@ -538,6 +540,99 @@ def test_checker_contract_repair_works_with_openai_compatible_client() -> None:
     assert len(backend.last_rejected_attempts) == 1
 
 
+def test_checker_repairs_satisfied_target_recheck_missing_reused_evidence() -> None:
+    root = RootQuestion(
+        question_id="root:Q366",
+        text="What was the absolute shortfall from the forecast?",
+    )
+    memory = initialize_evidence_memory(
+        reading_session_id="reading:Q366",
+        root_question_id=root.question_id,
+        root_question_text=root.text,
+        questions=[
+            QuestionState(
+                question_id="Q1",
+                text="What was the actual growth rate?",
+            ),
+            QuestionState(
+                question_id="Q2",
+                text="What was the forecast growth rate?",
+            ),
+        ],
+    ).model_copy(
+        update={
+            "questions": [
+                QuestionState(
+                    question_id="Q1",
+                    text="What was the actual growth rate?",
+                    status="satisfied",
+                ),
+                QuestionState(
+                    question_id="Q2",
+                    text="What was the forecast growth rate?",
+                ),
+            ],
+            "evidence": [
+                EvidenceItem(
+                    evidence_id="evidence:actual",
+                    statement="Actual GDP growth was 4.3%.",
+                    observation_ids=["obs:gdp"],
+                    supports_question_ids=["Q1"],
+                ),
+                EvidenceItem(
+                    evidence_id="evidence:forecast",
+                    statement="Forecast GDP growth was 6.7%.",
+                    observation_ids=["obs:gdp"],
+                    supports_question_ids=["Q1"],
+                ),
+            ],
+            "current_target": CurrentTarget(
+                question_id="Q2",
+                gap_description="What was the forecast growth rate?",
+            ),
+        }
+    )
+    checker_input = EvidenceCheckInput(
+        action_id="action:Q366:target-recheck:Q2",
+        root_question=root,
+        evidence_memory=memory,
+        observations=[],
+        limitations=[],
+    )
+    missing_reuse = (
+        '{"action_id":"action:Q366:target-recheck:Q2",'
+        '"observation_assessments":[],"evidence_updates":'
+        '{"add":[],"replace":[],"remove":[]},"reused_evidence_ids":[],'
+        '"current_target_status":"satisfied",'
+        '"remaining_gap_description":null}'
+    )
+    repaired = missing_reuse.replace(
+        '"reused_evidence_ids":[]',
+        '"reused_evidence_ids":["evidence:forecast"]',
+    )
+    transport = SequenceFakeTransport(
+        [
+            {"choices": [{"message": {"content": missing_reuse}}]},
+            {"choices": [{"message": {"content": repaired}}]},
+        ]
+    )
+    backend = OllamaEvidenceCheckerBackend(
+        OpenAICompatibleStructuredClient(
+            OpenAICompatibleConfig(model="text-test"), transport
+        )
+    )
+
+    result = backend.check(checker_input)
+
+    assert result.reused_evidence_ids == ["evidence:forecast"]
+    assert len(transport.calls) == 2
+    assert len(backend.last_rejected_attempts) == 1
+    repair_prompt = transport.calls[1][1]["messages"][1]["content"]
+    assert "evidence:forecast" in repair_prompt
+    assert "Forecast GDP growth was 6.7%." in repair_prompt
+    assert "If existing Evidence fully satisfies current_target" in repair_prompt
+
+
 def test_coverage_checker_backend_uses_frozen_schema_without_claiming_completion(
 ) -> None:
     checker_input = CoverageBatchCheckInput(
@@ -595,6 +690,127 @@ def test_coverage_checker_backend_uses_frozen_schema_without_claiming_completion
     assert payload["format"]["title"] == "CoverageBatchCheckResult"
     assert "Environment, not you" in payload["messages"][0]["content"]
     assert backend.client.call_records[0].component == "coverage_checker"
+
+
+def test_coverage_checker_repairs_missing_grounded_observation_ids() -> None:
+    checker_input = CoverageBatchCheckInput(
+        action_id="action:coverage:repair",
+        question_id="Q4",
+        question_text="How many charts match the criterion?",
+        requirement=CoverageRequirement(
+            operator=CoverageOperator.COUNT,
+            scope_text="this report",
+            item_type="chart",
+            source_type=CoverageSourceType.CHART,
+            predicate="compares two groups",
+        ),
+        inventory_items=[
+            CoverageInventoryItem(
+                inventory_id="chart:1",
+                source_ids=["chart:1"],
+                page_ids=["page:1"],
+                physical_page_numbers=[1],
+                source_type=CoverageSourceType.CHART,
+                element_type=ElementType.CHART,
+                deduplication_reason="canonical_element",
+            )
+        ],
+        observations=[
+            CoverageObservation(
+                observation_id="obs:chart:1",
+                text="The chart compares Group A and Group B.",
+                source_ids=["chart:1"],
+                page_ids=["page:1"],
+            )
+        ],
+    )
+    rejected = (
+        '{"action_id":"action:coverage:repair","assessments":['
+        '{"inventory_id":"chart:1","verdict":"matched",'
+        '"matched_count":1,"matched_values":[],"observation_ids":[],'
+        '"rationale":"The chart compares the groups."}]}'
+    )
+    repaired = rejected.replace(
+        '"observation_ids":[]',
+        '"observation_ids":["obs:chart:1"]',
+    )
+    transport = SequenceFakeTransport(
+        [
+            {"model": "vision-test", "message": {"content": rejected}},
+            {"model": "vision-test", "message": {"content": repaired}},
+        ]
+    )
+    backend = OllamaEvidenceCheckerBackend(
+        OllamaStructuredClient(OllamaModelConfig(model="vision-test"), transport)
+    )
+
+    result = backend.check_coverage(checker_input)
+
+    assert result.assessments[0].observation_ids == ["obs:chart:1"]
+    assert len(transport.calls) == 2
+    assert "Allowed grounded Observation IDs" in transport.calls[1][1]["messages"][1]["content"]
+    assert len(backend.last_rejected_attempts) == 1
+
+
+def test_coverage_checker_repairs_truncated_json_within_same_invocation() -> None:
+    checker_input = CoverageBatchCheckInput(
+        action_id="action:coverage:truncated",
+        question_id="Q12",
+        question_text="How many figures match the criterion?",
+        requirement=CoverageRequirement(
+            operator=CoverageOperator.COUNT,
+            scope_text="this report",
+            item_type="figure",
+            source_type=CoverageSourceType.FIGURE,
+            predicate="contains a warning",
+        ),
+        inventory_items=[
+            CoverageInventoryItem(
+                inventory_id="figure:1",
+                source_ids=["figure:1"],
+                page_ids=["page:1"],
+                physical_page_numbers=[1],
+                source_type=CoverageSourceType.FIGURE,
+                element_type=ElementType.FIGURE,
+                deduplication_reason="canonical_element",
+            )
+        ],
+        observations=[
+            CoverageObservation(
+                observation_id="obs:figure:1",
+                text="The figure contains a warning.",
+                source_ids=["figure:1"],
+                page_ids=["page:1"],
+            )
+        ],
+    )
+    truncated = '{"action_id":"action:coverage:truncated","assessments":['
+    repaired = (
+        '{"action_id":"action:coverage:truncated","assessments":['
+        '{"inventory_id":"figure:1","verdict":"matched",'
+        '"matched_count":1,"matched_values":["figure:1"],'
+        '"observation_ids":["obs:figure:1"],'
+        '"rationale":"The warning is visible."}]}'
+    )
+    transport = SequenceFakeTransport(
+        [
+            {"model": "vision-test", "message": {"content": truncated}},
+            {"model": "vision-test", "message": {"content": repaired}},
+        ]
+    )
+    backend = OllamaEvidenceCheckerBackend(
+        OllamaStructuredClient(OllamaModelConfig(model="vision-test"), transport)
+    )
+
+    result = backend.check_coverage(checker_input)
+
+    assert result.assessments[0].inventory_id == "figure:1"
+    assert len(transport.calls) == 2
+    assert len(backend.last_rejected_attempts) == 1
+    assert backend.last_rejected_attempts[0]["raw_content"] == truncated
+    assert "return one complete strict JSON object again" in (
+        transport.calls[1][1]["messages"][1]["content"]
+    )
 
 
 def test_structured_client_accepts_validated_output_from_thinking_channel() -> None:

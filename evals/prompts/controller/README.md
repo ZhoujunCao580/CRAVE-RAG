@@ -1,7 +1,7 @@
 # Controller suite inventory
 
-- Canonical Prompt: `src/softdoc/prompts/controller_policy_v0_12.txt`
-- Registry version: `controller-policy-v0.12`
+- Canonical Prompt: `src/softdoc/prompts/controller_policy_v0_13.txt`
+- Registry version: `controller-policy-v0.13`
 - Current source and runner: `scripts/evaluate_controller_mock.py`
 - Materialized suite: 28 Controller decisions
   - 15 existing contract regressions;
@@ -38,6 +38,8 @@ Still needed before formal testing:
 - materialize Q171/Q708 page-context decisions and a negative case where the
   focused crop is already sufficient;
 - add real ControllerInput snapshots after Checker updates EvidenceMemory;
+- materialize Q1073 after its Checker changes the gap, testing visible-candidate
+  re-evaluation and new-search selection instead of blind paging;
 - reserve real trajectories from unseen documents for holdout.
 
 Controller evaluation should use fixed snapshots before live-loop testing. A

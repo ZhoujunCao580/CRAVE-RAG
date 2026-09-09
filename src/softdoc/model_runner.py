@@ -241,6 +241,15 @@ class _RecordingChecker:
                     succeeded=False,
                     action_id=checker_input.action_id,
                     elapsed_seconds=time.perf_counter() - started,
+                    metadata=(
+                        {
+                            "rejected_attempts": list(
+                                getattr(self.backend, "last_rejected_attempts", [])
+                            )
+                        }
+                        if getattr(self.backend, "last_rejected_attempts", [])
+                        else {}
+                    ),
                 )
             )
             raise
@@ -252,6 +261,15 @@ class _RecordingChecker:
                 output=output.model_dump(mode="json"),
                 action_id=checker_input.action_id,
                 elapsed_seconds=time.perf_counter() - started,
+                metadata=(
+                    {
+                        "rejected_attempts": list(
+                            getattr(self.backend, "last_rejected_attempts", [])
+                        )
+                    }
+                    if getattr(self.backend, "last_rejected_attempts", [])
+                    else {}
+                ),
             )
         )
         return output

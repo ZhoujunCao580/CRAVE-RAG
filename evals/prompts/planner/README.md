@@ -1,7 +1,7 @@
 # Planner suite inventory
 
-- Canonical Prompt: `src/softdoc/prompts/planner_v0_21.txt` plus `src/softdoc/prompts/planner_v0_22_coverage_addendum.txt`
-- Registry version: `planner-v0.22`
+- Canonical Prompt: `src/softdoc/prompts/planner_v0_21.txt` plus `src/softdoc/prompts/planner_v0_24_legacy_coverage_disabled.txt`
+- Registry version: `planner-v0.24`
 - Compact source: `scripts/evaluate_planner_mock.py` (6 synthetic cases; inputs
   and expected constraints are inline)
 - Historical v0.18 runs and proposal reports were removed after materializing
