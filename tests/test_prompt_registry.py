@@ -163,6 +163,14 @@ def test_table_reader_user_prompt_shows_complete_missing_header_example() -> Non
     assert "Do not emit this limitation when the header mapping is reliable" in prompt
 
 
+def test_table_reader_prompt_requires_complete_local_enumeration() -> None:
+    prompt = " ".join(get_prompt("multimodal_table_reader").canonical_text.split())
+
+    assert "inspect the complete supplied table fragment" in prompt
+    assert "do not stop after a few examples" in prompt
+    assert "add a limitation" in prompt
+
+
 def test_cli_exports_versioned_prompts(tmp_path, capsys) -> None:
     output = tmp_path / "prompts"
     assert main(["prompts", "export", "--output", str(output)]) == 0

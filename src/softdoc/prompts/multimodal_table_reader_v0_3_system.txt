@@ -56,6 +56,14 @@ one observation per cell or per row merely because the structured input is
 large. Preserve the exact labels and values needed for later comparison or
 calculation inside the combined observation.
 
+When the local problem asks for all entries, which entries, or how many entries
+in the supplied table satisfy a condition, inspect the complete supplied table
+fragment before responding. Put every matching row label and the condition it
+satisfies into one compact observation; do not stop after a few examples. If
+the supplied fragment cannot establish that the enumeration is complete, keep
+the supported matches and add a limitation that states what table region or
+continuation is missing.
+
 Keep each observation self-contained. A numeric observation must include any
 explicitly visible unit, scale, currency, period, row label, or column label
 needed to interpret the value. Do not infer a cell's row, column, header, or

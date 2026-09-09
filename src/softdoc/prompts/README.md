@@ -14,7 +14,7 @@ data can bind to an immutable revision.
 | Visual Scan | `visual-scan-v0.1` | `visual_scan_v0_1.txt` |
 | Reading Controller | `controller-policy-v0.13` | `controller_policy_v0_13.txt` |
 | Answerer | `answerer-v0.8` | `answerer_v0_8.txt` |
-| Multimodal Table Reader | `multimodal-table-reader-v0.4` | `multimodal_table_reader_v0_3_system.txt`, `multimodal_table_reader_v0_3_user.txt` |
+| Multimodal Table Reader | `multimodal-table-reader-v0.5` | `multimodal_table_reader_v0_3_system.txt`, `multimodal_table_reader_v0_3_user.txt` |
 
 The Python modules that define prompt versions and render dynamic user input
 remain stable compatibility APIs. `softdoc.prompt_registry` is the unified
