@@ -17,6 +17,8 @@ from softdoc.coverage_reasoning import (
 )
 from softdoc.model_runner import (
     ModelBackedRunner,
+    StageCallRecord,
+    _bind_controller_action_ids,
     load_model_pipeline_run,
     write_model_pipeline_run,
 )
@@ -28,6 +30,9 @@ from softdoc.reading_environment import (
     ReadingRunStatus,
 )
 from softdoc.reading_state import (
+    ActionExecutionStatus,
+    ActionTrace,
+    ActionTraceEntry,
     EvidenceAddition,
     EvidenceCheckInput,
     EvidenceCheckResult,
@@ -50,6 +55,41 @@ from softdoc.teacher_data import (
     write_teacher_review,
 )
 from softdoc.training_data import load_openai_messages_sft_jsonl, load_sft_jsonl
+
+
+def test_visual_scan_trace_entry_is_not_bound_to_controller_call() -> None:
+    records = [
+        StageCallRecord(
+            component="controller",
+            call_index=0,
+            input={},
+            output={"action": "STOP"},
+        )
+    ]
+    trace = ActionTrace(
+        reading_session_id="session:1",
+        root_question_id="Root",
+        entries=[
+            ActionTraceEntry(
+                step_index=0,
+                action_id="action:auto",
+                question_id="Root",
+                action_name="VISUAL_SCAN",
+                execution_status=ActionExecutionStatus.SUCCEEDED,
+            ),
+            ActionTraceEntry(
+                step_index=1,
+                action_id="action:controller",
+                question_id="Root",
+                action_name="STOP",
+                execution_status=ActionExecutionStatus.SUCCEEDED,
+            ),
+        ],
+    )
+
+    _bind_controller_action_ids(records, trace)
+
+    assert records[0].action_id == "action:controller"
 
 
 class FixedPlanner:

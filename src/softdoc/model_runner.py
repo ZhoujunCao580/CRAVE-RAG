@@ -646,12 +646,13 @@ def load_model_pipeline_run(input_dir: Path) -> ModelPipelineRun:
 def _bind_controller_action_ids(
     records: list[StageCallRecord], action_trace: ActionTrace
 ) -> None:
-    """Bind model decisions to executed actions, excluding automatic Exact reads."""
+    """Bind model decisions to actions, excluding Environment-owned actions."""
 
     controller_records = [item for item in records if item.component == "controller"]
     automatic_action_names = {
         "COUNT_INVENTORY",
         "INSPECT_COVERAGE_BATCH",
+        "VISUAL_SCAN",
     }
     controller_entries = [
         item
