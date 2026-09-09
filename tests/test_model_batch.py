@@ -52,6 +52,7 @@ def _args(tmp_path: Path) -> argparse.Namespace:
         execution_mode="subprocess",
         workers=1,
         planner_max_tokens=768,
+        disable_planner_thinking=False,
         controller_max_tokens=512,
         reader_max_tokens=1536,
         checker_max_tokens=1536,

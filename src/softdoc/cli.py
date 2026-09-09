@@ -142,6 +142,11 @@ def build_parser() -> argparse.ArgumentParser:
     run_model.add_argument("--context-length", type=int, default=8192)
     run_model.add_argument("--action-budget", type=int, default=7)
     run_model.add_argument("--planner-max-tokens", type=int, default=768)
+    run_model.add_argument(
+        "--disable-planner-thinking",
+        action="store_true",
+        help="Disable Qwen thinking only for the Planner in vLLM mode.",
+    )
     run_model.add_argument("--controller-max-tokens", type=int, default=512)
     run_model.add_argument("--reader-max-tokens", type=int, default=1536)
     run_model.add_argument(
@@ -388,7 +393,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
 
             planner = InitialPlanner(
-                VLLMPlannerBackend(vllm_config(args.planner_max_tokens)),
+                VLLMPlannerBackend(
+                    vllm_config(
+                        args.planner_max_tokens,
+                        enable_thinking=(
+                            False if args.disable_planner_thinking else None
+                        ),
+                    )
+                ),
                 PlannerConfig(fallback_to_root_on_limit=True),
             )
             controller = VLLMControllerBackend(vllm_config(args.controller_max_tokens))

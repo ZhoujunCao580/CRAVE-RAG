@@ -342,6 +342,8 @@ def build_case_command(case: dict[str, Any], args: argparse.Namespace, output: P
     ]
     if getattr(args, "disable_answerer_thinking", False):
         command.append("--disable-answerer-thinking")
+    if getattr(args, "disable_planner_thinking", False):
+        command.append("--disable-planner-thinking")
     if case.get("question_id"):
         command.extend(["--question-id", case["question_id"]])
     if args.dense:
@@ -789,7 +791,14 @@ class _PersistentRuntime:
                 enable_thinking=enable_thinking,
             )
 
-        planner_config = config(self.args.planner_max_tokens)
+        planner_config = config(
+            self.args.planner_max_tokens,
+            enable_thinking=(
+                False
+                if getattr(self.args, "disable_planner_thinking", False)
+                else None
+            ),
+        )
         controller_config = config(self.args.controller_max_tokens)
         reader_client = OpenAICompatibleStructuredClient(
             config(self.args.reader_max_tokens)
@@ -928,6 +937,9 @@ def _run_persistent_batch_unlocked(
             },
             "disable_answerer_thinking": getattr(
                 args, "disable_answerer_thinking", False
+            ),
+            "disable_planner_thinking": getattr(
+                args, "disable_planner_thinking", False
             ),
         },
         "cases": [],
@@ -1149,6 +1161,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--workers", type=int, choices=(1, 2, 4), default=1)
     parser.add_argument("--planner-max-tokens", type=int, default=768)
+    parser.add_argument(
+        "--disable-planner-thinking",
+        action="store_true",
+        help=(
+            "Send chat_template_kwargs.enable_thinking=false only for the "
+            "Planner. Other components keep their configured behavior."
+        ),
+    )
     parser.add_argument("--controller-max-tokens", type=int, default=512)
     parser.add_argument("--reader-max-tokens", type=int, default=1536)
     parser.add_argument("--checker-max-tokens", type=int, default=1536)
