@@ -35,6 +35,9 @@ class OpenAICompatibleConfig(SoftDocModel):
     temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     seed: int = 42
     max_tokens: int = Field(default=2048, ge=1)
+    # ``None`` preserves the model/server default.  A component may opt out of
+    # Qwen's thinking mode without changing the other model roles.
+    enable_thinking: bool | None = None
 
     @field_validator("model", "api_key")
     @classmethod
@@ -127,6 +130,10 @@ class OpenAICompatibleStructuredClient:
             "stream": False,
             "response_format": {"type": "json_schema", "json_schema": {"name": component, "schema": output_model.model_json_schema() if hasattr(output_model, "model_json_schema") else output_model.json_schema(), "strict": True}},
         }
+        if self.config.enable_thinking is not None:
+            payload["chat_template_kwargs"] = {
+                "enable_thinking": self.config.enable_thinking
+            }
         response = self.transport.post_json(f"{self.config.base_url}/chat/completions", payload, self.config.timeout_seconds)
         self.last_response = response
         choices = response.get("choices")
@@ -141,3 +148,23 @@ class OpenAICompatibleStructuredClient:
             return output_model.model_validate_json(content) if hasattr(output_model, "model_validate_json") else output_model.validate_json(content)
         except ValidationError as exc:
             raise OpenAICompatibleError(f"OpenAI-compatible server returned invalid {component} JSON: {exc}", raw_content=content) from exc
+
+    def generation_metadata(self) -> dict[str, Any]:
+        """Return compact transport diagnostics for the latest generation."""
+
+        response = self.last_response or {}
+        choices = response.get("choices")
+        choice = choices[0] if isinstance(choices, list) and choices else {}
+        metadata: dict[str, Any] = {
+            "raw_content": self.last_raw_content,
+            "finish_reason": (
+                choice.get("finish_reason") if isinstance(choice, dict) else None
+            ),
+        }
+        usage = response.get("usage")
+        if isinstance(usage, dict):
+            metadata["usage"] = dict(usage)
+        for key in ("id", "model", "created"):
+            if key in response:
+                metadata[f"response_{key}"] = response[key]
+        return {key: value for key, value in metadata.items() if value is not None}

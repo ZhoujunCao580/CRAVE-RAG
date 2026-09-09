@@ -234,7 +234,7 @@ failed reads. The canonical stored form for this example is:
 
 ### Multimodal Table Reader
 
-The optional `multimodal-table-reader-v0.3` backend receives every available
+The optional `multimodal-table-reader-v0.4` backend receives every available
 representation of each selected canonical Table: structured cells or
 parser-extracted text, the original table crop when available, deterministic
 page metadata, and conservative header/fragment context. The Controller's

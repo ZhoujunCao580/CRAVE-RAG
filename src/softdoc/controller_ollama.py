@@ -328,6 +328,8 @@ class VLLMControllerBackend:
                     "base_url": self._config.base_url,
                     "validation_attempts": attempt,
                 }
+                if hasattr(self._client, "generation_metadata"):
+                    metadata.update(self._client.generation_metadata())
                 if rejected_attempts:
                     metadata["rejected_attempts"] = rejected_attempts
                 generation = ControllerGeneration(

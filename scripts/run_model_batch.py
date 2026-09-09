@@ -340,6 +340,8 @@ def build_case_command(case: dict[str, Any], args: argparse.Namespace, output: P
         "--run-key",
         case.get("run_key") or f"{args.run_key_prefix}-{case['case_id']}",
     ]
+    if getattr(args, "disable_answerer_thinking", False):
+        command.append("--disable-answerer-thinking")
     if case.get("question_id"):
         command.extend(["--question-id", case["question_id"]])
     if args.dense:
@@ -775,12 +777,15 @@ class _PersistentRuntime:
         if self.args.inference_backend != "vllm":
             raise ValueError("Persistent mode currently requires --inference-backend vllm")
 
-        def config(max_tokens: int) -> OpenAICompatibleConfig:
+        def config(
+            max_tokens: int, *, enable_thinking: bool | None = None
+        ) -> OpenAICompatibleConfig:
             return OpenAICompatibleConfig(
                 model=self.args.text_model,
                 base_url=self.args.base_url,
                 timeout_seconds=self.args.timeout,
                 max_tokens=max_tokens,
+                enable_thinking=enable_thinking,
             )
 
         planner_config = config(self.args.planner_max_tokens)
@@ -792,7 +797,14 @@ class _PersistentRuntime:
             config(self.args.checker_max_tokens)
         )
         answerer_client = OpenAICompatibleStructuredClient(
-            config(self.args.answerer_max_tokens)
+            config(
+                self.args.answerer_max_tokens,
+                enable_thinking=(
+                    False
+                    if getattr(self.args, "disable_answerer_thinking", False)
+                    else None
+                ),
+            )
         )
         return ModelBackedRunner(
             planner=InitialPlanner(
@@ -912,6 +924,9 @@ def _run_persistent_batch_unlocked(
                 "checker": args.checker_max_tokens,
                 "answerer": args.answerer_max_tokens,
             },
+            "disable_answerer_thinking": getattr(
+                args, "disable_answerer_thinking", False
+            ),
         },
         "cases": [],
     }
@@ -1136,6 +1151,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reader-max-tokens", type=int, default=1536)
     parser.add_argument("--checker-max-tokens", type=int, default=1536)
     parser.add_argument("--answerer-max-tokens", type=int, default=768)
+    parser.add_argument(
+        "--disable-answerer-thinking",
+        action="store_true",
+        help=(
+            "Send chat_template_kwargs.enable_thinking=false only for the "
+            "Answerer. Planner, Controller, Reader and Checker keep the model "
+            "default."
+        ),
+    )
     parser.add_argument("--dense", action="store_true")
     parser.add_argument("--dense-model", default="intfloat/multilingual-e5-small")
     parser.add_argument("--dense-model-path", type=Path)

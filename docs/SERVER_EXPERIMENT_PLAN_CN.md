@@ -42,7 +42,7 @@ Preview 的候选读取/生成简述。简述仅替换本批次的 Controller `C
 
 状态：代码与 Prompt 已修改，缺真实模型复测。
 
-- 使用 `multimodal-table-reader-v0.3` 和 Q658 保存的真实 Table Reader 输入。
+- 使用 `multimodal-table-reader-v0.4` 和 Q658 保存的真实 Table Reader 输入。
 - 一次输出必须同时包含 limitation 的 `code`、`description`、`input_ids` 和非空
   `relevant_visible_content`。
 - 输出必须通过 validator，并能进入 Controller feedback；不得静默重读或消耗新的 Controller action。

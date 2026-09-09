@@ -56,6 +56,7 @@ def _args(tmp_path: Path) -> argparse.Namespace:
         reader_max_tokens=1536,
         checker_max_tokens=1536,
         answerer_max_tokens=768,
+        disable_answerer_thinking=False,
         dense=False,
         dense_model="dense-model",
         dense_model_path=None,

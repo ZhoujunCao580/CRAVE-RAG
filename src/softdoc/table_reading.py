@@ -15,7 +15,7 @@ from softdoc.prompts import load_prompt_text
 
 InputId = Annotated[str, Field(min_length=1, pattern=r"^I[1-9][0-9]*$")]
 
-MULTIMODAL_TABLE_READER_PROMPT_VERSION = "multimodal-table-reader-v0.3"
+MULTIMODAL_TABLE_READER_PROMPT_VERSION = "multimodal-table-reader-v0.4"
 
 
 class TableHeaderStatus(StrEnum):
@@ -242,7 +242,10 @@ class TableLimitation(BaseModel):
 class TableReadResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    observations: list[TableObservation] = Field(max_length=16)
+    # One READ action addresses one local problem.  A small bound prevents a
+    # wide table from turning every matching cell/row into a separate claim and
+    # then forcing the Checker to repeat a long per-observation assessment.
+    observations: list[TableObservation] = Field(max_length=4)
     limitations: list[TableLimitation]
 
     @model_validator(mode="after")
@@ -289,7 +292,7 @@ def validate_table_read_result(
 
 
 MULTIMODAL_TABLE_READER_SYSTEM_PROMPT = load_prompt_text(
-    "multimodal_table_reader_v0_2_system.txt"
+    "multimodal_table_reader_v0_3_system.txt"
 )
 MULTIMODAL_TABLE_READER_USER_PROMPT_TEMPLATE = load_prompt_text(
     "multimodal_table_reader_v0_3_user.txt"

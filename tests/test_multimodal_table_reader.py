@@ -5,6 +5,7 @@ from typing import Any
 
 from PIL import Image
 import pytest
+from pydantic import ValidationError
 
 from softdoc.controller import ControllerCandidatePreview
 from softdoc.model_backends import (
@@ -220,6 +221,25 @@ def _reader(client: FakeStructuredClient) -> ModelBackedReader:
         OllamaVisualReaderBackend(client),
         table_reader=MultimodalTableReaderBackend(client),
     )
+
+
+def test_table_reader_schema_bounds_compact_observations() -> None:
+    schema = TableReadResult.model_json_schema()
+
+    assert schema["properties"]["observations"]["maxItems"] == 4
+    with pytest.raises(ValidationError, match="at most 4 items"):
+        TableReadResult.model_validate(
+            {
+                "observations": [
+                    {
+                        "text": f"fact {index}",
+                        "sources": [{"input_id": "I1", "cell_id": None}],
+                    }
+                    for index in range(5)
+                ],
+                "limitations": [],
+            }
+        )
 
 
 def test_html_and_image_table_uses_multimodal_reader(tmp_path: Path) -> None:

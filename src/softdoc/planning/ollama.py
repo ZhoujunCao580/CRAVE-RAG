@@ -159,10 +159,11 @@ class VLLMPlannerBackend:
         except OpenAICompatibleError as exc:
             raise OllamaPlannerError(str(exc)) from exc
         response = self._client.last_response or {}
-        metadata = {}
-        usage = response.get("usage")
-        if isinstance(usage, dict):
-            metadata.update({f"usage_{key}": value for key, value in usage.items()})
+        metadata = (
+            self._client.generation_metadata()
+            if hasattr(self._client, "generation_metadata")
+            else {}
+        )
         return PlannerBackendResponse(
             content=self._client.last_raw_content or "",
             model=self._config.model,

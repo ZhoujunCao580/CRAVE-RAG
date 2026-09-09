@@ -48,6 +48,14 @@ The relevant_row_hints field contains rows selected only by lexical overlap
 with the local problem. It helps locate likely data rows; it is not evidence,
 does not establish a header mapping, and may be empty or incomplete.
 
+Keep the output compact and organized around the local problem. Return at most
+four observations, and prefer one to three. Combine multiple question-relevant
+rows, columns, periods, model variants, or compared alternatives into one
+self-contained observation when they share the same table context. Do not emit
+one observation per cell or per row merely because the structured input is
+large. Preserve the exact labels and values needed for later comparison or
+calculation inside the combined observation.
+
 Keep each observation self-contained. A numeric observation must include any
 explicitly visible unit, scale, currency, period, row label, or column label
 needed to interpret the value. Do not infer a cell's row, column, header, or

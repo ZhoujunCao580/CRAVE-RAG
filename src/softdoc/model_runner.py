@@ -89,6 +89,39 @@ class ModelPipelineRun(SoftDocModel):
         return self
 
 
+def _generation_metadata(backend: Any) -> dict[str, Any]:
+    """Collect compact OpenAI-compatible diagnostics from a model adapter."""
+
+    clients: list[Any] = []
+    direct = getattr(backend, "client", None)
+    if direct is not None:
+        clients.append(direct)
+    for adapter_name in ("visual_reader", "table_reader"):
+        adapter = getattr(backend, adapter_name, None)
+        client = getattr(adapter, "client", None)
+        if client is not None and all(client is not item for item in clients):
+            clients.append(client)
+    generations = [
+        client.generation_metadata()
+        for client in clients
+        if hasattr(client, "generation_metadata")
+        and client.last_response is not None
+    ]
+    if not generations:
+        return {}
+    if len(generations) == 1:
+        return generations[0]
+    return {"generations": generations}
+
+
+def _call_metadata(backend: Any) -> dict[str, Any]:
+    metadata = _generation_metadata(backend)
+    rejected_attempts = getattr(backend, "last_rejected_attempts", [])
+    if rejected_attempts:
+        metadata["rejected_attempts"] = list(rejected_attempts)
+    return metadata
+
+
 class _RecordingController:
     def __init__(self, backend: ControllerBackend, records: list[StageCallRecord]) -> None:
         self.backend = backend
@@ -152,6 +185,7 @@ class _RecordingReader:
                     succeeded=False,
                     action_id=context.action_id,
                     elapsed_seconds=time.perf_counter() - started,
+                    metadata=_call_metadata(self.backend),
                 )
             )
             raise
@@ -163,6 +197,7 @@ class _RecordingReader:
                 output=output.model_dump(mode="json"),
                 action_id=context.action_id,
                 elapsed_seconds=time.perf_counter() - started,
+                metadata=_call_metadata(self.backend),
             )
         )
         return output
@@ -183,9 +218,6 @@ class _RecordingChecker:
             started = time.perf_counter()
             output = self.backend.check(checker_input)
         except Exception as exc:
-            rejected_attempts = getattr(
-                self.backend, "last_rejected_attempts", []
-            )
             self.records.append(
                 StageCallRecord(
                     component="checker",
@@ -195,15 +227,10 @@ class _RecordingChecker:
                     succeeded=False,
                     action_id=checker_input.action_id,
                     elapsed_seconds=time.perf_counter() - started,
-                    metadata=(
-                        {"rejected_attempts": list(rejected_attempts)}
-                        if rejected_attempts
-                        else {}
-                    ),
+                    metadata=_call_metadata(self.backend),
                 )
             )
             raise
-        rejected_attempts = getattr(self.backend, "last_rejected_attempts", [])
         self.records.append(
             StageCallRecord(
                 component="checker",
@@ -212,11 +239,7 @@ class _RecordingChecker:
                 output=output.model_dump(mode="json"),
                 action_id=checker_input.action_id,
                 elapsed_seconds=time.perf_counter() - started,
-                metadata=(
-                    {"rejected_attempts": list(rejected_attempts)}
-                    if rejected_attempts
-                    else {}
-                ),
+                metadata=_call_metadata(self.backend),
             )
         )
         return output
@@ -286,9 +309,6 @@ class _RecordingAnswerer:
             started = time.perf_counter()
             output = self.backend.answer(answer_input)
         except Exception as exc:
-            rejected_attempts = getattr(
-                self.backend, "last_rejected_attempts", []
-            )
             self.records.append(
                 StageCallRecord(
                     component="answerer",
@@ -297,15 +317,10 @@ class _RecordingAnswerer:
                     output={"error_type": type(exc).__name__, "error": str(exc)},
                     succeeded=False,
                     elapsed_seconds=time.perf_counter() - started,
-                    metadata=(
-                        {"rejected_attempts": list(rejected_attempts)}
-                        if rejected_attempts
-                        else {}
-                    ),
+                    metadata=_call_metadata(self.backend),
                 )
             )
             raise
-        rejected_attempts = getattr(self.backend, "last_rejected_attempts", [])
         self.records.append(
             StageCallRecord(
                 component="answerer",
@@ -313,11 +328,7 @@ class _RecordingAnswerer:
                 input=input_payload,
                 output=output.model_dump(mode="json"),
                 elapsed_seconds=time.perf_counter() - started,
-                metadata=(
-                    {"rejected_attempts": list(rejected_attempts)}
-                    if rejected_attempts
-                    else {}
-                ),
+                metadata=_call_metadata(self.backend),
             )
         )
         return output

@@ -68,7 +68,7 @@ def test_registry_text_comes_from_central_versioned_prompt_assets() -> None:
     )
     table_reader = get_prompt("multimodal_table_reader")
     assert table_reader.canonical_text == (
-        load_prompt_text("multimodal_table_reader_v0_2_system.txt")
+        load_prompt_text("multimodal_table_reader_v0_3_system.txt")
         + "\n# User message template\n\n"
         + load_prompt_text("multimodal_table_reader_v0_3_user.txt")
     )
@@ -97,7 +97,7 @@ def test_prompt_directory_contains_only_current_assets() -> None:
         "checker_v2_4.txt",
         "controller_policy_v0_13.txt",
         "answerer_v0_8.txt",
-        "multimodal_table_reader_v0_2_system.txt",
+        "multimodal_table_reader_v0_3_system.txt",
         "multimodal_table_reader_v0_3_user.txt",
         "coverage_checker_v0_1.txt",
         "visual_scan_v0_1.txt",

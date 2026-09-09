@@ -155,6 +155,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_model.add_argument("--checker-max-tokens", type=int, default=1536)
     run_model.add_argument("--answerer-max-tokens", type=int, default=768)
+    run_model.add_argument(
+        "--disable-answerer-thinking",
+        action="store_true",
+        help="Disable Qwen thinking only for the Answerer in vLLM mode.",
+    )
     run_model.add_argument("--run-key", default="model-v0")
     run_model.add_argument(
         "--question-id",
@@ -370,12 +375,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         document = load_document(args.document_dir)
         common = {"base_url": args.base_url, "timeout_seconds": args.timeout}
         if args.inference_backend == "vllm":
-            def vllm_config(max_tokens: int) -> OpenAICompatibleConfig:
+            def vllm_config(
+                max_tokens: int, *, enable_thinking: bool | None = None
+            ) -> OpenAICompatibleConfig:
                 return OpenAICompatibleConfig(
                     model=args.text_model,
                     base_url=args.base_url,
                     timeout_seconds=args.timeout,
                     max_tokens=max_tokens,
+                    enable_thinking=enable_thinking,
                 )
 
             planner = InitialPlanner(
@@ -385,7 +393,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             controller = VLLMControllerBackend(vllm_config(args.controller_max_tokens))
             text_client = OpenAICompatibleStructuredClient(vllm_config(args.checker_max_tokens))
             visual_client = OpenAICompatibleStructuredClient(vllm_config(args.reader_max_tokens))
-            answerer_client = OpenAICompatibleStructuredClient(vllm_config(args.answerer_max_tokens))
+            answerer_client = OpenAICompatibleStructuredClient(
+                vllm_config(
+                    args.answerer_max_tokens,
+                    enable_thinking=(
+                        False if args.disable_answerer_thinking else None
+                    ),
+                )
+            )
         else:
             planner = InitialPlanner(
                 OllamaPlannerBackend(OllamaPlannerConfig(model=args.text_model, **common)),
