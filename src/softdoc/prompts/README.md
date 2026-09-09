@@ -11,7 +11,7 @@ data can bind to an immutable revision.
 | Visual Reader | `visual-reader-v0.5` | `visual_reader_v0_5.txt` |
 | Evidence Checker | `checker-v2.4` | `checker_v2_4.txt` |
 | Legacy Coverage Checker (inactive) | `coverage-checker-v0.1` | `coverage_checker_v0_1.txt` |
-| Visual Scan | `visual-scan-v0.1` | `visual_scan_v0_1.txt` |
+| Visual Scan | `visual-scan-v0.2` | `visual_scan_v0_1.txt` |
 | Reading Controller | `controller-policy-v0.13` | `controller_policy_v0_13.txt` |
 | Answerer | `answerer-v0.8` | `answerer_v0_8.txt` |
 | Multimodal Table Reader | `multimodal-table-reader-v0.5` | `multimodal_table_reader_v0_3_system.txt`, `multimodal_table_reader_v0_3_user.txt` |

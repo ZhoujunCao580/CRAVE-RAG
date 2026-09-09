@@ -1474,7 +1474,10 @@ class ReadingEnvironment:
             )
             return observations, memory, trace, False
 
-        limitations = [item for result in batch_results for item in result.limitations]
+        assessments = [
+            item for result in batch_results for item in result.assessments
+        ]
+        limitations = [item for item in assessments if item.match_count is None]
         section_complete = (
             not isinstance(requirement.scope, SectionVisualScanScope)
             or section_ended
@@ -1482,11 +1485,11 @@ class ReadingEnvironment:
         )
         scope_complete = not limitations and section_complete
         total = (
-            sum(result.partial_count or 0 for result in batch_results)
+            sum(item.match_count or 0 for item in assessments)
             if scope_complete
             else None
         )
-        items = [item for result in batch_results for item in result.items]
+        items = [item for item in assessments if (item.match_count or 0) > 0]
         input_pairs = resolved[:scanned_count]
         read_inputs = [
             ReadInput(
@@ -1528,7 +1531,7 @@ class ReadingEnvironment:
         step = len(trace.entries)
         current_action_id = make_action_id(trace.reading_session_id, step)
         finding_text = "; ".join(
-            f"{item.input_id}: {item.description} (count={item.count})"
+            f"{item.input_id}: {item.description} (count={item.match_count})"
             for item in items
         )
         if scope_complete:
@@ -1538,7 +1541,7 @@ class ReadingEnvironment:
                 f"a total count of {total}."
             )
         else:
-            reliable_count = sum(item.count for item in items)
+            reliable_count = sum(item.match_count or 0 for item in assessments)
             observation_text = (
                 f"A question-directed visual scan inspected {scanned_count} page "
                 f"image(s) and found {reliable_count} reliable partial match(es), "

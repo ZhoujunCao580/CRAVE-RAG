@@ -12,8 +12,7 @@ from softdoc.visual_scan import (
     VisualScanAggregateResult,
     VisualScanBatchInput,
     VisualScanBatchResult,
-    VisualScanItem,
-    VisualScanLimitation,
+    VisualScanAssessment,
     VisualScanScopeKind,
     validate_visual_scan_batch_result,
 )
@@ -133,38 +132,46 @@ def test_twenty_page_scan_uses_global_ids_across_four_batches() -> None:
     assert len({item for batch in batches for item in batch}) == 20
 
 
-def test_resolved_batch_derives_exact_partial_count() -> None:
+def test_resolved_batch_keeps_one_assessment_per_input() -> None:
     result = VisualScanBatchResult(
         batch_index=1,
-        items=[
-            VisualScanItem(input_id="I002", description="One table.", count=1),
-            VisualScanItem(input_id="I004", description="Two tables.", count=2),
+        assessments=[
+            VisualScanAssessment(
+                input_id="I002", description="One table.", match_count=1
+            ),
+            VisualScanAssessment(
+                input_id="I004", description="Two tables.", match_count=2
+            ),
         ],
-        partial_count=3,
     )
-    assert result.partial_count == 3
+    assert [item.match_count for item in result.assessments] == [1, 2]
 
-    corrected = VisualScanBatchResult(
-        batch_index=1,
-        items=[VisualScanItem(input_id="I002", description="One table.", count=1)],
-        partial_count=2,
-    )
-    assert corrected.partial_count == 1
+    with pytest.raises(ValidationError, match="must be unique"):
+        VisualScanBatchResult(
+            batch_index=1,
+            assessments=[
+                VisualScanAssessment(
+                    input_id="I002", description="One table.", match_count=1
+                ),
+                VisualScanAssessment(
+                    input_id="I002", description="No table.", match_count=0
+                ),
+            ],
+        )
 
 
-def test_unreadable_page_forces_unknown_partial_count() -> None:
+def test_unreadable_page_uses_null_match_count() -> None:
     result = VisualScanBatchResult(
         batch_index=1,
-        items=[],
-        partial_count=0,
-        limitations=[
-            VisualScanLimitation(
+        assessments=[
+            VisualScanAssessment(
                 input_id="I007",
                 description="The page is too blurred to assess.",
+                match_count=None,
             )
         ],
     )
-    assert result.partial_count is None
+    assert result.assessments[0].match_count is None
 
 
 def test_batch_result_cannot_reference_invisible_input_id() -> None:
@@ -178,11 +185,36 @@ def test_batch_result_cannot_reference_invisible_input_id() -> None:
     )
     result = VisualScanBatchResult(
         batch_index=1,
-        items=[VisualScanItem(input_id="I999", description="One figure.", count=1)],
-        partial_count=1,
+        assessments=[
+            VisualScanAssessment(
+                input_id="I999", description="One figure.", match_count=1
+            )
+        ],
     )
 
     with pytest.raises(ValueError, match="not visible"):
+        validate_visual_scan_batch_result(scan_input, result)
+
+
+def test_batch_result_cannot_omit_visible_input_id() -> None:
+    scan_input = VisualScanBatchInput(
+        target_id="Root",
+        question="How many figures are shown?",
+        scope={"kind": "whole_document"},
+        batch_index=1,
+        batch_count=1,
+        input_ids=["I001", "I002"],
+    )
+    result = VisualScanBatchResult(
+        batch_index=1,
+        assessments=[
+            VisualScanAssessment(
+                input_id="I001", description="One figure.", match_count=1
+            )
+        ],
+    )
+
+    with pytest.raises(ValueError, match="omitted supplied"):
         validate_visual_scan_batch_result(scan_input, result)
 
 

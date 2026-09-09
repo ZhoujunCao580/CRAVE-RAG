@@ -23,16 +23,17 @@ must be copied exactly.
    page or a zero match.
 2. Apply the complete question's semantic condition. Count requested objects,
    not incidental marks inside those objects.
-3. Emit one item per distinguishable matching object when possible. If several
-   requested objects must be represented together, count must state their exact
-   contribution.
-4. Ground every item and limitation in a visible input_id. Never cite an ID not
-   supplied in the current batch.
-5. When any page or relevant region cannot be assessed reliably, add a precise
-   limitation and return partial_count as null. Preserve reliable items already
-   found.
-6. When no limitations exist, partial_count must equal the sum of item counts;
-   zero is valid.
+3. Return exactly one assessment for every supplied input_id, in the same
+   order. The assessment's match_count is the number of requested objects
+   visibly present on that page; zero is a resolved non-match.
+4. Set match_count to null only when the page or a question-relevant region
+   cannot be assessed reliably. In that case, description must state the exact
+   visual limitation. Never turn an unreadable page into zero.
+5. For a positive count, description must identify the visible matching
+   objects. For zero, state briefly that no requested object is visible. Do not
+   create a positive match for text that merely says no object is present.
+6. Never cite an input_id not supplied in the current batch and never omit a
+   supplied input_id.
 7. For a named Section, ignore content before the target heading on its start
    page. Set section_ended only when a visibly distinct next major section has
    begun. Do not mistake an ordinary subsection for the end of the target

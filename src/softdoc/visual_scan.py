@@ -12,7 +12,7 @@ from difflib import SequenceMatcher
 from enum import StrEnum
 import re
 import unicodedata
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import Field, field_validator, model_validator
 
@@ -134,58 +134,30 @@ class VisualScanBatchInput(SoftDocModel):
         return self
 
 
-class VisualScanItem(SoftDocModel):
+class VisualScanAssessment(SoftDocModel):
+    """One required decision for one supplied page image.
+
+    ``match_count=None`` means the page could not be assessed reliably.  Zero
+    is an explicit, resolved non-match and a positive value is the number of
+    requested objects visible on this page.
+    """
+
     input_id: str = Field(min_length=1)
     description: str = Field(min_length=1)
-    count: int = Field(ge=1)
-
-
-class VisualScanLimitation(SoftDocModel):
-    input_id: str = Field(min_length=1)
-    description: str = Field(min_length=1)
+    match_count: int | None = Field(default=None, ge=0)
 
 
 class VisualScanBatchResult(SoftDocModel):
     batch_index: int = Field(ge=1)
-    items: list[VisualScanItem] = Field(default_factory=list)
-    partial_count: int | None = Field(default=None, ge=0)
-    limitations: list[VisualScanLimitation] = Field(default_factory=list)
+    assessments: list[VisualScanAssessment] = Field(min_length=1)
     section_ended: bool = False
     end_heading_text: str | None = None
 
-    @model_validator(mode="before")
-    @classmethod
-    def derive_partial_count(cls, value: Any) -> Any:
-        """Derive the redundant aggregate from auditable item counts."""
-
-        if not isinstance(value, dict):
-            return value
-        normalized = dict(value)
-        limitations = normalized.get("limitations") or []
-        if limitations:
-            normalized["partial_count"] = None
-            return normalized
-        total = 0
-        for item in normalized.get("items") or []:
-            count = item.get("count") if isinstance(item, dict) else getattr(item, "count", None)
-            if isinstance(count, int) and not isinstance(count, bool):
-                total += count
-        normalized["partial_count"] = total
-        return normalized
-
     @model_validator(mode="after")
     def validate_result(self) -> Self:
-        if self.limitations:
-            if self.partial_count is not None:
-                raise ValueError(
-                    "partial_count must be null when any supplied page is unresolved"
-                )
-        else:
-            expected = sum(item.count for item in self.items)
-            if self.partial_count != expected:
-                raise ValueError(
-                    "partial_count must equal the sum of item counts when the batch is resolved"
-                )
+        input_ids = [item.input_id for item in self.assessments]
+        if len(input_ids) != len(set(input_ids)):
+            raise ValueError("Visual scan assessment input IDs must be unique")
         if self.section_ended != bool(self.end_heading_text):
             raise ValueError(
                 "section_ended and end_heading_text must be supplied together"
@@ -300,14 +272,17 @@ def validate_visual_scan_batch_result(
     if result.batch_index != batch_input.batch_index:
         raise ValueError("Visual scan result batch_index does not match its input")
     visible = set(batch_input.input_ids)
-    referenced = {item.input_id for item in result.items} | {
-        item.input_id for item in result.limitations
-    }
+    referenced = {item.input_id for item in result.assessments}
     hidden = sorted(referenced - visible)
     if hidden:
         raise ValueError(
             "Visual scan result references input IDs not visible in this batch: "
             + ", ".join(hidden)
+        )
+    missing = sorted(visible - referenced)
+    if missing:
+        raise ValueError(
+            "Visual scan result omitted supplied input IDs: " + ", ".join(missing)
         )
     return result
 

@@ -60,7 +60,7 @@ from softdoc.retrieval import SearchSessionConfig
 from softdoc.visual_scan import (
     VisualScanBatchInput,
     VisualScanBatchResult,
-    VisualScanItem,
+    VisualScanAssessment,
     VisualScanRequirement,
 )
 
@@ -241,21 +241,21 @@ class ScriptedVisualScanner:
     ) -> VisualScanBatchResult:
         self.inputs.append(scan_input)
         self.image_counts.append(len(image_paths))
-        items = (
-            [
-                VisualScanItem(
-                    input_id=scan_input.input_ids[0],
-                    description="One requested diagram is visible.",
-                    count=1,
-                )
-            ]
-            if scan_input.batch_index == 1
-            else []
-        )
+        assessments = [
+            VisualScanAssessment(
+                input_id=input_id,
+                description=(
+                    "One requested diagram is visible."
+                    if scan_input.batch_index == 1 and index == 0
+                    else "No requested diagram is visible."
+                ),
+                match_count=(1 if scan_input.batch_index == 1 and index == 0 else 0),
+            )
+            for index, input_id in enumerate(scan_input.input_ids)
+        ]
         return VisualScanBatchResult(
             batch_index=scan_input.batch_index,
-            items=items,
-            partial_count=sum(item.count for item in items),
+            assessments=assessments,
         )
 
 
