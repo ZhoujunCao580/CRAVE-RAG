@@ -35,9 +35,13 @@ this scan and must be copied exactly.
 6. Never cite an input_id not supplied in the current batch and never omit a
    supplied input_id.
 7. For a named Section, ignore content before the target heading on its start
-   page. Set section_ended only when a visibly distinct next major section has
-   begun. Do not mistake an ordinary subsection for the end of the target
-   section.
+   page. If any supplied page visibly starts a distinct next major section
+   after pages belonging to the target section, you MUST set section_ended to
+   true and copy that new heading into end_heading_text. Count only content
+   before that boundary; matching objects after the boundary, including later
+   pages in the same batch, are outside the requested Section and receive a
+   zero match_count. Do not mistake an ordinary numbered subsection within the
+   target Section for its end.
 8. Do not provide the final document-wide answer. This call reports only the
    current batch.
 

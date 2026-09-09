@@ -178,6 +178,13 @@ def test_visual_scan_prompt_maps_ordered_images_to_global_input_ids() -> None:
     assert "exactly one assessment for every supplied input_id" in prompt
 
 
+def test_visual_scan_prompt_requires_named_section_boundary_reporting() -> None:
+    prompt = " ".join(get_prompt("visual_scan").canonical_text.split())
+
+    assert "you MUST set section_ended to true" in prompt
+    assert "later pages in the same batch" in prompt
+
+
 def test_cli_exports_versioned_prompts(tmp_path, capsys) -> None:
     output = tmp_path / "prompts"
     assert main(["prompts", "export", "--output", str(output)]) == 0
