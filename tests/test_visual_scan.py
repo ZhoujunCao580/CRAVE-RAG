@@ -133,7 +133,7 @@ def test_twenty_page_scan_uses_global_ids_across_four_batches() -> None:
     assert len({item for batch in batches for item in batch}) == 20
 
 
-def test_resolved_batch_requires_exact_partial_count() -> None:
+def test_resolved_batch_derives_exact_partial_count() -> None:
     result = VisualScanBatchResult(
         batch_index=1,
         items=[
@@ -144,27 +144,27 @@ def test_resolved_batch_requires_exact_partial_count() -> None:
     )
     assert result.partial_count == 3
 
-    with pytest.raises(ValidationError, match="sum of item counts"):
-        VisualScanBatchResult(
-            batch_index=1,
-            items=[VisualScanItem(input_id="I002", description="One table.", count=1)],
-            partial_count=2,
-        )
+    corrected = VisualScanBatchResult(
+        batch_index=1,
+        items=[VisualScanItem(input_id="I002", description="One table.", count=1)],
+        partial_count=2,
+    )
+    assert corrected.partial_count == 1
 
 
-def test_unreadable_page_cannot_be_reported_as_zero() -> None:
-    with pytest.raises(ValidationError, match="must be null"):
-        VisualScanBatchResult(
-            batch_index=1,
-            items=[],
-            partial_count=0,
-            limitations=[
-                VisualScanLimitation(
-                    input_id="I007",
-                    description="The page is too blurred to assess.",
-                )
-            ],
-        )
+def test_unreadable_page_forces_unknown_partial_count() -> None:
+    result = VisualScanBatchResult(
+        batch_index=1,
+        items=[],
+        partial_count=0,
+        limitations=[
+            VisualScanLimitation(
+                input_id="I007",
+                description="The page is too blurred to assess.",
+            )
+        ],
+    )
+    assert result.partial_count is None
 
 
 def test_batch_result_cannot_reference_invisible_input_id() -> None:

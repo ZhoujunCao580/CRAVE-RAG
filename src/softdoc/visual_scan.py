@@ -12,7 +12,7 @@ from difflib import SequenceMatcher
 from enum import StrEnum
 import re
 import unicodedata
-from typing import Annotated, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import Field, field_validator, model_validator
 
@@ -152,6 +152,26 @@ class VisualScanBatchResult(SoftDocModel):
     limitations: list[VisualScanLimitation] = Field(default_factory=list)
     section_ended: bool = False
     end_heading_text: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def derive_partial_count(cls, value: Any) -> Any:
+        """Derive the redundant aggregate from auditable item counts."""
+
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+        limitations = normalized.get("limitations") or []
+        if limitations:
+            normalized["partial_count"] = None
+            return normalized
+        total = 0
+        for item in normalized.get("items") or []:
+            count = item.get("count") if isinstance(item, dict) else getattr(item, "count", None)
+            if isinstance(count, int) and not isinstance(count, bool):
+                total += count
+        normalized["partial_count"] = total
+        return normalized
 
     @model_validator(mode="after")
     def validate_result(self) -> Self:
