@@ -1,0 +1,246 @@
+"""Score persisted CRAVE-RAG answers with deterministic checks and an optional LLM judge.
+
+This is a diagnostic scorer rather than the official MMLongBench answer
+extractor.  Later output roots override earlier roots, which makes it possible
+to combine a frozen batch with narrowly scoped recovery runs without modifying
+the original artifacts.
+"""
+
+from __future__ import annotations
+
+import argparse
+import ast
+import concurrent.futures
+import json
+import re
+import urllib.request
+from collections import Counter
+from pathlib import Path
+from typing import Any
+
+
+NOT_ANSWERABLE = {
+    "not answerable",
+    "not_answerable",
+    "unanswerable",
+    "cannot be answered",
+}
+
+
+def _clean_text(value: Any) -> str:
+    text = "" if value is None else str(value)
+    text = text.strip().casefold()
+    text = re.sub(r"[\s\u00a0]+", " ", text)
+    return text.rstrip(". ")
+
+
+def _is_not_answerable(value: Any) -> bool:
+    return _clean_text(value) in NOT_ANSWERABLE
+
+
+def _parse_collection(value: Any) -> list[str] | None:
+    if isinstance(value, (list, tuple)):
+        parsed = list(value)
+    else:
+        text = str(value).strip()
+        if not (text.startswith("[") and text.endswith("]")):
+            return None
+        try:
+            parsed = ast.literal_eval(text)
+        except (SyntaxError, ValueError):
+            return None
+        if not isinstance(parsed, (list, tuple)):
+            return None
+    return sorted(_clean_text(item) for item in parsed)
+
+
+def _deterministic_score(gold: Any, prediction: Any) -> tuple[bool | None, str]:
+    gold_na = _is_not_answerable(gold)
+    pred_na = _is_not_answerable(prediction)
+    if gold_na or pred_na:
+        return gold_na and pred_na, "not_answerable_exact"
+    if _clean_text(gold) == _clean_text(prediction):
+        return True, "normalized_exact"
+    gold_list = _parse_collection(gold)
+    pred_list = _parse_collection(prediction)
+    if gold_list is not None and pred_list is not None:
+        return gold_list == pred_list, "collection_equivalence"
+    return None, "requires_semantic_judge"
+
+
+def _post_json(url: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _judge_one(
+    row: dict[str, Any], *, base_url: str, model: str, timeout: float
+) -> tuple[bool, str, dict[str, Any]]:
+    system = (
+        "Judge whether a predicted answer is semantically equivalent to the gold answer. "
+        "Ignore harmless formatting, punctuation, capitalization, explanation, and list syntax. "
+        "Do not ignore wrong values, missing requested items, wrong units, wrong direction, or "
+        "unsupported extra claims. Return only the requested JSON object."
+    )
+    user = json.dumps(
+        {
+            "question": row["question"],
+            "gold_answer": row["gold_answer"],
+            "predicted_answer": row["prediction"],
+        },
+        ensure_ascii=False,
+    )
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "temperature": 0,
+        "max_tokens": 256,
+        "chat_template_kwargs": {"enable_thinking": False},
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "semantic_answer_judgment",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "correct": {"type": "boolean"},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["correct", "reason"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+    }
+    response = _post_json(
+        f"{base_url.rstrip('/')}/chat/completions", payload, timeout
+    )
+    content = response["choices"][0]["message"]["content"]
+    judgment = json.loads(content)
+    metadata = {
+        "finish_reason": response["choices"][0].get("finish_reason"),
+        "usage": response.get("usage"),
+    }
+    return bool(judgment["correct"]), str(judgment["reason"]), metadata
+
+
+def _read_cases(path: Path) -> list[dict[str, Any]]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def _read_predictions(roots: list[Path]) -> dict[str, dict[str, Any]]:
+    predictions: dict[str, dict[str, Any]] = {}
+    for root in roots:
+        for run_path in sorted(root.glob("Q*/reading_run.json")):
+            run = json.loads(run_path.read_text(encoding="utf-8"))
+            answer = run.get("answer") or {}
+            predictions[run_path.parent.name] = {
+                "prediction": answer.get("answer") if isinstance(answer, dict) else answer,
+                "reading_status": run.get("status"),
+                "run_path": str(run_path),
+            }
+    return predictions
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cases", type=Path, required=True)
+    parser.add_argument("--gold-parquet", type=Path, required=True)
+    parser.add_argument("--output-roots", type=Path, nargs="+", required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--base-url", default="http://127.0.0.1:8000/v1")
+    parser.add_argument("--model", default="/workspace/models/Qwen3.5-27B")
+    parser.add_argument("--workers", type=int, choices=(1, 2, 4), default=4)
+    parser.add_argument("--timeout", type=float, default=300)
+    args = parser.parse_args()
+
+    import pyarrow.parquet as pq
+
+    gold_rows = pq.read_table(args.gold_parquet).to_pylist()
+    predictions = _read_predictions(args.output_roots)
+    records: list[dict[str, Any]] = []
+    for case in _read_cases(args.cases):
+        case_id = case["case_id"]
+        index = int(case_id.removeprefix("Q"))
+        gold = gold_rows[index]
+        pred = predictions.get(case_id, {})
+        prediction = pred.get("prediction")
+        result, method = _deterministic_score(gold["answer"], prediction)
+        records.append(
+            {
+                "case_id": case_id,
+                "question": gold["question"],
+                "gold_answer": gold["answer"],
+                "answer_format": gold.get("answer_format"),
+                "prediction": prediction,
+                "reading_status": pred.get("reading_status", "program_failure"),
+                "run_path": pred.get("run_path"),
+                "correct": result,
+                "scoring_method": method,
+                "reason": None,
+                "judge_metadata": None,
+            }
+        )
+
+    pending = [row for row in records if row["correct"] is None]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as pool:
+        futures = {
+            pool.submit(
+                _judge_one,
+                row,
+                base_url=args.base_url,
+                model=args.model,
+                timeout=args.timeout,
+            ): row
+            for row in pending
+        }
+        for future in concurrent.futures.as_completed(futures):
+            row = futures[future]
+            try:
+                correct, reason, metadata = future.result()
+            except Exception as exc:  # preserve scorer failures for audit
+                row["correct"] = False
+                row["scoring_method"] = "judge_failure"
+                row["reason"] = f"{type(exc).__name__}: {exc}"
+            else:
+                row["correct"] = correct
+                row["scoring_method"] = "llm_semantic_judge"
+                row["reason"] = reason
+                row["judge_metadata"] = metadata
+
+    status_counts = Counter(row["reading_status"] for row in records)
+    method_counts = Counter(row["scoring_method"] for row in records)
+    correct = sum(bool(row["correct"]) for row in records)
+    ready = [row for row in records if row["reading_status"] == "ready"]
+    payload = {
+        "schema_version": "semantic-answer-diagnostic-v0.1",
+        "case_count": len(records),
+        "correct": correct,
+        "accuracy": correct / len(records) if records else None,
+        "ready_count": len(ready),
+        "ready_correct": sum(bool(row["correct"]) for row in ready),
+        "ready_accuracy": (
+            sum(bool(row["correct"]) for row in ready) / len(ready) if ready else None
+        ),
+        "status_counts": dict(status_counts),
+        "scoring_method_counts": dict(method_counts),
+        "records": sorted(records, key=lambda row: int(row["case_id"][1:])),
+    }
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps({key: value for key, value in payload.items() if key != "records"}, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
