@@ -27,8 +27,10 @@ from softdoc.reading_environment import (
     ReadingEnvironment,
     ReadingEnvironmentConfig,
     ReadingRunResult,
+    VisualScanBackend,
 )
 from softdoc.reading_state import ActionTrace, EvidenceCheckInput, EvidenceCheckResult
+from softdoc.visual_scan import VisualScanBatchInput, VisualScanBatchResult
 
 
 MODEL_PIPELINE_VERSION = "model-pipeline-v0.1"
@@ -203,6 +205,49 @@ class _RecordingReader:
         return output
 
 
+class _RecordingVisualScanner:
+    def __init__(
+        self, backend: VisualScanBackend, records: list[StageCallRecord]
+    ) -> None:
+        self.backend = backend
+        self.records = records
+
+    def scan(
+        self,
+        scan_input: VisualScanBatchInput,
+        image_paths: list[Path],
+    ) -> VisualScanBatchResult:
+        input_payload = scan_input.model_dump(mode="json")
+        input_payload["image_count"] = len(image_paths)
+        try:
+            started = time.perf_counter()
+            output = self.backend.scan(scan_input, image_paths)
+        except Exception as exc:
+            self.records.append(
+                StageCallRecord(
+                    component="visual_scan",
+                    call_index=_next_index(self.records, "visual_scan"),
+                    input=input_payload,
+                    output={"error_type": type(exc).__name__, "error": str(exc)},
+                    succeeded=False,
+                    elapsed_seconds=time.perf_counter() - started,
+                    metadata=_call_metadata(self.backend),
+                )
+            )
+            raise
+        self.records.append(
+            StageCallRecord(
+                component="visual_scan",
+                call_index=_next_index(self.records, "visual_scan"),
+                input=input_payload,
+                output=output.model_dump(mode="json"),
+                elapsed_seconds=time.perf_counter() - started,
+                metadata=_call_metadata(self.backend),
+            )
+        )
+        return output
+
+
 class _RecordingChecker:
     def __init__(
         self,
@@ -345,6 +390,7 @@ class ModelBackedRunner:
         reader: ReaderBackend,
         checker: EvidenceCheckerBackend,
         answerer: AnswererBackend,
+        visual_scanner: VisualScanBackend | None = None,
         environment_config: ReadingEnvironmentConfig | None = None,
     ) -> None:
         self.planner = planner
@@ -352,6 +398,7 @@ class ModelBackedRunner:
         self.reader = reader
         self.checker = checker
         self.answerer = answerer
+        self.visual_scanner = visual_scanner
         self.environment_config = environment_config or ReadingEnvironmentConfig()
 
     def run(
@@ -386,6 +433,11 @@ class ModelBackedRunner:
             reader=_RecordingReader(self.reader, records),
             checker=_RecordingChecker(self.checker, records),
             answerer=_RecordingAnswerer(self.answerer, records),
+            visual_scanner=(
+                _RecordingVisualScanner(self.visual_scanner, records)
+                if self.visual_scanner is not None
+                else None
+            ),
             search_service=search_service,
             config=self.environment_config,
         )
@@ -435,6 +487,7 @@ def write_model_pipeline_run(run: ModelPipelineRun, output_dir: Path) -> None:
         "reader",
         "checker",
         "coverage_checker",
+        "visual_scan",
         "answerer",
     ):
         _write_jsonl(

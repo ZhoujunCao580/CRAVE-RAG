@@ -765,6 +765,7 @@ class _PersistentRuntime:
             OllamaAnswererBackend,
             OllamaEvidenceCheckerBackend,
             OllamaVisualReaderBackend,
+            OllamaVisualScanBackend,
         )
         from softdoc.model_runner import ModelBackedRunner
         from softdoc.openai_compatible import (
@@ -822,6 +823,7 @@ class _PersistentRuntime:
             ),
             checker=OllamaEvidenceCheckerBackend(checker_client),
             answerer=OllamaAnswererBackend(answerer_client),
+            visual_scanner=OllamaVisualScanBackend(reader_client),
             environment_config=ReadingEnvironmentConfig(
                 action_budget=self.args.action_budget
             ),

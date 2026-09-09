@@ -26,6 +26,7 @@ from softdoc.model_backends import (
     OllamaModelConfig,
     OllamaStructuredClient,
     OllamaVisualReaderBackend,
+    OllamaVisualScanBackend,
 )
 from softdoc.model_runner import (
     ModelBackedRunner,
@@ -473,6 +474,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             reader=reader,
             checker=OllamaEvidenceCheckerBackend(text_client),
             answerer=OllamaAnswererBackend(answerer_client),
+            visual_scanner=OllamaVisualScanBackend(visual_client),
             environment_config=ReadingEnvironmentConfig(
                 action_budget=args.action_budget
             ),

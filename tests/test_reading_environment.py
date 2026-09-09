@@ -57,6 +57,12 @@ from softdoc.reading_state import (
     RootQuestion,
 )
 from softdoc.retrieval import SearchSessionConfig
+from softdoc.visual_scan import (
+    VisualScanBatchInput,
+    VisualScanBatchResult,
+    VisualScanItem,
+    VisualScanRequirement,
+)
 
 
 class QueueController:
@@ -222,6 +228,34 @@ class CoverageFigureReader:
                 )
                 for item in context.inputs
             ],
+        )
+
+
+class ScriptedVisualScanner:
+    def __init__(self) -> None:
+        self.inputs: list[VisualScanBatchInput] = []
+        self.image_counts: list[int] = []
+
+    def scan(
+        self, scan_input: VisualScanBatchInput, image_paths: list[Path]
+    ) -> VisualScanBatchResult:
+        self.inputs.append(scan_input)
+        self.image_counts.append(len(image_paths))
+        items = (
+            [
+                VisualScanItem(
+                    input_id=scan_input.input_ids[0],
+                    description="One requested diagram is visible.",
+                    count=1,
+                )
+            ]
+            if scan_input.batch_index == 1
+            else []
+        )
+        return VisualScanBatchResult(
+            batch_index=scan_input.batch_index,
+            items=items,
+            partial_count=sum(item.count for item in items),
         )
 
 
@@ -643,6 +677,77 @@ def _relation(
         confidence=0.9,
         status=status,
         created_by=RelationSource.DETERMINISTIC_RULE,
+    )
+
+
+def test_visual_scan_runs_in_fixed_page_batches_without_controller_budget(
+    tmp_path: Path,
+) -> None:
+    document = _document(tmp_path, page_element_specs=[[], [], []])
+    scanner = ScriptedVisualScanner()
+    result = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=RejectingController(),
+        reader=DeterministicContentReader(),
+        checker=PredicateChecker(lambda text: "total count of 1" in text),
+        answerer=EvidenceAnswerer(),
+        visual_scanner=scanner,
+        config=ReadingEnvironmentConfig(action_budget=1, visual_scan_batch_size=2),
+    ).run(
+        root_question=RootQuestion(
+            question_id="root:visual-scan",
+            text="How many requested diagrams occur in the entire document?",
+        ),
+        visual_scan_requirements={
+            "root:visual-scan": VisualScanRequirement(
+                required=True,
+                scope={"kind": "whole_document"},
+            )
+        },
+    )
+
+    assert result.status == ReadingRunStatus.READY
+    assert scanner.image_counts == [2, 1]
+    assert [item.input_ids for item in scanner.inputs] == [["I1", "I2"], ["I3"]]
+    assert [item.action_name for item in result.action_trace.entries] == [
+        "VISUAL_SCAN"
+    ]
+    assert result.action_trace.entries[0].metadata["scope_complete"] is True
+    assert result.action_trace.entries[0].metadata["total"] == 1
+
+
+def test_unavailable_visual_scan_backend_falls_back_to_controller(
+    tmp_path: Path,
+) -> None:
+    document = _document(tmp_path, page_element_specs=[[]])
+    result = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=QueueController(
+            [{"action": "STOP", "reason": "No ordinary route remains."}]
+        ),
+        reader=DeterministicContentReader(),
+        checker=PredicateChecker(lambda _text: False),
+        answerer=EvidenceAnswerer(),
+    ).run(
+        root_question=RootQuestion(
+            question_id="root:scan-fallback",
+            text="How many diagrams occur?",
+        ),
+        visual_scan_requirements={
+            "root:scan-fallback": VisualScanRequirement(
+                required=True,
+                scope={"kind": "whole_document"},
+            )
+        },
+    )
+
+    assert result.status == ReadingRunStatus.STOPPED_INCOMPLETE
+    assert result.action_trace.entries[0].action_name == "STOP"
+    assert any(
+        item.code == "visual_scan_backend_unavailable"
+        for item in result.diagnostics
     )
 
 

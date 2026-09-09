@@ -1,214 +1,120 @@
 # CRAVE-RAG 下一轮服务器验证清单
 
-> 重写日期：2026-09-09
-> 本文是唯一有效的服务器实验文档。旧的阶段报告、未解决问题报告和服务器改动清单已经删除。
-> 历史轨迹、原始 JSON、日志、模型缓存、SoftDoc 与环境恢复说明不是实验计划，继续保留作为审计证据。
+> 冻结日期：2026-09-10  
+> 本文是下一轮唯一有效的服务器实验清单。所有正式输出使用新目录，历史结果不得覆盖。
 
-## 一、这轮实验的边界
+## 1. 本轮边界
 
-本轮只验证已经实现或已经明确需要验证的通用机制，不运行完整 baseline，不修改数据划分，不开始 SFT，
-也不为单题增加特例。每个实验使用独立输出目录，不覆盖历史轨迹。
+- 单模型保持 `Qwen3.5-27B`，通过 vLLM OpenAI-compatible 后端运行。
+- 正式检索仍是固定配额：每批 3 个文本候选 + 2 个视觉候选；视觉简述只在候选批次冻结后生成并缓存，不参与 BM25/Dense/visual dense 排名。
+- 旧 MinerU-inventory Coverage 与 Coverage Checker 保持断路。新计数路径只使用 Planner 的最小 `visual_scan`、Environment 的范围解析、全页 VLM 扫描和现有 Checker/Answerer。
+- 允许修复通用程序错误、Schema/ID/去重/截断记录和 Visual Scan 实现；不得为单题写 Gold 特例、改检索大纲、增加新 Agent、修改冻结题集或扩大模型资源。
+- 定向重跑写入 supplement 目录，不覆盖首次运行。报告必须区分首次结果与修复后结果。
 
-旧 MinerU-inventory Coverage 已从当前运行链路断开，不再继续阶段 4B/4C/4D 或原 T5 实验。
-Planner 不再输出 operator、source type、predicate 或 inventory；Environment 也不会调用旧 Coverage
-动作或 Coverage Checker。下一版改为 question-directed VLM 范围阅读，须在新契约冻结后另行验证。
+## 2. 冻结运行配置
 
-开始前只做必要预检：记录 Git commit、工作树状态、Python 环境、Prompt/Schema 版本、模型与缓存路径；
-确认 Qwen3.5-27B 的 vLLM 服务能接收结构化 JSON 和图片输入。已有完整测试若代码提交未变化，不重复执行。
+- Git commit：运行前记录。
+- 输入集：`configs/evaluation/next_round_unresolved_177_v0_1.jsonl`，恰好 177 题。
+- action budget：12；`VISUAL_SCAN`、同调用 repair、target-switch recheck 和 Observation Recall 均不消耗 Controller action。
+- 推理并发：先 1 题完成组件 smoke，再用 2 题并发；不得在未测峰值显存前升到 4。
+- Reader/Table Reader/视觉简述/Visual Scan 保留 thinking；只对 Answerer 做 Q327 的 thinking A/B，若关闭不损害控制题，则正式 177 使用 Answerer-only `enable_thinking=false`。
+- 每题保存 Planner、Controller、Reader/Table Reader、Visual Scan、Checker、Answerer 的原始输入输出，候选批次、动作轨迹、ObservationStore、Evidence delta、最终 EvidenceMemory、耗时、峰值显存、`finish_reason`、token usage 和同调用 repair。
 
-所有真实端到端 smoke 与 baseline（即使只有一道题）统一使用
-`scripts/run_model_batch.py --runtime-profile crave-baseline-v1 --execution-mode persistent`。
-该 Profile 会在首题前强制检查 vLLM、Dense、已完成的视觉索引、视觉简述缓存/按需生成和多模态 Table Reader，
-任何模块遗漏均直接失败，不允许静默退化。`softdoc run-model` 只用于低层组件调试，不作为完整架构结果入口。
+## 3. 阶段 A：环境和接口预检
 
-视觉简述的冻结边界：先由 BM25/Dense 与 visual dense 冻结当前 3 文本 + 2 视觉候选，再只为其中需要视觉
-Preview 的候选读取/生成简述。简述仅替换本批次的 Controller `CandidatePreview`，不得写入 SearchUnit，
-不得参与 BM25/Dense，也不得让已有缓存改变后续候选排名。
+1. 记录 Pod、GPU、Network Volume、仓库 commit/工作树、模型与缓存路径。
+2. 确认 `sentence_transformers` 来自 `/workspace/envs/visual-retrieval-packages`，`ninja` 和 vLLM 来自 `/opt/crave-venv`。
+3. 确认 Dense 缓存、ColSmol 全 Table 视觉索引和 visual descriptor cache 可读。
+4. 运行完整测试；当前本地基线为 `562 passed`。
+5. 用一条短 JSON 请求和一张真实图片验证 vLLM 的 JSON Schema 与多模态输入。
 
-## 二、已确认的概念边界
+## 4. 阶段 B：定向组件与真实模型验证
 
-### `gap` 与 `local_problem`
+### B1 — Q658：跨页 Table Reader limitation
 
-- `gap` 是 Checker 维护的持久缺口，跨 action 保留，Controller 每轮都能看到。
-- `local_problem` 是 Controller 在一次 `READ_SOURCE` 或关系读取动作中，针对已选来源临时写给 Reader 的阅读任务。
-- 当前系统本来就要求 Controller 根据最新 `gap` 生成 `local_problem`，不新增“自动复制”机制。
-- 不允许用 `local_problem` 覆盖 `gap`。一次局部阅读指令可能过窄或错误，不能反向替代 Checker 对全局证据缺口的判断。
-- `SEARCH new/next` 没有 `local_problem`。因此 gap 更新后若 Controller 一直执行旧 SearchSession 的
-  `SEARCH next`，新的 local problem 根本不会产生；Q1073 属于这个问题。
+- 使用 `multimodal-table-reader-v0.4`。
+- 缺可靠表头时，limitation 必须同时包含 `code`、`description`、`input_ids` 和非空 `relevant_visible_content`；其中保留与问题相关的可见行值。
+- Table Reader 一次最多 4 个 Observation，通常 1–3 个；相关行、时期或模型变体应合并，不得逐单元格复述整表。
+- 通过 validator 后 limitation 必须进入 Controller feedback，不重新 READ、不消耗额外 action。
 
-## 三、下一次服务器必须执行的验证
+### B2 — Q366：target-switch Evidence recheck 与 Recall
 
-### T1：Q658 跨页表缺表头 limitation
+- 切换 target 后，Checker 先基于完整 EvidenceMemory 做 state-only recheck。
+- `satisfied` 必须带真实、可见的 `reused_evidence_ids`；旧 Evidence 不足时返回 `incomplete` 和具体 gap。
+- 再以 Q375、Q611、Q838 检查 Observation Recall：只召回少量与新 target 相关的未接纳历史 Observation，不暴露完整 ObservationStore。
+- recheck/Recall/同调用 repair 不得新增 Controller action 或重新 READ。
 
-状态：代码与 Prompt 已修改，缺真实模型复测。
+### B3 — Q819：可见 ID 与 Relation 动作
 
-- 使用 `multimodal-table-reader-v0.4` 和 Q658 保存的真实 Table Reader 输入。
-- 一次输出必须同时包含 limitation 的 `code`、`description`、`input_ids` 和非空
-  `relevant_visible_content`。
-- 输出必须通过 validator，并能进入 Controller feedback；不得静默重读或消耗新的 Controller action。
-- 若找到兼容表头，联合重读后必须同时保留原片段的相关可见行与继承表头。
+- 保存 Controller 当轮真正可见的 candidate IDs、confirmed/candidate relation 和合法动作。
+- 当前批次可见来源可以 `READ_SOURCE`；仅通过 Relation 可达的另一端必须使用对应关系动作。
+- 不可见 ID 只在同一次 Controller 调用内受控 repair，不重新搜索、不消耗新 action。
 
-保存：原始输入输出、schema、finish reason、token usage、validator 结果。
+### B4 — JSON 截断与 thinking
 
-### T2：Q366 target-switch Evidence recheck
+- Q80：验证 Table Reader v0.4 的聚合规则是否避免读取整表后逐行输出导致的截断。
+- Q642：保留 Checker 对新/Recall Observation 的评估，因为拒绝理由会反馈给 Controller；验证 Reader 聚合后 Checker 输入输出是否已足够短。Checker 只输出本轮 delta，不复述未变化 Evidence。
+- Q327：Answerer thinking 开/关做 A/B；同时选至少 3 道已知普通文本/表格/视觉 READY 控制题。只有 Q327 截断改善且控制题语义答案不退化，才在 177 题中关闭 Answerer thinking。
+- Q468、Q364 只作旧问题的负向复现控制，不再写成已确认 Table Reader 截断。
+- 每次失败必须记录 `finish_reason`、prompt/completion tokens、token cap、raw output 和解析错误；不得猜补 JSON。
 
-状态：本地 repair 与状态机测试已通过，缺真实 Checker 验证。
+### B5 — question-directed Visual Scan
 
-- 切换 target 后，Checker 基于完整 EvidenceMemory 做 state-only recheck。
-- 若判断新 target satisfied，必须返回真实且可见的 `reused_evidence_ids`；不得出现
-  `satisfied + reused_evidence_ids=[]`。
-- 若旧 Evidence 不足，应返回 `incomplete` 和具体 gap，不得由程序猜测复用关系。
-- recheck/同调用 repair 不得增加 Controller action 或重新 READ。
+- Planner 只输出目标原问题/子问题和最小范围：`whole_document`、`pages(text)` 或 `section(anchor_text)`；不再输出 operator、item type、predicate 或 grouping rule。
+- Environment 先确定页范围，再按每批 5 张完整页面图送给 VLM；问题在所有批次保持不变，输入 ID 在一次 scan 内全局唯一。
+- 批结果保留匹配项、局部计数和 limitation。任何页无法判断时不得把它当 0；整个 scan 降级为 incomplete，并把 limitation 交给现有 Checker/Controller。
+- `whole_document`：Q705；`pages` 与印刷页映射：Q874；`section` 起点和视觉终点：Q197。
+- Q20 作为普通单 Figure 路径控制：不得因为 Visual Scan 接线而误触发全文扫描。
+- 缺 Section anchor、页面图、VLM/Schema/Checker 失败时必须回到普通 Controller SEARCH/READ，不得终止整题。
+- 不得产生旧 `COUNT_INVENTORY`、`INSPECT_COVERAGE_BATCH` 或 `coverage_checker_calls`。
 
-扩展反例：Q375、Q611、Q838。无关旧 Evidence 不得被错误复用；Observation Recall 最多返回已配置的
-少量相关历史 Observation。
+### B6 — Q1073：gap 更新后的 SearchSession 选择
 
-保存：Checker 原始输入输出、repair 输入输出、Recall 选择、Evidence 变化和 action budget。
+- READ/Relation/Page Context 后 gap 实质变化时，Controller 重新判断当前批次是否仍覆盖新 gap。
+- 当前可见候选覆盖新 gap 时优先 READ；旧 query 不再覆盖新 gap 时使用 `SEARCH new`；只有旧 query 仍服务同一缺口时才用 `SEARCH next`。
+- 保留每轮 gap、query、session ID、候选、feedback、SEARCH new/next 和 local_problem。
 
-### T3：Q819 可见来源与 Relation 动作
+## 5. 阶段 C：组合 Smoke
 
-状态：需要用真实轨迹确认故障归因，暂不预设一定是 Controller 错误。
+运行：`Q80, Q327, Q658, Q366, Q375, Q819, Q1073, Q197, Q705, Q874, Q20`。
 
-- 保存 Controller 当轮实际可见的 candidate IDs、confirmed/candidate relations 和允许动作。
-- 若目标是当前批次可见的来源，允许 `READ_SOURCE`。
-- 若目标只通过 relation 另一端可达，必须使用与 relation 类型匹配的导航动作；不可把不可见端点 ID
-  直接交给 `READ_SOURCE`。
-- 若输出不可见 ID，只在同一次 Controller 调用中做受控 repair；不得重新搜索或消耗新 action。
+通过门槛：
 
-通过标准：不再因不可见 ID 崩溃，同时不能把本来合法的直接 READ 强制改成关系导航。
+- 无程序崩溃、不可见 ID、重复 Observation source、旧 Coverage 调用；
+- 所有模型调用有输入输出或明确失败记录；
+- Visual Scan 范围、批次与 Checker 接线可审计；
+- Answerer thinking 决策有控制题依据；
+- 语义答案人工核对，不只看 READY。
 
-### T4：结构化 JSON 截断诊断
+## 6. 阶段 D：冻结 177 题运行
 
-状态：尚未决定修复策略，先复现并保存完整遥测。
+1. 使用阶段 C 冻结的同一 commit、Prompt、Schema、模型、检索配置和 action budget，一次运行全部 177 题。
+2. 运行中按增量轨迹审计错误漏斗：Planner、召回/候选、Controller、Reader、Checker、Answerer、Visual Scan、预算终止和程序异常。
+3. 只允许通用小修复。修复后仅把受影响题写入独立 supplement；禁止静默覆盖第一次结果。
+4. 首次运行与 supplement 合并时保留来源、commit、Prompt 版本和修复原因。
 
-- Checker：Q80、Q859。
-- Answerer：Q327、Q642。
-- Table Reader：Q468、Q364。
-- Planner 深度边界：Q565 保存 rejected draft、validator error、repair 与最终 plan。
+语义评分规则：
 
-每次调用必须保存：raw output、finish reason、prompt/completion token usage、token cap、使用的 JSON Schema、
-解析错误和同调用 repair 结果。只有证明确为长度截断后，才讨论缩短输出或调整该组件上限；不得猜补 JSON。
+- 不因冗长、标点、大小写或列表外壳而判错；只要核心答案与 Gold 语义等价即正确。
+- Gold 为 `Not answerable` 且系统也是 `Not answerable`，判正确。
+- Gold 可答但系统无答案，或核心事实/数值/单位/集合错误，判错误。
+- 同时报告：总语义准确率、answerable/Not-answerable 分层准确率、READY 精确率、有效回答覆盖率、各终止状态和程序失败数。
 
-### T5：旧 Coverage 断路与 question-directed Visual Scan
+## 7. 阶段 E：失败下载与收尾
 
-状态：**本地接口、Prompt、validator 和 Section anchor 解析已完成；557/557 测试通过；服务器执行链路待接线验证。**
+- 将所有语义错误、Gold 可答却无答案、程序异常，以及仍需人工判断的轨迹下载到本地 `.runlogs/next_round_177/`，按失败类型分目录。
+- 生成中文报告：配置、每阶段输入/输出、修复记录、首次与 supplement 指标、逐桶原因、可解决项与留给 SFT 的模型能力问题。
+- 确认服务器正式结果、日志、缓存和环境快照均在 `/workspace`；确认本地下载可读后再停止 Pod。
 
-已冻结的本地设计：
+## 8. 暂缓问题
 
-- Planner 升级为 `planner-v0.25`。旧兼容字段仍必须输出 `coverage_requirement=null`，不得重新启用
-  MinerU inventory、operator、source type、predicate 或 Coverage Checker。
-- Root 与每个 SubQuestion 可独立输出最小 `visual_scan`：
-  - `{"required":true,"scope":{"kind":"whole_document"}}`；
-  - `{"required":true,"scope":{"kind":"pages","text":"Pages 5-10"}}`；
-  - `{"required":true,"scope":{"kind":"section","anchor_text":"Academics and Related Resources"}}`。
-- 完整 target question 继续表达要找什么；scope 只表达完整性边界，不重复输出 operator、item type、
-  predicate、target description 或 grouping rule。
-- 普通 Page/Pages/Slide 先使用现有 SoftDoc/PDF 的可见页码映射；能映射则按印刷页，不能映射则按物理页。
-  Planner 不猜页码命名空间。
-- Section 先只在真实 Heading 中解析起点。找不到时返回 `needs_controller_anchor` 和定位 gap，交给普通
-  Controller SEARCH/READ；同名多页时返回 `ambiguous`。不得找不到章节就改扫全文。
-- Section 终点不信任 MinerU heading level 直接决定；后续扫描VLM在正常读取页面时确认可见的下一主要章节，
-  避免把目标章节内部被误标为同级的子标题当成终点。
-- VLM JSON 输入只包含完整问题、scope、batch index/count 和全局唯一 `input_id`。实际页面图片作为多模态
-  content 在 JSON 外按 ID 附加；不得伪造 `image`、`physical_page_number` 或 `visible_page_label` 字段。
-- 20页分4批时 ID 必须连续保持 `I001-I020`，不能每批重置。结果引用当前批不可见 ID 时由 validator 拒绝。
-- 每批输出 `items + partial_count + limitations`。任何页面/相关区域无法可靠判断时，`partial_count` 必须为
-  null，不能把“没看清”算作零；已可靠发现的 items 仍须保留。
-- 最终聚合输出 `answer_candidate + supporting_input_ids + scope_complete + limitation`，再进入现有 Checker
-  与 Answerer，不绕开 EvidenceMemory。
+- Q7：等价比例证据与硬子问题门槛。
+- Q1067：ROA/ROE 等派生指标的按需公式展开。
+- 若 Controller/Checker 在契约正确、上下文充分时仍做出稳定语义错误，留给后续 SFT，不为单题堆规则。
 
-本地真实数据验证：
+## 9. 明确不做
 
-- Q197 的 MinerU Heading 为粘连且带乱码的
-  `Academics and RelatedResources...`，resolver 仍准确定位物理第23页、真实 `page_id/source_id` 和标题 bbox。
-- 不存在的标题生成 Controller 定位 gap；不同页面的同名标题被判为 ambiguous。
-- 单元/契约测试覆盖：whole document/pages/section schema、全局批次 ID、无伪 image 字段、不可见 ID、
-  模糊页非零、partial count 一致性和完整/不完整聚合契约。
-- 完整本地测试：`557 passed`。
-
-服务器下一步只做执行接线和真实模型验证，不重新设计 schema：
-
-1. 将 `visual_scan` 从 `InitialPlan` 连接到 ReadingEnvironment、页面批处理、vLLM多图输入、文本汇总、Checker。
-2. 先用 Q197 验证 Section anchor、页面中部边界、批次持久化和 Checker 接纳。
-3. 用 Q705 验证全文纯视觉计数；用 Q874 验证 Pages 5-10 的页码映射和表格计数。
-4. 人为构造一个模糊页和一个截断批次，确认只重试失败页/批次，不覆盖成功结果、不错误输出0。
-5. 普通题与上述题都不得生成 `coverage_checker_calls`、`COUNT_INVENTORY` 或
-   `INSPECT_COVERAGE_BATCH`；旧 Coverage 继续保持断路。
-
-保存：Planner原始输出、解析后的scope、input ID到page ID的内部映射、多模态请求、每批原始输出、validator、
-汇总结果、Checker输入输出、耗时、token usage、重试和峰值显存。该定向测试不作为整体准确率。
-
-### T6：Q1073 新 gap 与旧 SearchSession
-
-状态：通用规则已写入 `controller-policy-v0.13`，缺服务器真实模型验证；本轮不增加 ControllerInput 字段或
-SearchSession 状态迁移。
-
-已知失败链路：Reader/Checker 已把 gap 从“找直接报告的 after-tax return on average equity”更新为“寻找
-net earnings 与 average equity operands”，但 Controller 随后连续对旧查询执行 `SEARCH next`。
-
-验证目标：
-
-- READ/Relation/Page Context 的反馈使 gap 实质改变后，Controller 必须先按新 gap 重新判断当前仍可见候选。
-- 当前批次若有明确覆盖新缺口的候选，优先 READ；Q1073 首批的 Shareholders' Equity 表是核心检查点。
-- 当前批次没有合适候选、且旧 query 不覆盖新缺失事实时，Controller 应 `SEARCH new`，而不是仅因旧
-  session `has_more=true` 就继续翻页。
-- 只有旧 query 仍在追求与 current gap 相同的未解决信息时才允许 `SEARCH next`；`has_more=true` 本身
-  不构成继续翻页的理由。
-- 新查询命中来源后，Controller 才依据最新 gap 生成新的 `local_problem` 并 READ。
-
-本次只依靠当前已存在的 `current_gap`、SearchSession query、当前 CandidatePreviews 和 recent feedback；
-若真实模型仍反复翻页，再评估是否需要显式 `gap_revision/session_stale` 字段，不提前增加状态复杂度。
-
-保存：每轮 gap、search query、session ID、CandidatePreviews、recent feedback、SEARCH new/next 选择和
-local problem。
-
-## 四、组合 Smoke Test
-
-T1–T6 各自通过后，只运行一个小型组合集：
-
-`Q658, Q366, Q819, Q565, Q838, Q1073, Q705`
-
-每题保存 Planner、Controller、Reader/Table Reader、Checker/Coverage Checker、Answerer 原始输入输出，
-以及候选批次、ActionTrace、ObservationStore、Evidence delta、最终 EvidenceMemory、finish reason、token usage
-和逐组件耗时。
-
-组合门槛：无程序崩溃；无不可见 ID；没有被误触发的不可解析 coverage；Q705 的结构计数不回归；
-Q1073 在 operand gap 后不再盲翻旧查询。该集合只验证链路，不作为准确率。
-
-## 五、已记录但本轮暂缓设计的问题
-
-### D1：Q7 等价证据与硬子问题门槛
-
-Q7 的“投票民主党人数 / 总人口”拆分在数学上成立，不能强制 Planner 猜文档一定用百分比表达。文档实际给出
-“民主党占总人口 31%”和“民主党中投票者占 59%”，当前 Checker 因无法满足绝对人数子问题而拒绝保存，
-Root 无法利用 `31% × 59%`。
-
-后续候选设计：允许可靠的部分 Evidence 在 target 仍 incomplete 时保存，并在新 Evidence 可能直接闭合 Root
-时做机会性 Root sufficiency recheck。该状态机改动尚未确定，本轮不测试、不改 Prompt。
-
-### D2：Q1067 派生指标按需展开
-
-Q1067 从旧版到当前 Planner 都没有拆分，直接搜索 `ADBE ROA FY2015`；文档没有直接报告 ROA，只给了
-net income 和期初/期末 total assets，因此 Controller 一直搜索指标名而没有寻找 operands。
-
-后续候选设计：先按指标原名检索；直接报告路径失败后，才触发一次受控 metric expansion，生成公式与所需
-operands，再开始新查询。需要同时考虑 ROA/ROE/margin/growth 等指标及公式口径差异，暂不写硬编码规则。
-
-### D3：语义 coverage 的延迟启用
-
-Q565 说明语义 scope 不能直接交给确定性 Environment，但完全禁止子问题 coverage 也会损失合法能力。后续研究
-在 Controller 已定位具体 Table/Section/Page set 后，如何把自然语言目标绑定为可枚举的运行时 scope。
-
-### D4：预算与完整 baseline
-
-当前清单通过前不重跑完整 baseline，也不继续扩大 action cap。覆盖误触发、旧查询翻页和 JSON 稳定性修好后，
-再用冻结题集测预算边际收益；最终准确率必须来自独立完整运行，而不是上述定向 smoke。
-
-## 六、明确不做
-
-- 不把 `gap` 直接赋值为 `local_problem`。
-- 不把 coverage 限制为只能出现在 Root。
-- 不为 Q7 强制生成百分比子问题。
-- 不为 Q1067 硬编码单题公式。
-- 不覆盖或删除历史原始轨迹、日志、SoftDoc、视觉索引和 descriptor cache。
-- 不把定向题集的 READY 比例写成系统准确率。
+- 不恢复旧 MinerU Coverage Checker。
+- 不让视觉简述进入 BM25/Dense 或改变已冻结候选排名。
+- 不把 gap 直接覆盖为 local_problem，也不为 Q7/Q1067 编写单题规则。
+- 不把定向 smoke 的 READY 比例写成整体准确率。

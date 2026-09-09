@@ -75,6 +75,15 @@ from softdoc.visual_retrieval import (
     VisualSearchIdentity,
     visual_retrieval_user_prompt,
 )
+from softdoc.visual_scan import (
+    VisualScanBatchInput,
+    VisualScanBatchResult,
+    validate_visual_scan_batch_result,
+)
+from softdoc.visual_scan_prompt import (
+    VISUAL_SCAN_SYSTEM_PROMPT,
+    build_visual_scan_user_prompt,
+)
 
 
 class OllamaModelError(RuntimeError):
@@ -674,6 +683,31 @@ class OllamaVisualReaderBackend:
                 for item in result.limitations
             ],
         )
+
+
+class OllamaVisualScanBackend:
+    """Inspect one already-resolved page batch against a fixed full question."""
+
+    def __init__(self, client: OllamaStructuredClient) -> None:
+        self.client = client
+
+    def scan(
+        self,
+        scan_input: VisualScanBatchInput,
+        image_paths: list[Path],
+    ) -> VisualScanBatchResult:
+        if len(image_paths) != len(scan_input.input_ids):
+            raise ValueError(
+                "Visual Scan requires exactly one image for every supplied input_id"
+            )
+        result = self.client.generate(
+            component="visual_scan",
+            system_prompt=VISUAL_SCAN_SYSTEM_PROMPT,
+            user_prompt=build_visual_scan_user_prompt(scan_input),
+            output_model=VisualScanBatchResult,
+            image_paths=image_paths,
+        )
+        return validate_visual_scan_batch_result(scan_input, result)
 
 
 class MultimodalTableReaderBackend:

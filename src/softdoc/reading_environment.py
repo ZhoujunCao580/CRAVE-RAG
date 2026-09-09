@@ -53,6 +53,7 @@ from softdoc.coverage_reasoning import (
     CoverageRequirement,
     CoverageScopeResolver,
     CoverageScopeStatus,
+    CoverageSourceType,
     PageNumberNamespace,
     QuestionCoveragePlan,
     apply_coverage_batch_result,
@@ -127,6 +128,17 @@ from softdoc.retrieval import (
 )
 from softdoc.store import DocumentStore
 from softdoc.table_view import TableMaterializer, TableView
+from softdoc.visual_scan import (
+    PagesVisualScanScope,
+    SectionAnchorStatus,
+    SectionScopeResolver,
+    SectionVisualScanScope,
+    VisualScanBatchInput,
+    VisualScanBatchResult,
+    VisualScanRequirement,
+    VisualScanScopeKind,
+    WholeDocumentVisualScanScope,
+)
 
 
 READING_ENVIRONMENT_VERSION = "reading-environment-v0.6"
@@ -168,7 +180,7 @@ _RECALL_STOPWORDS = frozenset(
 # than a Controller decision.  Keep these entries in ActionTrace for audit and
 # replay, but do not charge them against the Controller SEARCH/READ budget.
 _NON_BUDGETED_ACTION_NAMES = frozenset(
-    {"COUNT_INVENTORY", "INSPECT_COVERAGE_BATCH"}
+    {"COUNT_INVENTORY", "INSPECT_COVERAGE_BATCH", "VISUAL_SCAN"}
 )
 
 
@@ -227,6 +239,15 @@ class EvidenceCheckerBackend(Protocol):
         """Assess new observations and return an EvidenceMemory delta."""
 
 
+class VisualScanBackend(Protocol):
+    def scan(
+        self,
+        scan_input: VisualScanBatchInput,
+        image_paths: list[Path],
+    ) -> VisualScanBatchResult:
+        """Inspect one resolved page batch against the unchanged target question."""
+
+
 class SemanticCoverageCheckerBackend(Protocol):
     def check_coverage(
         self, checker_input: CoverageBatchCheckInput
@@ -272,6 +293,7 @@ class ReadingEnvironmentConfig(SoftDocModel):
     # it disconnected while the question-directed VLM route is designed.
     enable_legacy_coverage: bool = False
     coverage_batch_size: int = Field(default=5, ge=1, le=16)
+    visual_scan_batch_size: int = Field(default=5, ge=1, le=8)
     search: SearchSessionConfig = Field(default_factory=SearchSessionConfig)
     coverage_namespace_overrides: dict[str, PageNumberNamespace] = Field(
         default_factory=dict
@@ -499,6 +521,7 @@ class ReadingEnvironment:
         reader: ReaderBackend,
         checker: EvidenceCheckerBackend,
         answerer: AnswererBackend,
+        visual_scanner: VisualScanBackend | None = None,
         search_service: DocumentSearchService | None = None,
         config: ReadingEnvironmentConfig | None = None,
     ) -> None:
@@ -509,6 +532,7 @@ class ReadingEnvironment:
         self.reader = reader
         self.checker = checker
         self.answerer = answerer
+        self.visual_scanner = visual_scanner
         self.config = config or ReadingEnvironmentConfig()
         self.search = search_service or DocumentSearchService(
             document, config=self.config.search
@@ -527,6 +551,8 @@ class ReadingEnvironment:
         self._exact_results: list[ExactLookupResult] = []
         self._coverage_plans: list[QuestionCoveragePlan] = []
         self._coverage_fallback_question_ids: set[str] = set()
+        self._visual_scan_requirements: dict[str, VisualScanRequirement] = {}
+        self._visual_scan_attempted_question_ids: set[str] = set()
         self._stop_reason: str | None = None
         self._action_limit = self.config.action_budget
 
@@ -536,6 +562,7 @@ class ReadingEnvironment:
         root_question: RootQuestion,
         questions: list[QuestionState] | None = None,
         coverage_requirements: dict[str, CoverageRequirement] | None = None,
+        visual_scan_requirements: dict[str, VisualScanRequirement] | None = None,
         run_key: str = "v0",
     ) -> ReadingRunResult:
         # A ReadingEnvironment may be reused in tests or services.  Canonical
@@ -552,6 +579,16 @@ class ReadingEnvironment:
             root_question.question_id,
             *[item.question_id for item in memory.questions],
         }
+        requested_visual_scans = visual_scan_requirements or {}
+        unknown_visual_scan_questions = set(requested_visual_scans).difference(
+            known_question_ids
+        )
+        if unknown_visual_scan_questions:
+            raise ValueError(
+                "Visual Scan requirements reference unknown questions: "
+                + ", ".join(sorted(unknown_visual_scan_questions))
+            )
+        self._visual_scan_requirements = dict(requested_visual_scans)
         requested_coverage = coverage_requirements or {}
         if self.config.enable_legacy_coverage:
             unknown_coverage_questions = set(requested_coverage).difference(
@@ -671,6 +708,8 @@ class ReadingEnvironment:
         self._exact_results = []
         self._coverage_plans = []
         self._coverage_fallback_question_ids = set()
+        self._visual_scan_requirements = {}
+        self._visual_scan_attempted_question_ids = set()
         self._stop_reason = None
         self._action_limit = self.config.action_budget
 
@@ -1140,6 +1179,15 @@ class ReadingEnvironment:
             target = memory.current_target
             if target is None:
                 raise ValueError("Incomplete reading state lost its current target")
+            observations, memory, trace, scanned = self._route_visual_scan(
+                root_question=root_question,
+                memory=memory,
+                observations=observations,
+                trace=trace,
+            )
+            if scanned:
+                self._validate_state(observations, memory, trace)
+                continue
             observations, memory, trace, counted = self._route_structural_coverage(
                 root_question=root_question,
                 memory=memory,
@@ -1283,8 +1331,392 @@ class ReadingEnvironment:
                     if item.coverage_requirement is not None
                 },
             },
+            visual_scan_requirements={
+                **(
+                    {root_question_id: plan.visual_scan}
+                    if plan.visual_scan is not None
+                    else {}
+                ),
+                **{
+                    item.subquestion_id: item.visual_scan
+                    for item in plan.subquestions
+                    if item.visual_scan is not None
+                },
+            },
             run_key=run_key,
         )
+
+    def _route_visual_scan(
+        self,
+        *,
+        root_question: RootQuestion,
+        memory: EvidenceMemory,
+        observations: ObservationStore,
+        trace: ActionTrace,
+    ) -> tuple[ObservationStore, EvidenceMemory, ActionTrace, bool]:
+        """Execute one Planner-declared full-page scan outside action budget.
+
+        The complete target question remains fixed across batches.  Scope
+        resolution is deterministic; the VLM only judges the supplied page
+        pixels.  Any unavailable scope, image, or model call degrades to the
+        ordinary Controller route instead of terminating the question.
+        """
+
+        target = memory.current_target
+        if target is None:
+            return observations, memory, trace, False
+        question_id = target.question_id
+        requirement = self._visual_scan_requirements.get(question_id)
+        if requirement is None or question_id in self._visual_scan_attempted_question_ids:
+            return observations, memory, trace, False
+        self._visual_scan_attempted_question_ids.add(question_id)
+        if self.visual_scanner is None:
+            self._diagnostics.append(
+                EnvironmentDiagnostic(
+                    code="visual_scan_backend_unavailable",
+                    description=(
+                        "The Planner requested a visual scan, but no scan backend "
+                        "was configured. Normal Controller execution remains available."
+                    ),
+                    question_id=question_id,
+                )
+            )
+            return observations, memory, trace, False
+
+        pages, scope_metadata, scope_error = self._resolve_visual_scan_pages(
+            requirement
+        )
+        if scope_error is not None or not pages:
+            self._diagnostics.append(
+                EnvironmentDiagnostic(
+                    code="visual_scan_scope_deferred",
+                    description=(
+                        (scope_error or "The visual scan resolved no pages.")
+                        + " Normal Controller execution remains available."
+                    ),
+                    question_id=question_id,
+                    metadata=scope_metadata,
+                )
+            )
+            return observations, memory, trace, False
+
+        resolved: list[tuple[Page, Path]] = []
+        missing_page_ids: list[str] = []
+        for page in pages:
+            path = self._asset_path(page.image_path)
+            if path is None:
+                missing_page_ids.append(page.page_id)
+            else:
+                resolved.append((page, path))
+        if missing_page_ids:
+            self._diagnostics.append(
+                EnvironmentDiagnostic(
+                    code="visual_scan_page_image_unavailable",
+                    description=(
+                        "One or more resolved pages have no readable page image; "
+                        "the exhaustive scan was deferred to normal Controller execution."
+                    ),
+                    question_id=question_id,
+                    metadata={**scope_metadata, "missing_page_ids": missing_page_ids},
+                )
+            )
+            return observations, memory, trace, False
+
+        question_text = (
+            root_question.text
+            if question_id == root_question.question_id
+            else next(item.text for item in memory.questions if item.question_id == question_id)
+        )
+        batch_size = self.config.visual_scan_batch_size
+        all_input_ids = [read_input_id(index) for index in range(len(resolved))]
+        batch_count = (len(resolved) + batch_size - 1) // batch_size
+        batch_results: list[VisualScanBatchResult] = []
+        scanned_count = 0
+        section_ended = False
+        try:
+            for offset in range(0, len(resolved), batch_size):
+                batch_pairs = resolved[offset : offset + batch_size]
+                scan_input = VisualScanBatchInput(
+                    target_id=question_id,
+                    question=question_text,
+                    scope=requirement.scope,
+                    batch_index=len(batch_results) + 1,
+                    batch_count=batch_count,
+                    input_ids=all_input_ids[offset : offset + len(batch_pairs)],
+                )
+                result = self.visual_scanner.scan(
+                    scan_input,
+                    [path for _page, path in batch_pairs],
+                )
+                batch_results.append(result)
+                scanned_count += len(batch_pairs)
+                if (
+                    isinstance(requirement.scope, SectionVisualScanScope)
+                    and result.section_ended
+                ):
+                    section_ended = True
+                    break
+        except Exception as exc:
+            self._diagnostics.append(
+                EnvironmentDiagnostic(
+                    code="visual_scan_failed_fallback",
+                    description=(
+                        f"Visual Scan failed: {exc}. Normal Controller execution "
+                        "remains available."
+                    ),
+                    question_id=question_id,
+                    metadata={
+                        **scope_metadata,
+                        "completed_batch_count": len(batch_results),
+                        "error_type": type(exc).__name__,
+                    },
+                )
+            )
+            return observations, memory, trace, False
+
+        limitations = [item for result in batch_results for item in result.limitations]
+        section_complete = (
+            not isinstance(requirement.scope, SectionVisualScanScope)
+            or section_ended
+            or scanned_count == len(resolved)
+        )
+        scope_complete = not limitations and section_complete
+        total = (
+            sum(result.partial_count or 0 for result in batch_results)
+            if scope_complete
+            else None
+        )
+        items = [item for result in batch_results for item in result.items]
+        input_pairs = resolved[:scanned_count]
+        read_inputs = [
+            ReadInput(
+                input_id=all_input_ids[index],
+                source_id=page.page_id,
+                source_type=ReadingSourceType.PAGE,
+                representation=ReadRepresentation.PAGE_VISUAL,
+                document_id=self.document.document_id,
+                page_id=page.page_id,
+                visual_asset_id=(
+                    "visual:"
+                    + stable_digest(self.document.document_id, page.page_id, "page_visual")
+                ),
+                visual_asset_path=path,
+            )
+            for index, (page, path) in enumerate(input_pairs)
+        ]
+        inputs_by_id = {item.input_id: item for item in read_inputs}
+        pages_by_id = {item.page_id: item for item in self.document.pages}
+        cited_ids = list(dict.fromkeys(item.input_id for item in items))
+        if not cited_ids and read_inputs:
+            cited_ids = [read_inputs[0].input_id]
+            if len(read_inputs) > 1:
+                cited_ids.append(read_inputs[-1].input_id)
+        sources = [
+            ObservationSourceRef(
+                input_id=input_id,
+                source_id=inputs_by_id[input_id].source_id,
+                page_id=inputs_by_id[input_id].page_id,
+                physical_page_number=pages_by_id[
+                    inputs_by_id[input_id].page_id
+                ].page_number,
+                display_page_label=pages_by_id[
+                    inputs_by_id[input_id].page_id
+                ].display_page_label,
+            )
+            for input_id in cited_ids
+        ]
+        step = len(trace.entries)
+        current_action_id = make_action_id(trace.reading_session_id, step)
+        finding_text = "; ".join(
+            f"{item.input_id}: {item.description} (count={item.count})"
+            for item in items
+        )
+        if scope_complete:
+            observation_text = (
+                f"A question-directed visual scan exhaustively inspected "
+                f"{scanned_count} page image(s) in the resolved scope and found "
+                f"a total count of {total}."
+            )
+        else:
+            reliable_count = sum(item.count for item in items)
+            observation_text = (
+                f"A question-directed visual scan inspected {scanned_count} page "
+                f"image(s) and found {reliable_count} reliable partial match(es), "
+                "but the resolved scope is not complete."
+            )
+        if finding_text:
+            observation_text += " Findings: " + finding_text
+        stored = StoredObservation(
+            observation_id=make_observation_id(current_action_id, 0),
+            action_id=current_action_id,
+            text=observation_text,
+            sources=sources,
+        )
+        reader_limitations = [
+            ObservationLimitation(
+                code="visual_scan_unresolved",
+                description=item.description,
+                input_ids=[item.input_id],
+            )
+            for item in limitations
+        ]
+        if not section_complete:
+            reader_limitations.append(
+                ObservationLimitation(
+                    code="visual_scan_section_boundary_unresolved",
+                    description=(
+                        "The named Section end was not confirmed within the supplied "
+                        "document pages."
+                    ),
+                    input_ids=[read_inputs[-1].input_id],
+                )
+            )
+        record = ReadRecord(
+            action_id=current_action_id,
+            reader_kind=ReaderKind.PAGE,
+            document_id=self.document.document_id,
+            subquestion_id=(
+                question_id if question_id != root_question.question_id else None
+            ),
+            local_problem=question_text,
+            inputs=read_inputs,
+            observation_ids=[stored.observation_id],
+            limitations=reader_limitations,
+        )
+        next_observations = ObservationStore(
+            reading_session_id=observations.reading_session_id,
+            root_question_id=observations.root_question_id,
+            read_records=[*observations.read_records, record],
+            observations=[*observations.observations, stored],
+        )
+        status = (
+            ActionExecutionStatus.SUCCEEDED
+            if scope_complete
+            else ActionExecutionStatus.DEGRADED
+        )
+        entry = ActionTraceEntry(
+            step_index=step,
+            action_id=current_action_id,
+            question_id=question_id,
+            action_name="VISUAL_SCAN",
+            target_ids=[page.page_id for page, _path in input_pairs],
+            execution_status=status,
+            observation_ids=[stored.observation_id],
+            metadata={
+                **scope_metadata,
+                "batch_count": len(batch_results),
+                "scanned_page_count": scanned_count,
+                "scope_complete": scope_complete,
+                "total": total,
+            },
+        )
+        checker_input = EvidenceCheckInput(
+            action_id=current_action_id,
+            root_question=root_question,
+            evidence_memory=memory,
+            observations=[stored],
+            limitations=reader_limitations,
+        )
+        next_memory = memory
+        try:
+            check_result = self.checker.check(checker_input)
+            next_memory = apply_evidence_check_result(checker_input, check_result)
+            feedback = self._feedback(
+                reader_limitations, check_result.observation_assessments, record
+            )
+        except Exception as exc:
+            self._diagnostics.append(
+                EnvironmentDiagnostic(
+                    code="visual_scan_checker_rejected",
+                    description=str(exc),
+                    action_id=current_action_id,
+                    question_id=question_id,
+                )
+            )
+            feedback = self._feedback(reader_limitations, [], record)
+            entry = entry.model_copy(
+                update={"execution_status": ActionExecutionStatus.DEGRADED}
+            )
+        if feedback is not None:
+            entry = entry.model_copy(
+                update={
+                    "metadata": {
+                        **entry.metadata,
+                        "controller_feedback": feedback.model_dump(mode="json"),
+                    }
+                }
+            )
+        next_trace = ActionTrace(
+            reading_session_id=trace.reading_session_id,
+            root_question_id=trace.root_question_id,
+            entries=[*trace.entries, entry],
+        )
+        if next_memory != memory:
+            next_memory = self._advance_state_only_checks(
+                root_question=root_question,
+                previous_memory=memory,
+                memory=next_memory,
+                observations=next_observations,
+                triggering_action_id=current_action_id,
+            )
+        return next_observations, next_memory, next_trace, True
+
+    def _resolve_visual_scan_pages(
+        self,
+        requirement: VisualScanRequirement,
+    ) -> tuple[list[Page], dict[str, Any], str | None]:
+        ordered_pages = sorted(
+            self.document.pages, key=lambda item: (item.page_index, item.page_id)
+        )
+        scope = requirement.scope
+        if isinstance(scope, WholeDocumentVisualScanScope):
+            return ordered_pages, {"scope_kind": "whole_document"}, None
+        if isinstance(scope, PagesVisualScanScope):
+            resolution = CoverageScopeResolver().resolve(
+                CoverageRequirement(
+                    operator=CoverageOperator.COUNT,
+                    scope_text=scope.text,
+                    item_type="page",
+                    source_type=CoverageSourceType.PAGE,
+                ),
+                self.document,
+            )
+            metadata = {
+                "scope_kind": "pages",
+                "scope_text": scope.text,
+                "scope_status": resolution.status.value,
+                "page_number_namespace": (
+                    resolution.chosen_namespace.value
+                    if resolution.chosen_namespace is not None
+                    else None
+                ),
+                "decision_reason": resolution.decision_reason,
+                "requires_review": resolution.requires_review,
+            }
+            if resolution.status != CoverageScopeStatus.RESOLVED:
+                return [], metadata, "The requested page range did not resolve completely."
+            pages_by_id = {page.page_id: page for page in ordered_pages}
+            return [pages_by_id[item.page_id] for item in resolution.resolved_pages], metadata, None
+        assert isinstance(scope, SectionVisualScanScope)
+        preparation = SectionScopeResolver().resolve(self.document, scope)
+        metadata = {
+            "scope_kind": "section",
+            "anchor_text": scope.anchor_text,
+            "anchor_status": preparation.status.value,
+        }
+        if preparation.status != SectionAnchorStatus.READY:
+            metadata["anchor_candidates"] = [
+                item.model_dump(mode="json") for item in preparation.candidates
+            ]
+            return [], metadata, preparation.controller_gap
+        assert preparation.resolved_anchor is not None
+        start_index = next(
+            index
+            for index, page in enumerate(ordered_pages)
+            if page.page_id == preparation.resolved_anchor.page_id
+        )
+        metadata["anchor"] = preparation.resolved_anchor.model_dump(mode="json")
+        return ordered_pages[start_index:], metadata, None
 
     def _route_structural_coverage(
         self,
