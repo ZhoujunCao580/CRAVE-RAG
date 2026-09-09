@@ -137,10 +137,16 @@ def test_resolved_batch_keeps_one_assessment_per_input() -> None:
         batch_index=1,
         assessments=[
             VisualScanAssessment(
-                input_id="I002", description="One table.", match_count=1
+                input_id="I002",
+                description="One table.",
+                scope_membership="inside",
+                match_count=1,
             ),
             VisualScanAssessment(
-                input_id="I004", description="Two tables.", match_count=2
+                input_id="I004",
+                description="Two tables.",
+                scope_membership="inside",
+                match_count=2,
             ),
         ],
     )
@@ -151,10 +157,16 @@ def test_resolved_batch_keeps_one_assessment_per_input() -> None:
             batch_index=1,
             assessments=[
                 VisualScanAssessment(
-                    input_id="I002", description="One table.", match_count=1
+                    input_id="I002",
+                    description="One table.",
+                    scope_membership="inside",
+                    match_count=1,
                 ),
                 VisualScanAssessment(
-                    input_id="I002", description="No table.", match_count=0
+                    input_id="I002",
+                    description="No table.",
+                    scope_membership="inside",
+                    match_count=0,
                 ),
             ],
         )
@@ -167,6 +179,7 @@ def test_unreadable_page_uses_null_match_count() -> None:
             VisualScanAssessment(
                 input_id="I007",
                 description="The page is too blurred to assess.",
+                scope_membership="uncertain",
                 match_count=None,
             )
         ],
@@ -187,7 +200,10 @@ def test_batch_result_cannot_reference_invisible_input_id() -> None:
         batch_index=1,
         assessments=[
             VisualScanAssessment(
-                input_id="I999", description="One figure.", match_count=1
+                input_id="I999",
+                description="One figure.",
+                scope_membership="inside",
+                match_count=1,
             )
         ],
     )
@@ -209,7 +225,10 @@ def test_batch_result_cannot_omit_visible_input_id() -> None:
         batch_index=1,
         assessments=[
             VisualScanAssessment(
-                input_id="I001", description="One figure.", match_count=1
+                input_id="I001",
+                description="One figure.",
+                scope_membership="inside",
+                match_count=1,
             )
         ],
     )

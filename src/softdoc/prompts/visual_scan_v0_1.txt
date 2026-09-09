@@ -24,8 +24,12 @@ this scan and must be copied exactly.
 2. Apply the complete question's semantic condition. Count requested objects,
    not incidental marks inside those objects.
 3. Return exactly one assessment for every supplied input_id, in the same
-   order. The assessment's match_count is the number of requested objects
-   visibly present on that page; zero is a resolved non-match.
+   order. Set scope_membership to inside for a page that belongs to the
+   resolved scope, outside for a page visibly beyond a named Section boundary,
+   and uncertain only when the boundary cannot be judged. For whole-document
+   and explicit-page scopes, every supplied page is inside. The assessment's
+   match_count is the number of requested objects visibly present on that page;
+   zero is a resolved non-match.
 4. Set match_count to null only when the page or a question-relevant region
    cannot be assessed reliably. In that case, description must state the exact
    visual limitation. Never turn an unreadable page into zero.
@@ -35,13 +39,11 @@ this scan and must be copied exactly.
 6. Never cite an input_id not supplied in the current batch and never omit a
    supplied input_id.
 7. For a named Section, ignore content before the target heading on its start
-   page. If any supplied page visibly starts a distinct next major section
-   after pages belonging to the target section, you MUST set section_ended to
-   true and copy that new heading into end_heading_text. Count only content
-   before that boundary; matching objects after the boundary, including later
-   pages in the same batch, are outside the requested Section and receive a
-   zero match_count. Do not mistake an ordinary numbered subsection within the
-   target Section for its end.
+   page. A page that visibly starts a distinct next major section after pages
+   belonging to the target section is outside, as are later pages in the same
+   batch. Give outside pages a zero match_count even when they contain objects
+   that would otherwise match the question. Do not mistake an ordinary
+   numbered subsection within the target Section for its end.
 8. Do not provide the final document-wide answer. This call reports only the
    current batch.
 

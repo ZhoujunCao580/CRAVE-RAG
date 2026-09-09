@@ -244,6 +244,7 @@ class ScriptedVisualScanner:
         assessments = [
             VisualScanAssessment(
                 input_id=input_id,
+                scope_membership="inside",
                 description=(
                     "One requested diagram is visible."
                     if scan_input.batch_index == 1 and index == 0
@@ -256,6 +257,33 @@ class ScriptedVisualScanner:
         return VisualScanBatchResult(
             batch_index=scan_input.batch_index,
             assessments=assessments,
+        )
+
+
+class SectionBoundaryVisualScanner:
+    def __init__(self) -> None:
+        self.inputs: list[VisualScanBatchInput] = []
+
+    def scan(
+        self, scan_input: VisualScanBatchInput, image_paths: list[Path]
+    ) -> VisualScanBatchResult:
+        self.inputs.append(scan_input)
+        outside = scan_input.batch_index >= 2
+        return VisualScanBatchResult(
+            batch_index=scan_input.batch_index,
+            assessments=[
+                VisualScanAssessment(
+                    input_id=input_id,
+                    scope_membership=("outside" if outside else "inside"),
+                    description=(
+                        "A later major section contains irrelevant matches."
+                        if outside
+                        else "One target object is visible."
+                    ),
+                    match_count=(99 if outside else (1 if index == 0 else 0)),
+                )
+                for index, input_id in enumerate(scan_input.input_ids)
+            ],
         )
 
 
@@ -715,6 +743,58 @@ def test_visual_scan_runs_in_fixed_page_batches_without_controller_budget(
     ]
     assert result.action_trace.entries[0].metadata["scope_complete"] is True
     assert result.action_trace.entries[0].metadata["total"] == 1
+
+
+def test_section_visual_scan_excludes_later_section_and_stops_next_batches(
+    tmp_path: Path,
+) -> None:
+    document = _document(
+        tmp_path,
+        page_element_specs=[
+            [
+                {
+                    "element_id": "heading:target",
+                    "element_type": ElementType.HEADING,
+                    "text": "Academics and Related Resources",
+                }
+            ],
+            [],
+            [],
+            [],
+            [],
+        ],
+    )
+    scanner = SectionBoundaryVisualScanner()
+    result = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=RejectingController(),
+        reader=DeterministicContentReader(),
+        checker=PredicateChecker(lambda text: "total count of 1" in text),
+        answerer=EvidenceAnswerer(),
+        visual_scanner=scanner,
+        config=ReadingEnvironmentConfig(action_budget=1, visual_scan_batch_size=2),
+    ).run(
+        root_question=RootQuestion(
+            question_id="root:section-scan",
+            text="How many objects occur in the named section?",
+        ),
+        visual_scan_requirements={
+            "root:section-scan": VisualScanRequirement(
+                required=True,
+                scope={
+                    "kind": "section",
+                    "anchor_text": "Academics and Related Resources",
+                },
+            )
+        },
+    )
+
+    assert result.status == ReadingRunStatus.READY
+    assert len(scanner.inputs) == 2
+    entry = result.action_trace.entries[0]
+    assert entry.metadata["scanned_page_count"] == 4
+    assert entry.metadata["total"] == 1
 
 
 def test_unavailable_visual_scan_backend_falls_back_to_controller(

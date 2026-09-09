@@ -181,7 +181,8 @@ def test_visual_scan_prompt_maps_ordered_images_to_global_input_ids() -> None:
 def test_visual_scan_prompt_requires_named_section_boundary_reporting() -> None:
     prompt = " ".join(get_prompt("visual_scan").canonical_text.split())
 
-    assert "you MUST set section_ended to true" in prompt
+    assert "scope_membership" in prompt
+    assert "distinct next major section" in prompt
     assert "later pages in the same batch" in prompt
 
 

@@ -1452,7 +1452,10 @@ class ReadingEnvironment:
                 scanned_count += len(batch_pairs)
                 if (
                     isinstance(requirement.scope, SectionVisualScanScope)
-                    and result.section_ended
+                    and any(
+                        item.scope_membership == "outside"
+                        for item in result.assessments
+                    )
                 ):
                     section_ended = True
                     break
@@ -1477,7 +1480,14 @@ class ReadingEnvironment:
         assessments = [
             item for result in batch_results for item in result.assessments
         ]
-        limitations = [item for item in assessments if item.match_count is None]
+        in_scope_assessments = [
+            item for item in assessments if item.scope_membership != "outside"
+        ]
+        limitations = [
+            item
+            for item in in_scope_assessments
+            if item.match_count is None or item.scope_membership == "uncertain"
+        ]
         section_complete = (
             not isinstance(requirement.scope, SectionVisualScanScope)
             or section_ended
@@ -1485,11 +1495,13 @@ class ReadingEnvironment:
         )
         scope_complete = not limitations and section_complete
         total = (
-            sum(item.match_count or 0 for item in assessments)
+            sum(item.match_count or 0 for item in in_scope_assessments)
             if scope_complete
             else None
         )
-        items = [item for item in assessments if (item.match_count or 0) > 0]
+        items = [
+            item for item in in_scope_assessments if (item.match_count or 0) > 0
+        ]
         input_pairs = resolved[:scanned_count]
         read_inputs = [
             ReadInput(
@@ -1541,7 +1553,9 @@ class ReadingEnvironment:
                 f"a total count of {total}."
             )
         else:
-            reliable_count = sum(item.match_count or 0 for item in assessments)
+            reliable_count = sum(
+                item.match_count or 0 for item in in_scope_assessments
+            )
             observation_text = (
                 f"A question-directed visual scan inspected {scanned_count} page "
                 f"image(s) and found {reliable_count} reliable partial match(es), "

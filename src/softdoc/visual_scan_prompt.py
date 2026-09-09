@@ -8,7 +8,7 @@ from softdoc.prompts import load_prompt_text
 from softdoc.visual_scan import VisualScanBatchInput
 
 
-VISUAL_SCAN_PROMPT_VERSION = "visual-scan-v0.4"
+VISUAL_SCAN_PROMPT_VERSION = "visual-scan-v0.5"
 VISUAL_SCAN_SYSTEM_PROMPT = load_prompt_text("visual_scan_v0_1.txt")
 
 

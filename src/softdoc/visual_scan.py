@@ -144,6 +144,7 @@ class VisualScanAssessment(SoftDocModel):
 
     input_id: str = Field(min_length=1)
     description: str = Field(min_length=1)
+    scope_membership: Literal["inside", "outside", "uncertain"]
     match_count: int | None = Field(default=None, ge=0)
 
 
