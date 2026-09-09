@@ -54,6 +54,7 @@ from softdoc.reading_state import (
     QuestionStatus,
     ReaderKind,
     ReadRepresentation,
+    ReadingSourceType,
     RootQuestion,
 )
 from softdoc.retrieval import SearchSessionConfig
@@ -706,6 +707,40 @@ def _relation(
         status=status,
         created_by=RelationSource.DETERMINISTIC_RULE,
     )
+
+
+def test_materialized_table_view_can_be_read_again_by_its_visible_source_id(
+    tmp_path: Path,
+) -> None:
+    document = _document(
+        tmp_path,
+        page_element_specs=[
+            [
+                {
+                    "element_id": "table:1",
+                    "element_type": ElementType.TABLE,
+                    "html": "<table><tr><th>Name</th><th>Value</th></tr>"
+                    "<tr><td>A</td><td>1</td></tr></table>",
+                }
+            ]
+        ],
+    )
+    environment = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=RejectingController(),
+        reader=DeterministicContentReader(),
+        checker=PredicateChecker(lambda _text: False),
+        answerer=EvidenceAnswerer(),
+    )
+
+    first = environment._read_input("table:1", 0)
+    repeated = environment._read_input(first.source_id, 1)
+
+    assert first.source_type == ReadingSourceType.TABLE_VIEW
+    assert repeated.source_id == first.source_id
+    assert repeated.element_id == "table:1"
+    assert repeated.table_view_id == first.table_view_id
 
 
 def test_visual_scan_runs_in_fixed_page_batches_without_controller_budget(

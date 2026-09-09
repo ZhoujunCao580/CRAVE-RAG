@@ -3327,6 +3327,30 @@ class ReadingEnvironment:
 
     def _read_input(self, source_id: str, index: int) -> ReadInput:
         input_id = read_input_id(index)
+        existing_view = self._table_views.get(source_id)
+        if existing_view is not None:
+            visual_path = self._asset_path(existing_view.outer_visual_path)
+            return ReadInput(
+                input_id=input_id,
+                source_id=existing_view.table_view_id,
+                source_type=ReadingSourceType.TABLE_VIEW,
+                representation=ReadRepresentation.TABLE_VIEW,
+                document_id=self.document.document_id,
+                page_id=existing_view.page_id,
+                element_id=existing_view.element_id,
+                table_view_id=existing_view.table_view_id,
+                visual_asset_id=(
+                    "visual:"
+                    + stable_digest(
+                        self.document.document_id,
+                        existing_view.element_id,
+                        "table_visual",
+                    )
+                    if visual_path is not None
+                    else None
+                ),
+                visual_asset_path=visual_path,
+            )
         try:
             page = self.store.get_page(source_id)
         except KeyError:
