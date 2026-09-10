@@ -3,6 +3,8 @@
 > 冻结日期：2026-09-10  
 > 本文是下一轮唯一有效的服务器实验清单。所有正式输出使用新目录，历史结果不得覆盖。
 
+> **执行状态（2026-09-10）：已完成。** 177 道全部形成最终轨迹，程序失败 0；语义正确 81/177（45.8%）。详细结果、恢复记录、预算曲线与失败桶见 `docs/NEXT_ROUND_177_OVERNIGHT_REPORT_20260910_CN.md`。本文件以下内容保留为实验设计与复现实录，实际偏离项以该报告为准。
+
 ## 1. 本轮边界
 
 - 单模型保持 `Qwen3.5-27B`，通过 vLLM OpenAI-compatible 后端运行。
@@ -15,9 +17,9 @@
 
 - Git commit：运行前记录。
 - 输入集：`configs/evaluation/next_round_unresolved_177_v0_1.jsonl`，恰好 177 题。
-- action budget：12；`VISUAL_SCAN`、同调用 repair、target-switch recheck 和 Observation Recall 均不消耗 Controller action。
+- 计划 action budget 为 12；本轮为测量边际收益实际运行到 16。`VISUAL_SCAN`、同调用 repair、target-switch recheck 和 Observation Recall 均不消耗 Controller action。实测 step 8–12 新增 13 个 READY（6 个答对），step 13–16 仅新增 2 个 READY且均答错，因此后续默认回到 12。
 - 推理并发：先 1 题完成组件 smoke，再用 2 题并发；不得在未测峰值显存前升到 4。
-- Reader/Table Reader/视觉简述/Visual Scan 保留 thinking；只对 Answerer 做 Q327 的 thinking A/B，若关闭不损害控制题，则正式 177 使用 Answerer-only `enable_thinking=false`。
+- Reader/Table Reader/视觉简述/Visual Scan 保留 thinking；Q327 的 A/B 显示 Answerer thinking off 退化，正式 177 保持 Answerer thinking on。四道 Planner 持续截断题仅在恢复批次使用 Planner-only thinking off。
 - 每题保存 Planner、Controller、Reader/Table Reader、Visual Scan、Checker、Answerer 的原始输入输出，候选批次、动作轨迹、ObservationStore、Evidence delta、最终 EvidenceMemory、耗时、峰值显存、`finish_reason`、token usage 和同调用 repair。
 
 ## 3. 阶段 A：环境和接口预检
@@ -25,7 +27,7 @@
 1. 记录 Pod、GPU、Network Volume、仓库 commit/工作树、模型与缓存路径。
 2. 确认 `sentence_transformers` 来自 `/workspace/envs/visual-retrieval-packages`，`ninja` 和 vLLM 来自 `/opt/crave-venv`。
 3. 确认 Dense 缓存、ColSmol 全 Table 视觉索引和 visual descriptor cache 可读。
-4. 运行完整测试；当前本地基线为 `562 passed`。
+4. 运行完整测试；阶段 0 为 `508/508`，本轮代码完成后的本地完整基线为 `570 passed`。
 5. 用一条短 JSON 请求和一张真实图片验证 vLLM 的 JSON Schema 与多模态输入。
 
 ## 4. 阶段 B：定向组件与真实模型验证
