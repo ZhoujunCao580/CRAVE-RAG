@@ -2778,10 +2778,10 @@ class ReadingEnvironment:
         step = len(trace.entries)
         current_action_id = make_action_id(trace.reading_session_id, step)
         try:
-            resolved = [
+            resolved = self._deduplicate_read_inputs([
                 self._read_input(source_id, index)
                 for index, source_id in enumerate(source_ids)
-            ]
+            ])
         except (KeyError, ValueError) as exc:
             trace = self._append_failed_action(
                 trace=trace,
@@ -3324,6 +3324,29 @@ class ReadingEnvironment:
             )
             for item in limitations
         ]
+
+    @staticmethod
+    def _deduplicate_read_inputs(inputs: list[ReadInput]) -> list[ReadInput]:
+        """Collapse source aliases that resolve to the same visual payload.
+
+        A materialized TableView and its originating Table element can both be
+        visible handles even though they resolve to one outer crop. Passing
+        that crop twice adds no information and violates ReadRecord's stable
+        visual-asset identity contract. Keep the first representation and
+        renumber call-local input IDs so Reader prompts remain contiguous.
+        """
+
+        seen_visual_asset_ids: set[str] = set()
+        deduplicated: list[ReadInput] = []
+        for item in inputs:
+            if item.visual_asset_id is not None:
+                if item.visual_asset_id in seen_visual_asset_ids:
+                    continue
+                seen_visual_asset_ids.add(item.visual_asset_id)
+            deduplicated.append(
+                item.model_copy(update={"input_id": read_input_id(len(deduplicated))})
+            )
+        return deduplicated
 
     def _read_input(self, source_id: str, index: int) -> ReadInput:
         input_id = read_input_id(index)

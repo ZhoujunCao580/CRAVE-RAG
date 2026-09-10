@@ -748,6 +748,47 @@ def test_materialized_table_view_can_be_read_again_by_its_visible_source_id(
     assert focus.table_view_id == first.table_view_id
 
 
+def test_read_inputs_collapse_table_aliases_with_the_same_visual_asset(
+    tmp_path: Path,
+) -> None:
+    document = _document(
+        tmp_path,
+        page_element_specs=[
+            [
+                {
+                    "element_id": "table:1",
+                    "element_type": ElementType.TABLE,
+                    "html": "<table><tr><th>Name</th><th>Value</th></tr>"
+                    "<tr><td>A</td><td>1</td></tr></table>",
+                    "visual": True,
+                },
+                {
+                    "element_id": "figure:1",
+                    "element_type": ElementType.FIGURE,
+                    "visual": True,
+                },
+            ]
+        ],
+    )
+    environment = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=RejectingController(),
+        reader=DeterministicContentReader(),
+        checker=PredicateChecker(lambda _text: False),
+        answerer=EvidenceAnswerer(),
+    )
+
+    table = environment._read_input("table:1", 0)
+    table_alias = environment._read_input(table.source_id, 1)
+    figure = environment._read_input("figure:1", 2)
+    resolved = environment._deduplicate_read_inputs([table, table_alias, figure])
+
+    assert [item.input_id for item in resolved] == ["I1", "I2"]
+    assert [item.element_id for item in resolved] == ["table:1", "figure:1"]
+    assert len({item.visual_asset_id for item in resolved}) == 2
+
+
 def test_visual_scan_runs_in_fixed_page_batches_without_controller_budget(
     tmp_path: Path,
 ) -> None:
