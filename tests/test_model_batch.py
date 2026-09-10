@@ -43,6 +43,7 @@ def _args(tmp_path: Path) -> argparse.Namespace:
         base_url="http://127.0.0.1:11434",
         inference_backend="ollama",
         text_model="text-model",
+        controller_model=None,
         visual_model="visual-model",
         timeout=30.0,
         case_timeout=120.0,
@@ -101,6 +102,22 @@ def test_load_cases_validates_ids_and_resolves_document_paths(tmp_path: Path) ->
     )
     with pytest.raises(ValueError, match="case_id"):
         load_cases(manifest, path_root=tmp_path)
+
+
+def test_case_command_can_select_controller_only_model(tmp_path: Path) -> None:
+    args = _args(tmp_path)
+    args.inference_backend = "vllm"
+    args.controller_model = "controller-sft"
+    case = {
+        "case_id": "Q1",
+        "document_dir": str(tmp_path / "doc1"),
+        "question": "Question one?",
+    }
+
+    command = build_case_command(case, args, tmp_path / "output")
+
+    assert command[command.index("--text-model") + 1] == "text-model"
+    assert command[command.index("--controller-model") + 1] == "controller-sft"
 
 
 def test_run_batch_keeps_running_after_one_case_fails(tmp_path: Path) -> None:

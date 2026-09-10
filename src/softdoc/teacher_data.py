@@ -5,11 +5,16 @@ from __future__ import annotations
 from enum import StrEnum
 import json
 from pathlib import Path
-from typing import Literal, Sequence
+from typing import Any, Literal, Sequence
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, TypeAdapter, field_validator, model_validator
 
-from softdoc.controller import ControllerInput, validate_controller_action
+from softdoc.controller import (
+    ControllerAction,
+    ControllerInput,
+    validate_controller_action,
+)
+from softdoc.controller_prompt import build_controller_user_prompt
 from softdoc.model_runner import ModelPipelineRun, StageCallRecord, load_model_pipeline_run
 from softdoc.models import SoftDocModel
 from softdoc.prompt_registry import PromptComponent, get_prompt
@@ -28,12 +33,71 @@ CONTROLLER_SFT_DATASET_VERSION = "controller-sft-dataset-v0"
 CHECKER_REVIEW_SCHEMA_VERSION = "checker-review-v0"
 CHECKER_SFT_DATASET_VERSION = "checker-sft-dataset-v0"
 TEACHER_GENERATION_PROTOCOL = "teacher-no-gold-v0"
+CONTROLLER_SFT_AUDIT_VERSION = "controller-sft-audit-v0"
+
+_CONTROLLER_ACTION_ADAPTER = TypeAdapter(ControllerAction)
 
 
 class ReviewStatus(StrEnum):
     PENDING = "pending"
     ACCEPTED = "accepted"
     REJECTED = "rejected"
+
+
+class ControllerSFTAuditIssue(SoftDocModel):
+    """One actionable data-quality finding in a Controller SFT JSONL."""
+
+    line_number: int = Field(ge=1)
+    example_id: str | None = None
+    category: Literal[
+        "record_json",
+        "record_schema",
+        "component",
+        "input_json",
+        "input_schema",
+        "target_json",
+        "action_schema",
+        "visible_id",
+        "duplicate_example_id",
+        "duplicate_state",
+        "duplicate_state_action",
+        "consecutive_duplicate_action",
+    ]
+    severity: Literal["error", "warning"]
+    detail: str = Field(min_length=1)
+
+
+class ControllerSFTAuditReport(SoftDocModel):
+    """Strict, model-free audit of exported Controller supervision."""
+
+    schema_version: Literal[CONTROLLER_SFT_AUDIT_VERSION] = (
+        CONTROLLER_SFT_AUDIT_VERSION
+    )
+    data_file: str = Field(min_length=1)
+    record_count: int = Field(ge=0)
+    controller_example_count: int = Field(ge=0)
+    record_json_valid_count: int = Field(ge=0)
+    input_json_valid_count: int = Field(ge=0)
+    controller_input_valid_count: int = Field(ge=0)
+    target_json_valid_count: int = Field(ge=0)
+    action_valid_count: int = Field(ge=0)
+    visible_id_valid_count: int = Field(ge=0)
+    duplicate_example_id_count: int = Field(ge=0)
+    duplicate_state_count: int = Field(ge=0)
+    duplicate_state_action_count: int = Field(ge=0)
+    consecutive_duplicate_action_count: int = Field(ge=0)
+    action_distribution: dict[str, int] = Field(default_factory=dict)
+    record_json_valid_rate: float = Field(ge=0.0, le=1.0)
+    input_json_valid_rate: float = Field(ge=0.0, le=1.0)
+    controller_input_valid_rate: float = Field(ge=0.0, le=1.0)
+    target_json_valid_rate: float = Field(ge=0.0, le=1.0)
+    action_valid_rate: float = Field(ge=0.0, le=1.0)
+    visible_id_valid_rate: float = Field(ge=0.0, le=1.0)
+    duplicate_state_rate: float = Field(ge=0.0, le=1.0)
+    duplicate_state_action_rate: float = Field(ge=0.0, le=1.0)
+    consecutive_duplicate_action_rate: float = Field(ge=0.0, le=1.0)
+    passed: bool
+    issues: list[ControllerSFTAuditIssue] = Field(default_factory=list)
 
 
 class ControllerStepReview(SoftDocModel):
@@ -360,11 +424,9 @@ def build_controller_sft_examples(
                 ),
                 component=PromptComponent.CONTROLLER,
                 prompt_version=current_prompt.version,
-                input_text=json.dumps(
-                    controller_input.model_dump(mode="json"),
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                ),
+                # Keep the training user message byte-for-byte aligned with
+                # the online Controller input serialization.
+                input_text=build_controller_user_prompt(controller_input),
                 target=action.model_dump(mode="json"),
             )
         )
@@ -522,6 +584,287 @@ def build_checker_sft_dataset(
         example_count=len(all_examples),
     )
     return manifest, all_examples
+
+
+def audit_controller_sft_jsonl(path: Path) -> ControllerSFTAuditReport:
+    """Audit Controller SFT records without invoking a model or reading gold data.
+
+    The audit deliberately parses the raw JSONL rather than using
+    :func:`load_sft_jsonl` so it can report every malformed line instead of
+    stopping at the first error.  ``visible_id_valid_count`` means the action
+    passes the canonical state-aware validator, including visible source,
+    relation, page, and search-session handles.
+    """
+
+    path = Path(path)
+    issues: list[ControllerSFTAuditIssue] = []
+    record_count = 0
+    controller_example_count = 0
+    record_json_valid_count = 0
+    input_json_valid_count = 0
+    controller_input_valid_count = 0
+    target_json_valid_count = 0
+    action_valid_count = 0
+    visible_id_valid_count = 0
+    duplicate_example_id_count = 0
+    duplicate_state_count = 0
+    duplicate_state_action_count = 0
+    consecutive_duplicate_action_count = 0
+    action_distribution: dict[str, int] = {}
+    seen_example_ids: set[str] = set()
+    seen_states: set[str] = set()
+    seen_state_actions: set[str] = set()
+    previous_action_by_session: dict[str, str] = {}
+
+    for line_number, raw_line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), 1
+    ):
+        if not raw_line.strip():
+            continue
+        record_count += 1
+        try:
+            raw_record = json.loads(raw_line)
+        except json.JSONDecodeError as exc:
+            issues.append(
+                ControllerSFTAuditIssue(
+                    line_number=line_number,
+                    category="record_json",
+                    severity="error",
+                    detail=str(exc),
+                )
+            )
+            continue
+        record_json_valid_count += 1
+        try:
+            example = SFTExample.model_validate(raw_record)
+        except Exception as exc:
+            issues.append(
+                ControllerSFTAuditIssue(
+                    line_number=line_number,
+                    example_id=_raw_example_id(raw_record),
+                    category="record_schema",
+                    severity="error",
+                    detail=str(exc),
+                )
+            )
+            continue
+
+        example_id = example.example_id
+        if example_id in seen_example_ids:
+            duplicate_example_id_count += 1
+            issues.append(
+                ControllerSFTAuditIssue(
+                    line_number=line_number,
+                    example_id=example_id,
+                    category="duplicate_example_id",
+                    severity="error",
+                    detail="example_id already appeared earlier in the dataset",
+                )
+            )
+        seen_example_ids.add(example_id)
+
+        if example.component != PromptComponent.CONTROLLER:
+            issues.append(
+                ControllerSFTAuditIssue(
+                    line_number=line_number,
+                    example_id=example_id,
+                    category="component",
+                    severity="error",
+                    detail=(
+                        "Controller audit accepts only component=controller, got "
+                        f"{example.component.value!r}"
+                    ),
+                )
+            )
+            continue
+        controller_example_count += 1
+
+        try:
+            raw_input = json.loads(example.input_text)
+            input_json_valid_count += 1
+        except json.JSONDecodeError as exc:
+            issues.append(
+                ControllerSFTAuditIssue(
+                    line_number=line_number,
+                    example_id=example_id,
+                    category="input_json",
+                    severity="error",
+                    detail=str(exc),
+                )
+            )
+            continue
+        try:
+            controller_input = ControllerInput.model_validate(raw_input)
+            controller_input_valid_count += 1
+        except Exception as exc:
+            issues.append(
+                ControllerSFTAuditIssue(
+                    line_number=line_number,
+                    example_id=example_id,
+                    category="input_schema",
+                    severity="error",
+                    detail=str(exc),
+                )
+            )
+            continue
+
+        try:
+            raw_target = (
+                json.loads(example.target)
+                if isinstance(example.target, str)
+                else example.target
+            )
+            if not isinstance(raw_target, dict):
+                raise ValueError("Controller target JSON must be an object")
+            target_json_valid_count += 1
+        except (json.JSONDecodeError, ValueError) as exc:
+            issues.append(
+                ControllerSFTAuditIssue(
+                    line_number=line_number,
+                    example_id=example_id,
+                    category="target_json",
+                    severity="error",
+                    detail=str(exc),
+                )
+            )
+            continue
+        try:
+            action = _CONTROLLER_ACTION_ADAPTER.validate_python(raw_target)
+            action_valid_count += 1
+        except Exception as exc:
+            issues.append(
+                ControllerSFTAuditIssue(
+                    line_number=line_number,
+                    example_id=example_id,
+                    category="action_schema",
+                    severity="error",
+                    detail=str(exc),
+                )
+            )
+            continue
+
+        action_name = action.action.value
+        if action_name == "SEARCH":
+            action_name = f"SEARCH:{action.operation.value}"
+        action_distribution[action_name] = action_distribution.get(action_name, 0) + 1
+
+        canonical_state = json.dumps(
+            controller_input.model_dump(mode="json"),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        canonical_action = json.dumps(
+            action.model_dump(mode="json"),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        if canonical_state in seen_states:
+            duplicate_state_count += 1
+            issues.append(
+                ControllerSFTAuditIssue(
+                    line_number=line_number,
+                    example_id=example_id,
+                    category="duplicate_state",
+                    severity="error",
+                    detail="canonical ControllerInput already appeared earlier",
+                )
+            )
+        seen_states.add(canonical_state)
+        state_action = canonical_state + "\n" + canonical_action
+        if state_action in seen_state_actions:
+            duplicate_state_action_count += 1
+            issues.append(
+                ControllerSFTAuditIssue(
+                    line_number=line_number,
+                    example_id=example_id,
+                    category="duplicate_state_action",
+                    severity="error",
+                    detail="canonical state-action pair already appeared earlier",
+                )
+            )
+        seen_state_actions.add(state_action)
+
+        session_id = controller_input.reading_session_id
+        if previous_action_by_session.get(session_id) == canonical_action:
+            consecutive_duplicate_action_count += 1
+            issues.append(
+                ControllerSFTAuditIssue(
+                    line_number=line_number,
+                    example_id=example_id,
+                    category="consecutive_duplicate_action",
+                    severity="warning",
+                    detail="same canonical action as the preceding record in this session",
+                )
+            )
+        previous_action_by_session[session_id] = canonical_action
+
+        try:
+            validate_controller_action(action, controller_input)
+            visible_id_valid_count += 1
+        except ValueError as exc:
+            issues.append(
+                ControllerSFTAuditIssue(
+                    line_number=line_number,
+                    example_id=example_id,
+                    category="visible_id",
+                    severity="error",
+                    detail=str(exc),
+                )
+            )
+
+    error_count = sum(item.severity == "error" for item in issues)
+    return ControllerSFTAuditReport(
+        data_file=str(path),
+        record_count=record_count,
+        controller_example_count=controller_example_count,
+        record_json_valid_count=record_json_valid_count,
+        input_json_valid_count=input_json_valid_count,
+        controller_input_valid_count=controller_input_valid_count,
+        target_json_valid_count=target_json_valid_count,
+        action_valid_count=action_valid_count,
+        visible_id_valid_count=visible_id_valid_count,
+        duplicate_example_id_count=duplicate_example_id_count,
+        duplicate_state_count=duplicate_state_count,
+        duplicate_state_action_count=duplicate_state_action_count,
+        consecutive_duplicate_action_count=consecutive_duplicate_action_count,
+        action_distribution=dict(sorted(action_distribution.items())),
+        record_json_valid_rate=_ratio(record_json_valid_count, record_count),
+        input_json_valid_rate=_ratio(
+            input_json_valid_count, controller_example_count
+        ),
+        controller_input_valid_rate=_ratio(
+            controller_input_valid_count, controller_example_count
+        ),
+        target_json_valid_rate=_ratio(
+            target_json_valid_count, controller_example_count
+        ),
+        action_valid_rate=_ratio(action_valid_count, controller_example_count),
+        visible_id_valid_rate=_ratio(
+            visible_id_valid_count, controller_example_count
+        ),
+        duplicate_state_rate=_ratio(duplicate_state_count, controller_example_count),
+        duplicate_state_action_rate=_ratio(
+            duplicate_state_action_count, controller_example_count
+        ),
+        consecutive_duplicate_action_rate=_ratio(
+            consecutive_duplicate_action_count, controller_example_count
+        ),
+        passed=record_count > 0 and error_count == 0,
+        issues=issues,
+    )
+
+
+def write_controller_sft_audit(
+    report: ControllerSFTAuditReport,
+    path: Path,
+) -> None:
+    """Persist a deterministic Controller SFT audit report."""
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write_json(path, report.model_dump(mode="json"))
 
 
 def write_teacher_review(review: TeacherReview, path: Path) -> None:
@@ -706,6 +1049,17 @@ def _required_action_id(record: StageCallRecord) -> str:
 
 def _reading_session_id(run: ModelPipelineRun) -> str:
     return run.reading_run.evidence_memory.reading_session_id
+
+
+def _raw_example_id(value: Any) -> str | None:
+    if not isinstance(value, dict):
+        return None
+    example_id = value.get("example_id")
+    return example_id if isinstance(example_id, str) and example_id else None
+
+
+def _ratio(numerator: int, denominator: int) -> float:
+    return numerator / denominator if denominator else 0.0
 
 
 def _bound_controller_prompt(run: ModelPipelineRun) -> dict[str, str | int]:

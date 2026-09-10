@@ -178,9 +178,19 @@ softdoc teacher-data export-controller path/to/run_a path/to/run_b \
 softdoc teacher-data init-checker-review path/to/run
 softdoc teacher-data export-checker path/to/run_a path/to/run_b \
   --output path/to/checker_dataset
+softdoc teacher-data audit-controller \
+  path/to/controller_dataset/controller_sft.jsonl \
+  --output path/to/controller_dataset/controller_sft_audit.json
 python scripts/train_sft.py \
   --data path/to/controller_dataset/controller_sft.jsonl --validate-only
 ```
+
+The Controller audit is model-free and must pass before training. It reports
+raw-record and target JSON validity, ControllerInput and Action-schema
+validity, state-aware visible-ID validity, duplicate example/state/state-action
+counts, consecutive repeated-action warnings, and the Action distribution
+(including separate `SEARCH:new/next/switch` buckets). It never reads gold
+answers or Test trajectories.
 
 For LLaMA-Factory, copy or point its dataset directory at
 `controller_sft_messages.jsonl` and the generated `dataset_info.json`, then use

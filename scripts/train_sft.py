@@ -20,6 +20,7 @@ if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
 from softdoc.training_data import SFTExample, load_sft_jsonl
+from softdoc.prompt_registry import PromptComponent
 
 
 @dataclass(frozen=True)
@@ -53,7 +54,9 @@ def _train(args: argparse.Namespace, examples: list[SFTExample]) -> None:
         import torch
         from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
         from transformers import (
+            AutoConfig,
             AutoModelForCausalLM,
+            AutoModelForImageTextToText,
             AutoTokenizer,
             BitsAndBytesConfig,
             Trainer,
@@ -86,7 +89,22 @@ def _train(args: argparse.Namespace, examples: list[SFTExample]) -> None:
     elif torch.cuda.is_available():
         model_kwargs["torch_dtype"] = torch.bfloat16 if args.bf16 else torch.float16
 
-    model = AutoModelForCausalLM.from_pretrained(args.model, **model_kwargs)
+    model_config = AutoConfig.from_pretrained(
+        args.model, trust_remote_code=args.trust_remote_code
+    )
+    model_class = args.model_class
+    if model_class == "auto":
+        model_class = (
+            "image_text_to_text"
+            if getattr(model_config, "vision_config", None) is not None
+            else "causal_lm"
+        )
+    model_loader = (
+        AutoModelForImageTextToText
+        if model_class == "image_text_to_text"
+        else AutoModelForCausalLM
+    )
+    model = model_loader.from_pretrained(args.model, **model_kwargs)
     if args.qlora:
         model = prepare_model_for_kbit_training(
             model, use_gradient_checkpointing=args.gradient_checkpointing
@@ -98,7 +116,15 @@ def _train(args: argparse.Namespace, examples: list[SFTExample]) -> None:
             r=args.lora_rank,
             lora_alpha=args.lora_alpha,
             lora_dropout=args.lora_dropout,
-            target_modules="all-linear",
+            target_modules=(
+                "all-linear"
+                if args.lora_target_modules == "all-linear"
+                else [
+                    item.strip()
+                    for item in args.lora_target_modules.split(",")
+                    if item.strip()
+                ]
+            ),
         ),
     )
     if args.gradient_checkpointing and not args.qlora:
@@ -137,8 +163,17 @@ def _train(args: argparse.Namespace, examples: list[SFTExample]) -> None:
         per_device_train_batch_size=args.batch_size,
         gradient_accumulation_steps=args.gradient_accumulation,
         learning_rate=args.learning_rate,
+        weight_decay=args.weight_decay,
+        warmup_ratio=args.warmup_ratio,
+        lr_scheduler_type=args.lr_scheduler_type,
+        max_steps=args.max_steps,
         logging_steps=1,
-        save_strategy="epoch",
+        save_strategy=("steps" if args.max_steps > 0 else "epoch"),
+        save_steps=args.save_steps,
+        save_total_limit=args.save_total_limit,
+        optim=args.optim,
+        seed=args.seed,
+        data_seed=args.seed,
         report_to=[],
         bf16=bool(args.bf16 and torch.cuda.is_available()),
         fp16=bool(not args.bf16 and torch.cuda.is_available()),
@@ -159,6 +194,11 @@ def _train(args: argparse.Namespace, examples: list[SFTExample]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate or run LoRA/QLoRA SFT")
     parser.add_argument("--data", type=Path, required=True)
+    parser.add_argument(
+        "--require-component",
+        choices=tuple(item.value for item in PromptComponent),
+        help="Fail if any record belongs to another component.",
+    )
     parser.add_argument("--model", default="Qwen/Qwen3-8B")
     parser.add_argument("--output", type=Path, default=Path(".runlogs/sft"))
     parser.add_argument("--validate-only", action="store_true")
@@ -166,14 +206,49 @@ def main() -> int:
     parser.add_argument("--bf16", action="store_true")
     parser.add_argument("--gradient-checkpointing", action="store_true")
     parser.add_argument("--trust-remote-code", action="store_true")
+    parser.add_argument(
+        "--model-class",
+        choices=("auto", "causal_lm", "image_text_to_text"),
+        default="auto",
+        help=(
+            "Model AutoClass. auto selects ImageTextToText when the config has "
+            "a vision_config, otherwise CausalLM."
+        ),
+    )
     parser.add_argument("--max-length", type=int, default=4096)
     parser.add_argument("--epochs", type=float, default=1.0)
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=-1,
+        help="Positive values override --epochs for a time-bounded pilot.",
+    )
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--gradient-accumulation", type=int, default=8)
     parser.add_argument("--learning-rate", type=float, default=2e-4)
+    parser.add_argument("--weight-decay", type=float, default=0.0)
+    parser.add_argument("--warmup-ratio", type=float, default=0.0)
+    parser.add_argument(
+        "--lr-scheduler-type",
+        choices=("linear", "cosine", "constant", "constant_with_warmup"),
+        default="linear",
+    )
+    parser.add_argument("--optim", default="adamw_torch")
+    parser.add_argument("--seed", type=int, default=20260910)
+    parser.add_argument("--save-steps", type=int, default=20)
+    parser.add_argument("--save-total-limit", type=int, default=3)
     parser.add_argument("--lora-rank", type=int, default=16)
     parser.add_argument("--lora-alpha", type=int, default=32)
     parser.add_argument("--lora-dropout", type=float, default=0.05)
+    parser.add_argument(
+        "--lora-target-modules",
+        default="all-linear",
+        help=(
+            "Comma-separated module-name suffixes, or all-linear. For the "
+            "multimodal Qwen3.5 Controller pilot, explicitly name language "
+            "projection modules so the vision tower is not adapted."
+        ),
+    )
     args = parser.parse_args()
 
     examples = load_sft_jsonl(args.data)
@@ -181,6 +256,13 @@ def main() -> int:
     for example in examples:
         key = example.component.value
         component_counts[key] = component_counts.get(key, 0) + 1
+    if args.require_component is not None and set(component_counts) != {
+        args.require_component
+    }:
+        raise SystemExit(
+            "Dataset component mismatch: required "
+            f"{args.require_component!r}, found {sorted(component_counts)!r}"
+        )
     print(
         json.dumps(
             {

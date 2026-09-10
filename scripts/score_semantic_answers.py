@@ -152,6 +152,54 @@ def _read_predictions(roots: list[Path]) -> dict[str, dict[str, Any]]:
     return predictions
 
 
+def _summarize_records(records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Return the project content-accuracy and generalized-F1 aggregates.
+
+    The positive class is an answerable question.  A persisted ``ready`` run is
+    treated as a positive prediction; terminal fallback runs persist
+    ``Not answerable`` and are treated as negative predictions.  This matches
+    the frozen Test baseline accounting in
+    ``docs/MMLONGBENCH_SPLIT_AND_SCORECARD_CN.md``.
+    """
+
+    status_counts = Counter(row["reading_status"] for row in records)
+    method_counts = Counter(row["scoring_method"] for row in records)
+    correct = sum(bool(row["correct"]) for row in records)
+    ready = [row for row in records if row["reading_status"] == "ready"]
+    answerable = [
+        row for row in records if not _is_not_answerable(row["gold_answer"])
+    ]
+    answerable_correct = [row for row in answerable if bool(row["correct"])]
+    precision = len(answerable_correct) / len(ready) if ready else 0.0
+    recall = len(answerable_correct) / len(answerable) if answerable else 0.0
+    generalized_f1 = (
+        2 * precision * recall / (precision + recall)
+        if precision + recall
+        else 0.0
+    )
+    return {
+        "case_count": len(records),
+        "correct": correct,
+        "accuracy": correct / len(records) if records else None,
+        "gold_answerable_count": len(answerable),
+        "gold_not_answerable_count": len(records) - len(answerable),
+        "predicted_answerable_count": len(ready),
+        "answerable_correct": len(answerable_correct),
+        "precision": precision,
+        "recall": recall,
+        "generalized_f1": generalized_f1,
+        "ready_count": len(ready),
+        "ready_correct": sum(bool(row["correct"]) for row in ready),
+        "ready_accuracy": (
+            sum(bool(row["correct"]) for row in ready) / len(ready)
+            if ready
+            else None
+        ),
+        "status_counts": dict(status_counts),
+        "scoring_method_counts": dict(method_counts),
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cases", type=Path, required=True)
@@ -162,6 +210,14 @@ def main() -> int:
     parser.add_argument("--model", default="/workspace/models/Qwen3.5-27B")
     parser.add_argument("--workers", type=int, choices=(1, 2, 4), default=4)
     parser.add_argument("--timeout", type=float, default=300)
+    parser.add_argument(
+        "--baseline-score",
+        type=Path,
+        help=(
+            "Optional prior score JSON containing accuracy and generalized_f1. "
+            "Only aggregate deltas are read; per-question baseline records are ignored."
+        ),
+    )
     args = parser.parse_args()
 
     import pyarrow.parquet as pq
@@ -218,24 +274,29 @@ def main() -> int:
                 row["reason"] = reason
                 row["judge_metadata"] = metadata
 
-    status_counts = Counter(row["reading_status"] for row in records)
-    method_counts = Counter(row["scoring_method"] for row in records)
-    correct = sum(bool(row["correct"]) for row in records)
-    ready = [row for row in records if row["reading_status"] == "ready"]
+    summary = _summarize_records(records)
     payload = {
         "schema_version": "semantic-answer-diagnostic-v0.1",
-        "case_count": len(records),
-        "correct": correct,
-        "accuracy": correct / len(records) if records else None,
-        "ready_count": len(ready),
-        "ready_correct": sum(bool(row["correct"]) for row in ready),
-        "ready_accuracy": (
-            sum(bool(row["correct"]) for row in ready) / len(ready) if ready else None
-        ),
-        "status_counts": dict(status_counts),
-        "scoring_method_counts": dict(method_counts),
+        **summary,
         "records": sorted(records, key=lambda row: int(row["case_id"][1:])),
     }
+    if args.baseline_score is not None:
+        baseline = json.loads(args.baseline_score.read_text(encoding="utf-8"))
+        baseline_accuracy = baseline.get("accuracy")
+        baseline_f1 = baseline.get("generalized_f1")
+        if not isinstance(baseline_accuracy, (int, float)) or not isinstance(
+            baseline_f1, (int, float)
+        ):
+            raise ValueError(
+                "--baseline-score must contain numeric accuracy and generalized_f1"
+            )
+        payload["baseline_comparison"] = {
+            "baseline_score": str(args.baseline_score),
+            "baseline_accuracy": baseline_accuracy,
+            "baseline_generalized_f1": baseline_f1,
+            "accuracy_delta": summary["accuracy"] - baseline_accuracy,
+            "generalized_f1_delta": summary["generalized_f1"] - baseline_f1,
+        }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({key: value for key, value in payload.items() if key != "records"}, indent=2))

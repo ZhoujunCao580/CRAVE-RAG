@@ -134,6 +134,9 @@ def _batch_lock_path(
         "base_url": args.base_url,
         "inference_backend": args.inference_backend,
         "text_model": args.text_model,
+        "controller_model": (
+            getattr(args, "controller_model", None) or args.text_model
+        ),
         "visual_model": args.visual_model,
         "cases": [
             {
@@ -319,6 +322,8 @@ def build_case_command(case: dict[str, Any], args: argparse.Namespace, output: P
         args.inference_backend,
         "--text-model",
         args.text_model,
+        "--controller-model",
+        getattr(args, "controller_model", None) or args.text_model,
         "--visual-model",
         args.visual_model,
         "--timeout",
@@ -799,7 +804,15 @@ class _PersistentRuntime:
                 else None
             ),
         )
-        controller_config = config(self.args.controller_max_tokens)
+        controller_config = OpenAICompatibleConfig(
+            model=(
+                getattr(self.args, "controller_model", None)
+                or self.args.text_model
+            ),
+            base_url=self.args.base_url,
+            timeout_seconds=self.args.timeout,
+            max_tokens=self.args.controller_max_tokens,
+        )
         reader_client = OpenAICompatibleStructuredClient(
             config(self.args.reader_max_tokens)
         )
@@ -911,6 +924,9 @@ def _run_persistent_batch_unlocked(
             "base_url": args.base_url,
             "inference_backend": args.inference_backend,
             "text_model": args.text_model,
+            "controller_model": (
+                getattr(args, "controller_model", None) or args.text_model
+            ),
             "visual_model": args.visual_model,
             "context_length": args.context_length,
             "action_budget": args.action_budget,
@@ -1038,6 +1054,9 @@ def _run_batch_unlocked(
             "base_url": args.base_url,
             "inference_backend": args.inference_backend,
             "text_model": args.text_model,
+            "controller_model": (
+                getattr(args, "controller_model", None) or args.text_model
+            ),
             "visual_model": args.visual_model,
             "context_length": args.context_length,
             "action_budget": args.action_budget,
@@ -1138,6 +1157,14 @@ def build_parser() -> argparse.ArgumentParser:
         default="ollama",
     )
     parser.add_argument("--text-model", default="qwen3:8b")
+    parser.add_argument(
+        "--controller-model",
+        help=(
+            "Optional Controller-only model name exposed by the inference "
+            "server (for example a vLLM LoRA alias). Defaults to --text-model; "
+            "Planner, Reader, Checker, and Answerer remain on --text-model."
+        ),
+    )
     parser.add_argument("--visual-model", default="qwen3-vl:4b")
     parser.add_argument("--timeout", type=float, default=180.0)
     parser.add_argument("--case-timeout", type=float, default=None)

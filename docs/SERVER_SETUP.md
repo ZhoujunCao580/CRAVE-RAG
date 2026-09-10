@@ -252,6 +252,12 @@ entry. It does **not** yet provide a finished RL reward, production Teacher
 dataset, or claim that the sample record is sufficient for training. Those are
 research artifacts to be created after trajectory collection and evaluation.
 
+For the time-bounded Qwen3.5-27B Controller-only pilot, use
+[`CONTROLLER_SFT_PILOT_RUNBOOK_CN.md`](CONTROLLER_SFT_PILOT_RUNBOOK_CN.md).
+The batch runner accepts `--controller-model <vLLM-LoRA-alias>` while leaving
+Planner, Reader, Checker, and Answerer on `--text-model`. Omitting the option
+preserves the old all-base behavior.
+
 ## 6. What must be transferred separately
 
 The following are deliberately ignored by Git because of size, licensing, or

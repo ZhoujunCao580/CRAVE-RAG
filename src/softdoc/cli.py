@@ -47,6 +47,7 @@ from softdoc.server_readiness import check_server_readiness, readiness_install_h
 from softdoc.serialization import load_document, write_document
 from softdoc.store import DocumentStore
 from softdoc.teacher_data import (
+    audit_controller_sft_jsonl,
     build_checker_review_template,
     build_teacher_review_template,
     load_checker_reviewed_run,
@@ -54,6 +55,7 @@ from softdoc.teacher_data import (
     write_checker_review,
     write_checker_sft_dataset,
     write_controller_sft_dataset,
+    write_controller_sft_audit,
     write_teacher_review,
 )
 from softdoc.reading_environment import (
@@ -137,6 +139,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Model service transport; vllm uses an OpenAI-compatible /v1 endpoint.",
     )
     run_model.add_argument("--text-model", default="qwen3:8b")
+    run_model.add_argument(
+        "--controller-model",
+        help=(
+            "Optional Controller-only model name. Defaults to --text-model so "
+            "existing runs are unchanged."
+        ),
+    )
     run_model.add_argument("--visual-model", default="qwen3-vl:4b")
     run_model.add_argument("--timeout", type=float, default=180.0)
     run_model.add_argument("--context-length", type=int, default=8192)
@@ -221,6 +230,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     teacher_export.add_argument("run_dirs", nargs="+", type=Path)
     teacher_export.add_argument("--output", type=Path, required=True)
+    teacher_audit = teacher_subparsers.add_parser(
+        "audit-controller",
+        help="Strictly validate and summarize an exported Controller SFT JSONL",
+    )
+    teacher_audit.add_argument("data", type=Path)
+    teacher_audit.add_argument("--output", type=Path)
     checker_export = teacher_subparsers.add_parser(
         "export-checker", help="Export accepted Checker decisions from reviewed runs"
     )
@@ -403,7 +418,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 ),
                 PlannerConfig(fallback_to_root_on_limit=True),
             )
-            controller = VLLMControllerBackend(vllm_config(args.controller_max_tokens))
+            controller = VLLMControllerBackend(
+                OpenAICompatibleConfig(
+                    model=args.controller_model or args.text_model,
+                    base_url=args.base_url,
+                    timeout_seconds=args.timeout,
+                    max_tokens=args.controller_max_tokens,
+                )
+            )
             text_client = OpenAICompatibleStructuredClient(vllm_config(args.checker_max_tokens))
             visual_client = OpenAICompatibleStructuredClient(vllm_config(args.reader_max_tokens))
             answerer_client = OpenAICompatibleStructuredClient(
@@ -419,7 +441,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 OllamaPlannerBackend(OllamaPlannerConfig(model=args.text_model, **common)),
                 PlannerConfig(fallback_to_root_on_limit=True),
             )
-            controller = OllamaControllerBackend(OllamaControllerConfig(model=args.text_model, context_length=args.context_length, **common))
+            controller = OllamaControllerBackend(
+                OllamaControllerConfig(
+                    model=args.controller_model or args.text_model,
+                    context_length=args.context_length,
+                    **common,
+                )
+            )
             text_client = OllamaStructuredClient(OllamaModelConfig(model=args.text_model, context_length=args.context_length, **common))
             visual_client = OllamaStructuredClient(OllamaModelConfig(model=args.visual_model, context_length=args.context_length, **common))
             answerer_client = text_client
@@ -535,6 +563,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"to {args.output}"
             )
             return 0
+        if args.teacher_command == "audit-controller":
+            report = audit_controller_sft_jsonl(args.data)
+            if args.output is not None:
+                write_controller_sft_audit(report, args.output)
+            print(report.model_dump_json())
+            return 0 if report.passed else 1
         if args.teacher_command == "export-checker":
             reviewed_runs = [load_checker_reviewed_run(path) for path in args.run_dirs]
             manifest = write_checker_sft_dataset(reviewed_runs, args.output)
