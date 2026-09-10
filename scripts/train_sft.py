@@ -8,8 +8,10 @@ stack so core users do not need heavyweight dependencies.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 from dataclasses import dataclass
 import inspect
+from numbers import Integral
 import json
 from pathlib import Path
 import sys
@@ -30,14 +32,47 @@ class EncodedExample:
     labels: list[int]
 
 
+def _extract_input_ids(value: Any, *, field: str) -> list[int]:
+    """Normalize tokenizer outputs across Transformers 4.x and 5.x.
+
+    ``apply_chat_template(tokenize=True)`` historically returned a flat list,
+    while newer tokenizers may return a ``BatchEncoding``.  Iterating the
+    latter yields string keys (for example ``"input_ids"``), which must never
+    reach the tensor collator.
+    """
+
+    if isinstance(value, Mapping):
+        if "input_ids" not in value:
+            raise ValueError(f"{field} tokenizer output has no input_ids")
+        value = value["input_ids"]
+    if hasattr(value, "tolist"):
+        value = value.tolist()
+    if isinstance(value, tuple):
+        value = list(value)
+    if (
+        isinstance(value, list)
+        and len(value) == 1
+        and isinstance(value[0], (list, tuple))
+    ):
+        value = list(value[0])
+    if not isinstance(value, list) or not all(
+        isinstance(item, Integral) for item in value
+    ):
+        raise TypeError(f"{field} input_ids must be a flat integer sequence")
+    return [int(item) for item in value]
+
+
 def _encode_example(example: SFTExample, tokenizer: Any, max_length: int) -> EncodedExample:
-    prompt_ids = list(
+    prompt_ids = _extract_input_ids(
         tokenizer.apply_chat_template(
             example.messages(), tokenize=True, add_generation_prompt=True
-        )
+        ),
+        field="prompt",
     )
     target_text = example.target_text() + (tokenizer.eos_token or "")
-    target_ids = list(tokenizer(target_text, add_special_tokens=False)["input_ids"])
+    target_ids = _extract_input_ids(
+        tokenizer(target_text, add_special_tokens=False), field="target"
+    )
     if len(target_ids) >= max_length:
         raise ValueError(
             f"{example.example_id}: target alone has {len(target_ids)} tokens, "
