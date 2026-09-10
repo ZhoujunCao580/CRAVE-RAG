@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import inspect
 import json
 from pathlib import Path
 import sys
@@ -157,14 +158,13 @@ def _train(args: argparse.Namespace, examples: list[SFTExample]) -> None:
             "attention_mask": torch.tensor(attention_mask, dtype=torch.long),
         }
 
-    training_args = TrainingArguments(
+    training_kwargs: dict[str, Any] = dict(
         output_dir=str(args.output),
         num_train_epochs=args.epochs,
         per_device_train_batch_size=args.batch_size,
         gradient_accumulation_steps=args.gradient_accumulation,
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
-        warmup_ratio=args.warmup_ratio,
         lr_scheduler_type=args.lr_scheduler_type,
         max_steps=args.max_steps,
         logging_steps=1,
@@ -180,6 +180,15 @@ def _train(args: argparse.Namespace, examples: list[SFTExample]) -> None:
         gradient_checkpointing=args.gradient_checkpointing,
         remove_unused_columns=False,
     )
+    # Transformers 5 renamed ``warmup_ratio`` to a float-capable
+    # ``warmup_steps``.  Preserve the CLI contract across both generations:
+    # a value below 1 remains a ratio in either implementation.
+    training_parameters = inspect.signature(TrainingArguments).parameters
+    if "warmup_ratio" in training_parameters:
+        training_kwargs["warmup_ratio"] = args.warmup_ratio
+    else:
+        training_kwargs["warmup_steps"] = args.warmup_ratio
+    training_args = TrainingArguments(**training_kwargs)
     trainer = Trainer(
         model=model,
         args=training_args,
