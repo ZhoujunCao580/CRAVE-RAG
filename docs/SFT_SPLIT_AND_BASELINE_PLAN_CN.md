@@ -96,3 +96,18 @@ checkpoint；若需要新的最终盲测，从 Reserve 冻结新文档集合。
 Controller 是第一阶段唯一训练对象。Checker 继续保留 Prompt-only；只有在
 Controller SFT 后的新 Dev 漏斗中确认存在足量“正确来源 + 正确 Observation +
 Checker 错判”案例，才单独训练 Checker adapter。
+
+## 5. Pilot 实际结果与下一步门槛
+
+2026-09-11 已完成首个 Controller-only pilot：30 个审阅 episode 中，24 题/78 个决策用于
+训练，6 题/14 个决策用于文档隔离的离线评估。60-step QLoRA 训练与部署闭环成功，但离线
+route agreement 从 base 的 100% 降至 SFT 的 92.86%；端到端 Test 仍为
+**62/124 = 50.0% Acc、49.44% F1**，7 题救回与 7 题退化相互抵消。
+
+因此当前不应直接扩到全量 Teacher 数据，也不进入 DPO。下一轮门槛调整为：
+
+1. 先在 Clean Dev 比较 checkpoint 20、40、60，不默认采用训练 loss 最低的 checkpoint；
+2. 增加失败状态上的真实在线 Teacher rollout，而不只是过滤 base 已执行动作；
+3. 文档隔离 held-out state 规模扩大后，route agreement 至少不得低于 base；
+4. Clean Dev 端到端提升后，才扩大到 100--150 题；
+5. Checker 数据继续与 Controller 数据分开构建。

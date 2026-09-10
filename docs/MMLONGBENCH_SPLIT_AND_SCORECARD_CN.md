@@ -32,9 +32,12 @@
 | Diagnostic Dev（97） | 已完成 | **53/97 = 54.6%** | **56.12%** |
 | Clean Dev（68） | 已完成 | **36/68 = 52.9%** | **48.89%** |
 | **Dev 合并（165）** | 已完成 | **89/165 = 53.9%** | **53.28%** |
-| Test Core（81） | 已完成 | **38/81 = 46.9%** | **47.86%** |
-| Test Challenge（43） | 已完成 | **24/43 = 55.8%** | **52.46%** |
-| **Test 合并（124）** | 已完成 | **62/124 = 50.0%** | **49.44%** |
+| Test Core / Prompt-only（81） | 已完成 | **38/81 = 46.9%** | **47.86%** |
+| Test Challenge / Prompt-only（43） | 已完成 | **24/43 = 55.8%** | **52.46%** |
+| **Test 合并 / Prompt-only（124）** | 已完成 | **62/124 = 50.0%** | **49.44%** |
+| Test Core / Controller SFT pilot（81） | 已完成 | **42/81 = 51.9%** | **54.24%** |
+| Test Challenge / Controller SFT pilot（43） | 已完成 | **20/43 = 46.5%** | **40.00%** |
+| **Test 合并 / Controller SFT pilot（124）** | 已完成 | **62/124 = 50.0%** | **49.44%** |
 | Reserve（445） | 未运行 | — | — |
 
 这里的“正式”表示项目后续选 checkpoint、比较 SFT 和汇报内部结果时统一采用的官方指标口径：Acc 按内容等价判对，F1 使用官方 generalized F1 公式。它不再与 48% 的未抽取严格字符串诊断值并列。若投稿或提交公开榜单，仍需披露本次等价判断含自动/人工校准，并补做官方三阶段复现。
@@ -137,3 +140,19 @@ Dev 合并正式结果 53.9% Acc / 53.28% F1 在数字上略高于 MAGE-RAG 主�
 - `.runlogs/test-q657-recovery-0d7503d-v3.tar.gz`。
 
 本次内容等价评分对 38 个非精确匹配案例做过人工语义复核，因此该集合仍可作为当前 Prompt-only **内部 baseline**，但已不再是对开发者完全密封的盲测集。后续 SFT、Prompt 或架构选择不得参考 Test 逐题错误；checkpoint 只用 Clean Dev 选择。若需要新的最终盲测，应从尚未使用的 Reserve 文档冻结新集合。
+
+## 8. Controller SFT pilot Test 记录
+
+2026-09-11，使用 24 题/78 个 Controller 决策训练的 60-step QLoRA adapter 完成同一
+124 题 Test：
+
+- 总体仍为 **62/124 = 50.0% Acc，49.44% generalized F1**，相对 baseline 净变化为 0；
+- 29 道预测文本发生变化，其中 7 道被救回、7 道退化；
+- Core 提高 4 题，但 Challenge 降低 4 题，说明小样本策略没有稳定泛化；
+- 最终状态：`ready=79`、`budget_exhausted=38`、`stopped_incomplete=6`、
+  `program_failure=1`；
+- 唯一程序失败 Q1023 是 Planner JSON 在 768-token 上限处稳定截断，同配置独立恢复仍失败；
+- 4-worker 主批墙钟 60 分 49 秒，约 29.4 秒/题。
+
+该结果不能表述为 SFT 提升。它证明的是 Controller 数据审计、QLoRA、vLLM LoRA 路由和
+端到端评估闭环已经打通。完整技术边界见 `docs/CONTROLLER_SFT_PILOT_REPORT_CN.md`。
