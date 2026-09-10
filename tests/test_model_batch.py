@@ -83,6 +83,7 @@ def test_load_cases_validates_ids_and_resolves_document_paths(tmp_path: Path) ->
             {
                 "case_id": "Q-1",
                 "question_id": "benchmark:Q-1",
+                "document_id": "doc-1-audit-id",
                 "document_dir": "documents/doc-1",
                 "question": "  What is reported?  ",
             }
@@ -94,6 +95,7 @@ def test_load_cases_validates_ids_and_resolves_document_paths(tmp_path: Path) ->
     cases = load_cases(manifest, path_root=tmp_path)
 
     assert cases[0]["question"] == "What is reported?"
+    assert cases[0]["document_id"] == "doc-1-audit-id"
     assert Path(cases[0]["document_dir"]) == (tmp_path / "documents" / "doc-1").resolve()
 
     manifest.write_text(

@@ -274,7 +274,17 @@ def load_cases(path: Path, *, path_root: Path) -> list[dict[str, Any]]:
             raise ValueError(f"{path}:{line_number}: invalid JSON: {exc}") from exc
         if not isinstance(row, dict):
             raise ValueError(f"{path}:{line_number}: each case must be a JSON object")
-        unknown = set(row) - {"case_id", "document_dir", "question", "question_id", "run_key"}
+        # Split manifests retain ``document_id`` as audit provenance even
+        # though execution resolves the concrete ``document_dir``.  Accept
+        # and preserve that known field; continue rejecting arbitrary extras.
+        unknown = set(row) - {
+            "case_id",
+            "document_id",
+            "document_dir",
+            "question",
+            "question_id",
+            "run_key",
+        }
         if unknown:
             raise ValueError(
                 f"{path}:{line_number}: unsupported fields: {sorted(unknown)}"
