@@ -826,6 +826,44 @@ def test_visual_scan_runs_in_fixed_page_batches_without_controller_budget(
     assert result.action_trace.entries[0].metadata["total"] == 1
 
 
+def test_visual_scan_deduplicates_page_aliases_before_scanning(
+    tmp_path: Path,
+) -> None:
+    document = _document(tmp_path, page_element_specs=[[], []])
+    document.pages[0] = document.pages[0].model_copy(
+        update={"page_label_aliases": ["1", "2"]}
+    )
+    scanner = ScriptedVisualScanner()
+    result = ReadingEnvironment(
+        document,
+        asset_root=tmp_path,
+        controller=RejectingController(),
+        reader=DeterministicContentReader(),
+        checker=PredicateChecker(lambda text: "total count of 1" in text),
+        answerer=EvidenceAnswerer(),
+        visual_scanner=scanner,
+        config=ReadingEnvironmentConfig(action_budget=1, visual_scan_batch_size=2),
+    ).run(
+        root_question=RootQuestion(
+            question_id="root:visual-scan-aliases",
+            text="How many requested diagrams occur on Pages 1-2?",
+        ),
+        visual_scan_requirements={
+            "root:visual-scan-aliases": VisualScanRequirement(
+                required=True,
+                scope={"kind": "pages", "text": "Pages 1-2"},
+            )
+        },
+    )
+
+    assert result.status == ReadingRunStatus.READY
+    assert scanner.image_counts == [1]
+    entry = result.action_trace.entries[0]
+    assert entry.target_ids == [document.pages[0].page_id]
+    assert entry.metadata["scanned_page_count"] == 1
+    assert entry.metadata["deduplicated_page_ids"] == [document.pages[0].page_id]
+
+
 def test_section_visual_scan_excludes_later_section_and_stops_next_batches(
     tmp_path: Path,
 ) -> None:

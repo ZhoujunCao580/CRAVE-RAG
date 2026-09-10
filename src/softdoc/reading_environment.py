@@ -1400,6 +1400,27 @@ class ReadingEnvironment:
             )
             return observations, memory, trace, False
 
+        # A printed-page range can map more than one requested label to the
+        # same physical page (for example, when OCR retained multiple page
+        # label aliases).  A page image must be scanned and recorded exactly
+        # once: duplicate inputs would both double-count visual findings and
+        # violate ReadRecord's visual-asset identity contract.
+        unique_pages: list[Page] = []
+        duplicate_page_ids: list[str] = []
+        seen_page_ids: set[str] = set()
+        for page in pages:
+            if page.page_id in seen_page_ids:
+                duplicate_page_ids.append(page.page_id)
+                continue
+            seen_page_ids.add(page.page_id)
+            unique_pages.append(page)
+        pages = unique_pages
+        if duplicate_page_ids:
+            scope_metadata = {
+                **scope_metadata,
+                "deduplicated_page_ids": list(dict.fromkeys(duplicate_page_ids)),
+            }
+
         resolved: list[tuple[Page, Path]] = []
         missing_page_ids: list[str] = []
         for page in pages:
