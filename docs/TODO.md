@@ -1,147 +1,68 @@
 # TODO
 
-This file contains only unresolved work that requires evidence from real
-experiments. Implemented contracts and workflows belong in
-[`MODEL_CONTRACTS.md`](MODEL_CONTRACTS.md) and
-[`ARCHITECTURE.md`](ARCHITECTURE.md), not here.
+Only unresolved work belongs here. Historical experiments and completed fixes
+are recoverable from Git history and are not kept in the working tree.
 
-## 1. PDF and SoftDoc integrity
+## 1. Preserve the completed SFT assets
 
-- [ ] On the complete datasets, distinguish MinerU omissions, wrong element
-  types, and wrong crops from information lost by the SoftDoc adapter. Fix
-  general failures instead of adding rules for individual documents.
-- [ ] Review the 22 upstream Table-type error candidates and measure their
-  impact on retrieval, reading, and answers before adding general type
-  validation or another parser backend.
-- [ ] Audit composite Tables as three distinct cases: valid `<img src>`, only
-  an `<image N>` placeholder, and no hint even though the visual region contains
-  an image. Do not add a VLM call for every Table in v0.
-- [ ] Compare the current pipeline, MinerU Hybrid, and visual recovery on a
-  larger sample. Remove recovery/normalization rules with no net benefit.
-- [x] Preserve MinerU aggregate Table HTML in Provenance and split runtime HTML
-  into physical-page fragments only when row ownership is unique, ordered,
-  complete, and free of a cross-page `rowspan`. Emit confirmed `continued_on`
-  only for those groups; ambiguous groups remain untouched and cannot lend
-  headers to adjacent Tables.
-- [ ] On the full QA failure set, measure whether confirmed fragment header
-  inheritance and joint header/data rereads improve answer quality without
-  causing unrelated adjacent Tables to be merged.
+- [ ] Copy the 500+ reviewed Controller SFT dataset, its manifest, exact
+  training config, and final adapter from external storage into a durable
+  versioned archive. These large artifacts are not committed to Git.
+- [ ] Record exact base-model revision, tokenizer revision, adapter SHA-256,
+  random seed, package lock, and the scorer summary that produced **56.45%
+  Accuracy / 55.32% generalized F1**.
+- [ ] Keep Test sealed from further label or checkpoint decisions. Use
+  document-isolated Dev or a new Reserve split for selection.
 
-## 2. Planner policy
+## 2. Expand Controller supervision carefully
 
-- [ ] Compare No Planner, Initial Planner, and Deferred Planner under identical
-  full-loop conditions.
-- [ ] Report answer quality, Evidence completeness, action/model-call count,
-  latency, and cost. Implement dynamic plan updates only if Deferred Planning
-  provides a stable net gain.
+- [ ] Add real Teacher corrections at the first wrong Controller decision,
+  continue through the actual Reading Environment, and retain a trajectory only
+  when the corrected route succeeds.
+- [ ] Balance Text/Table/Figure, exact/search/relation/page-context actions,
+  single-hop/multi-hop tasks, failure recovery, and efficient successful
+  trajectories. Normalize per question so long runs do not dominate.
+- [ ] Recheck the two observed SFT regressions on Dev-like states and add
+  counterexamples only when the error is attributable to the Controller.
+- [ ] Compare checkpoints using JSON validity, action validity, visible-ID
+  validity, Teacher route agreement, repeat rate, answer Accuracy/F1, Evidence
+  sufficiency, latency, and cost.
 
-## 3. Retrieval, candidate batches, and budget
+## 3. Decide whether Checker SFT is justified
 
-- [ ] Compare weighted RRF, fixed-quota mixing such as `3 BM25 + 2 Dense`, and
-  BM25-first with Dense used only when needed.
-- [ ] On evidence-page retrieval, compare text-only BM25/Dense, retrieval-only
-  VLM descriptions, native visual page retrieval, and their combinations.
-  Generated descriptions may create CandidatePreviews but must never become
-  Observations or Evidence without reading the original visual source.
-- [ ] Tune CandidatePreview batch sizes such as `3/5/10`, BM25/Dense quotas,
-  RRF parameters (including any visual channel), and the policy for
-  next/switch/new search.
-- [ ] Report more than Top-k recall: include candidate batches, full reads, VLM
-  calls, latency, and cost required to obtain sufficient Evidence.
-- [ ] **First experiment after the next server startup:** resume the 199 saved
-  step-7 `budget_exhausted` episodes once, with a total action limit of 12.
-  Preserve steps 1--7 exactly, never restart a question from step 0, and record
-  the first step at which each episode becomes `ready` (8, 9, 10, 11, 12, or
-  never). Report both incremental and cumulative rescues at each step before
-  choosing a new default action limit. This is a budget-horizon diagnostic,
-  not a new baseline score.
-- [ ] Replace the current action-count placeholder budget with configurable
-  resource cost. Paging search results, reading text, reading a whole page, and
-  inspecting a visual region must not be treated as equal-cost actions.
+- [ ] Build a new failure funnel after the trained Controller runs. Train the
+  Checker only on cases with a correct source and Reader Observation but an
+  incorrect Evidence decision.
+- [ ] Keep Checker examples and adapters separate from Controller data. Preserve
+  atomic Evidence deltas, stable source/page/element identity, target-switch
+  rechecks, and Observation Recall behavior.
 
-## 4. Reader and visual actions
+## 4. Add preference training only after SFT stabilizes
 
-- [ ] On real QA, compare direct Controller use of structured content with a
-  dedicated Reader producing Observations. Keep the dedicated Reader only if it
-  improves quality or cost.
-- [ ] Visual Reader v0 handles Page, Figure, and Chart together. Decide from
-  experiments whether Page/Element or Figure/Chart Readers should be separated.
-- [ ] Default to single-image reads. Decompose multi-image numeric or factual
-  comparisons into separate reads followed by Answerer aggregation. Use joint
-  multi-image reading only when the visual relationship itself is inseparable.
-- [ ] Evaluate the implemented Multimodal Table Reader on the server failure
-  set before enabling it by default. `INSPECT_REGION`/zoom remains deferred;
-  do not expand the action schema for hypothetical cases.
-- [ ] When `continued_on` is absent, a candidate Relation is uncertain, or a
-  structured read fails, let the Controller choose an adjacent page, candidate
-  relation, or visual read. The Reader must not navigate automatically.
+- [ ] Define a versioned Controller preference schema containing one exact
+  ControllerInput, one `chosen` legal action, one `rejected` action, prompt
+  lineage, source-run identity, and non-model-visible outcome/cost metadata.
+- [ ] Add a model-free preference validator: identical state for both actions,
+  valid visible IDs, no Gold leakage, no duplicate pair, and no upstream
+  retrieval/Reader/Checker corruption.
+- [ ] Implement a DPO/ORPO-compatible exporter and trainer configuration.
+- [ ] Mine rejected actions from real Student failures and same-state Teacher
+  corrections; do not manufacture easy invalid-ID negatives as the main data.
+- [ ] Evaluate whether preference training reduces repeated exploration and
+  premature STOP without regressing answer quality.
 
-## 5. Relation and rule audits
+## 5. Remaining system evaluation
 
-- [ ] Ablate `caption_of`, `footnote_of`, `refers_to`, Section, page/reading
-  adjacency, and `continued_on` on real trajectories. Measure Evidence gain,
-  searches avoided, and incorrect-navigation cost.
-- [ ] Audit the remaining aggressive rules, starting with
-  `parser_declared_function_target`, `bounded_nearest_compatible_element`, and
-  `profile_forced_sibling_level`. Retain, downgrade to candidate, or remove each
-  rule based on final QA utility.
-- [ ] Keep confirmed and candidate Relations separate in evaluation. A
-  candidate is an investigation opportunity and must not become a fact merely
-  because the Controller explored it.
-
-## 6. Observation, Evidence Checker, and Recall
-
-- [ ] Decide how to persist mixed Observations (regression case C23). When one
-  Observation contains both a reliable local fact and a claim that the current
-  source cannot establish causality, test whether to promote the reliable
-  sub-fact while keeping the causal insufficiency in the limitation/current
-  gap. Bounded target-switch Observation Recall now covers relevant historical
-  claims that were preserved but not admitted into Evidence; source rereading
-  remains a separate deferred problem when the earlier Reader never extracted
-  the later target's fact.
-- [x] Add bounded target-switch Observation Recall for historical claims that
-  never entered Evidence. The Environment selects at most three deduplicated
-  lexical matches, presents them only to the Checker, and records no fake read
-  or Controller action. Server evaluation must still measure false reuse and
-  cost before enabling a broader semantic or source-recall policy.
-- [x] Keep normal read-time Evidence scoped to the current target. On every
-  later SubQuestion switch with accepted Evidence available, run a state-only
-  Checker recheck; explicitly record any reused Evidence IDs for the new target
-  without a fake read or Controller action.
-- [x] Keep lightweight Observation Recall limited to useful prior Observations
-  that never entered Evidence. Do not expose the complete ObservationStore to
-  the Controller. Source Recall remains deferred until real failures show that
-  a target-specific Reader omitted a later target's fact from the old
-  Observation.
-
-## 7. Controller policy and training
-
-- [ ] With stronger server models, test whether the Controller rejects previews
-  that are topically relevant but cannot fill the current field, and whether it
-  reliably distinguishes confirmed from candidate Relations.
-- [ ] Build Teacher trajectories that record acceptable actions, net Evidence
-  gain, cost, and failure cause per step. Start with prompted Teacher/SFT before
-  deciding whether preference training or RL is necessary.
-- [ ] Prevent meaningless loops: repeat an action only after Evidence, gap,
-  readability, or candidate state changes. `STOP` must never turn incomplete
-  into ready.
-- [ ] Compare giving the Controller only the current gap with giving it concise
-  full Evidence and recent feedback. Freeze training inputs only after testing
-  which state fields actually improve action selection.
-- [ ] Single-step Controller SFT learns only `ControllerInput -> Action` and may
-  miss long-horizon credit assignment, route planning, temporarily low immediate
-  information gain, and trajectory-level cost control. Preserve the full
-  `ModelPipelineRun`, then compare multi-turn trajectory supervision,
-  preference learning, and RL before expanding the training target.
-
-## 8. Answerer and final citations
-
-- [ ] With stronger models, test abstention when Evidence proves only that a
-  change occurred but the Root asks why it occurred. The primary safeguard is
-  still preventing the Checker from declaring `ready` too early.
-- [ ] Implement a deterministic Citation Materializer that expands
-  `used_evidence_ids -> observation_ids -> ReadRecord.inputs -> SoftDoc source`
-  into Document/Page/Element/Region citations. The Answerer must not invent
-  source locations.
-- [ ] On complete datasets, evaluate end-to-end answer quality, Evidence
-  sufficiency, citation correctness, reading efficiency, and cost.
+- [ ] Evaluate Multimodal Table Reader alignment, cross-page header inheritance,
+  unit preservation, and HTML/image disagreement on held-out documents.
+- [ ] Measure BM25, text Dense, and visual Dense recall/nDCG separately and as
+  the frozen mixed batch; also report reads, VLM calls, latency, and cost.
+- [ ] Evaluate question-directed Visual Scan on whole-document, explicit-page,
+  and section scopes without restoring the retired MinerU-inventory Coverage
+  path.
+- [ ] Audit bounded Observation Recall and target-switch Evidence recheck for
+  false reuse before expanding to semantic or source recall.
+- [ ] Implement deterministic final citation materialization from accepted
+  Evidence through Observation and ReadRecord provenance.
+- [ ] Run a final untouched Reserve evaluation or the complete official
+  MMLongBench-Doc protocol before making public leaderboard claims.

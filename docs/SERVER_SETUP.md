@@ -252,11 +252,11 @@ entry. It does **not** yet provide a finished RL reward, production Teacher
 dataset, or claim that the sample record is sufficient for training. Those are
 research artifacts to be created after trajectory collection and evaluation.
 
-For the time-bounded Qwen3.5-27B Controller-only pilot, use
-[`CONTROLLER_SFT_PILOT_RUNBOOK_CN.md`](CONTROLLER_SFT_PILOT_RUNBOOK_CN.md).
-The batch runner accepts `--controller-model <vLLM-LoRA-alias>` while leaving
-Planner, Reader, Checker, and Answerer on `--text-model`. Omitting the option
-preserves the old all-base behavior.
+For Controller SFT artifact boundaries, dataset validation, offline comparison,
+and the future DPO handoff, use [`POST_TRAINING.md`](POST_TRAINING.md). The batch
+runner accepts `--controller-model <vLLM-LoRA-alias>` while leaving Planner,
+Reader, Checker, and Answerer on `--text-model`; omitting it preserves the
+all-base behavior.
 
 ## 6. What must be transferred separately
 
@@ -288,23 +288,11 @@ script for these artifacts. Do not commit credentials or copyrighted corpora.
 7. Review Controller and Checker decisions before exporting any SFT rows.
 8. Train a tiny smoke adapter before committing to a long QLoRA run.
 
-## 8. Next server experiment: action-budget horizon
+## 8. Resume after a long pause
 
-The first experiment after the next server startup is not a fresh benchmark
-run. Resume the 199 preserved episodes that stopped at the seven-action limit
-and allow each episode to continue through at most step 12. The saved first
-seven actions, EvidenceMemory, ObservationStore, SearchSession cursors, visible
-candidate batch, and exact-anchor activation state are the checkpoint; do not
-ask the models to regenerate them.
-
-For each episode record `first_ready_step` as 8, 9, 10, 11, 12, or null. From
-that single continuation run, derive how many additional episodes are rescued
-at step 8, steps 9--10, and steps 11--12. Keep non-ready failure types separate
-because a larger action budget cannot by itself repair repeated reads,
-retrieval misses, rejected Checker deltas, or premature `STOP` decisions.
-
-Before the full continuation, run one real checkpoint through one additional
-action and confirm that the old trace is byte-for-byte unchanged and the next
-Controller input reports the correct remaining budget. This local smoke check
-has already passed with Qwen; repeat it on the server model and production
-retrieval configuration before processing all 199 episodes.
+Restore ignored corpora, visual/dense indexes, model checkpoints, adapters, and
+reviewed training JSONL from external storage before starting a server run.
+Then confirm the Git commit, prompt manifest, frozen document split, and model
+aliases. Use a fresh output directory and validate one representative case
+before launching a paid batch. Historical `.runlogs` are intentionally not a
+project dependency.

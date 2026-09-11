@@ -1,87 +1,118 @@
 # CRAVE-RAG Architecture
 
-**CRAVE-RAG** stands for **Controller-guided Reading and Action Via Evidence Gaps**. SoftDoc remains the parser-neutral document representation, and `softdoc` remains the stable Python package and CLI name.
+CRAVE-RAG stands for **Controller-guided Reading and Action Via Evidence
+Gaps**. It is a multimodal long-document QA system in which retrieval proposes
+where to read, while accepted Evidence—not retrieval rank—controls completion.
 
 ![CRAVE-RAG overview](assets/crave-rag-overview.svg)
 
-## Core Loop
+## Offline document layer
 
-1. A question and the persistent candidate pool provide possible reading entry points.
-2. The Controller chooses the next reading move using the current Evidence state and available document structure.
-3. The selected Reader produces source-linked Observations.
-4. The Evidence Checker evaluates progress, revises Evidence Memory, and maintains the active gap.
-5. If Evidence is incomplete, control returns to the Controller. If it is sufficient, the Answerer responds using accepted Evidence.
-
-## Safety Boundary
-
-- Search results and candidate previews are reading leads, not Evidence.
-- Visual search summaries and keywords are offline retrieval metadata, not
-  Observations or Evidence; the original asset must still be read.
-- Confirmed Relations are navigation handles.
-- Candidate Relations are investigation hints, not established facts.
-- Readers produce Observations; only the Checker may admit them into Evidence Memory.
-- The Answerer receives accepted Evidence rather than raw retrieval or navigation state.
-- Accepted Evidence remains traceable through its Observation and read record to the underlying document source.
-
-## Implementation Boundary
-
-The repository implements and tests the SoftDoc foundation, MinerU adapter and deterministic passes, document relations, retrieval stack, resumable search sessions, candidate previews, the contracts for planning, reading, evidence checking, and answering, an injectable Reading Environment v0, and an Ollama-backed runner that executes those contracts as one stateful loop.
-
-Production-quality model policies, citation materialization, model-quality
-evaluation, deferred planning, broader semantic/source recall, post-training,
-and full-dataset end-to-end answer evaluation remain research-stage work. The
-runtime already implements a bounded lexical Observation Recall pass for a
-newly selected SubQuestion, but its model-level precision still requires
-server evaluation.
-
-## Executable Reading Loop
-
-`src/softdoc/reading_environment.py` now connects the frozen contracts without
-creating a second state model:
+MinerU output is normalized into a parser-neutral SoftDoc:
 
 ```text
-activate the Root directly when the plan is empty, otherwise activate the
-first dependency-ready SubQuestion
-  -> resolve a unique exact anchor when possible
-  -> otherwise let the Controller search or navigate
-  -> execute a read and append a ReadRecord/Observation
-  -> invoke the Checker when an Observation exists
-  -> atomically apply the Evidence delta
-  -> continue from the remaining gap, or invoke the Answerer when ready
+Document
+├─ Page
+│  └─ Heading / Paragraph / Table / Figure / Chart / Caption / Footnote
+├─ Section hierarchy
+└─ confirmed and candidate Relations
 ```
 
-The v0 boundary is intentionally strict:
+Stable document, page, element, region, and visual-asset identities preserve
+layout, reading order, provenance, and source paths. Confirmed relations support
+navigation; candidate relations remain hypotheses.
 
-- a unique Page or Element exact anchor is read before ordinary search;
-- Search results and CandidatePreviews are never Evidence;
-- Reader limitations survive even when no Observation is produced;
-- confirmed relations may be followed from either visible endpoint without
-  changing their canonical SoftDoc direction;
-- every visible Relation is oriented around the current reading focus and
-  includes `related_source_preview`, a short deterministic view of its other
-  endpoint; this preview is a navigation clue, never Evidence;
-- candidate relations may be investigated but are not promoted to confirmed;
-- invalid Checker deltas leave canonical EvidenceMemory unchanged;
-- question advancement and Answerer invocation are program controlled;
-- satisfying every planned SubQuestion is necessary but not automatically
-  sufficient: the complete Evidence set must still make the Root ready;
-- the Controller may stop explicitly without changing incomplete Evidence to ready;
-- Relations whose other endpoint cannot be read by the current Environment are not exposed as actions;
-- cross-store references are validated after every action.
+Tables keep structured HTML/cells and visual crops. Confirmed cross-page table
+fragments may inherit headers through `continued_on`; ambiguous fragments are
+not merged automatically.
 
-`ReadingRunResult` is also the checkpoint boundary for a reading episode. In
-addition to Evidence, Observations, and the append-only action trace, v0.3
-persists search cursors, the currently visible candidate batches, the active
-search session, and the questions whose exact anchors have already been
-activated. A `budget_exhausted` result can therefore be resumed with a larger
-action limit without repeating prior model calls or rereading an automatic
-exact anchor. Legacy v0.2 results reconstruct the small visibility registry
-from their saved SearchSessions and ActionTrace before continuing.
+## Retrieval and candidate presentation
 
-`scripts/audit_reading_environment_v0.py` is a small real-SoftDoc replay audit.
-Its scripted Teacher decisions replace unfinished learned components only to
-test orchestration and state transitions; the report is not an Agent accuracy
-score. Known v0 boundaries remain: Section exact anchors do not yet trigger
-scoped reading, the resource budget is an action-count placeholder, and the
-current Ollama model backends have not yet been accepted as production-quality
-policies.
+The online retrieval stack has three ranked routes:
+
+1. BM25 over text-bearing SearchUnits;
+2. text Dense retrieval over the same semantic units;
+3. native visual Dense retrieval over visual assets, including Tables with a
+   usable crop.
+
+Exact Page/Figure/Table anchors are resolved before ordinary ranking. Text
+scores are fused, then a fixed mixed batch presents text and visual candidates.
+All routes deduplicate by stable source/`element_id`, so a Table retrieved by
+both text and image occupies one slot and is read once.
+
+Candidate previews are decision aids only. Paragraphs use matched text;
+Tables prefer an HTML-derived TablePreview; visual candidates receive a short
+VLM description only after their batch is frozen. That description is cached
+for presentation and never inserted into BM25/Dense text retrieval, an
+Observation, or Evidence.
+
+## Agentic reading loop
+
+```text
+Question -> Planner -> current target + active gap
+                         |
+                         v
+          mixed candidate batch + visible relations
+                         |
+                         v
+                    Controller
+        SEARCH / READ_SOURCE / READ_PAGE_CONTEXT /
+                    FOLLOW_RELATION
+                         |
+                         v
+        Text Reader / Visual Reader / Multimodal Table Reader
+                         |
+                         v
+              source-linked Observations
+                         |
+                         v
+                 Evidence Checker
+         atomic Evidence delta + next active gap
+                         |
+              incomplete | ready
+                  loop    | Answerer
+```
+
+The Planner may keep the Root intact or create a small validated DAG. The
+Controller sees only legal actions and current visible IDs. Readers interpret a
+selected source for the Controller's `local_problem`; they do not navigate or
+admit Evidence.
+
+The Multimodal Table Reader receives aligned structured cells/HTML and the
+original crop when available. It uses text for exact strings and numbers when
+alignment is clear and the image for layout, headers, units, and visible
+context. Ambiguity becomes a limitation instead of a fabricated cell mapping.
+
+The Checker receives the current target, new Observations, limitations, and
+complete Evidence Memory. Its delta is validated and applied atomically. A
+target switch may trigger a state-only Evidence recheck plus at most three
+relevant unaccepted historical Observations. No fake read or Controller action
+is created.
+
+## Persistence and completion
+
+Every run persists Planner, Controller, Reader, Checker, and Answerer inputs and
+outputs; candidate batches; SearchSession cursors; action trace; Observation
+Store; Evidence Memory; latency; and diagnostics. Stable identities allow a
+source to be traced from final Evidence back to the original page or region.
+
+The Answerer sees accepted Evidence only. `ready` is program-controlled from
+Checker state. Explicit STOP or budget exhaustion remains incomplete and emits
+`Not answerable`; it cannot silently promote weak Evidence.
+
+Question-directed Visual Scan is a separate whole-page VLM path for exhaustive
+visual questions over a resolved document/page/section scope. The earlier
+MinerU-inventory Coverage route remains disabled compatibility code and is not
+part of current runs.
+
+## Post-training boundary
+
+Controller SFT uses the exact online `ControllerInput` as the user message and
+a validated legal `ControllerAction` as the target, with prompt hashes and
+source-run lineage. Checker data is exported and trained separately. Preference
+training must compare chosen and rejected actions under the identical visible
+state; future Environment outcomes may be stored as audit metadata but cannot
+leak into model input.
+
+The current Controller-only SFT result is **56.45% Accuracy / 55.32%
+generalized F1**, up from **50.00% / 49.44%** on the same internal Test.

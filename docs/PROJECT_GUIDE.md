@@ -24,11 +24,17 @@ The guiding principle is:
 - Stable serialization, validation, in-memory document access, overlays, and
   spatial queries.
 - Exact Anchor lookup, SearchUnits, BM25, multilingual-E5 dense retrieval,
-  SearchSessions, and deterministic CandidatePreviews.
+  native visual Dense retrieval, SearchSessions, fixed mixed candidate batches,
+  Element-level route deduplication, and deterministic CandidatePreviews.
 - Optional conservative Planner: zero SubQuestions when no decomposition is
   needed, or a validated DAG for genuine decomposition.
-- Visual Reader request/result contracts and prompt.
-- Retrieval-only visual search identities with asset and Prompt provenance.
+- Visual Reader and question-directed full-page Visual Scan contracts.
+- Retrieval-only visual identities and on-demand Controller-facing visual
+  descriptions with asset and Prompt provenance. Descriptions do not enter
+  text retrieval or Evidence.
+- Dual-route Table retrieval plus a Multimodal Table Reader that combines
+  HTML/cells, crop pixels, table units, page/source identity, and confirmed
+  cross-page header inheritance.
 - Append-only ObservationStore and atomic Evidence Checker deltas.
 - Target-switch Evidence rechecking plus bounded, Checker-only Observation
   Recall for relevant historical claims that never entered Evidence.
@@ -36,21 +42,22 @@ The guiding principle is:
   `STOP`.
 - Evidence-only Answerer contract and prompt.
 - An injectable Reading Environment that exercises the complete state loop.
-- Ollama-backed Visual Retrieval, Planner, Controller, Visual Reader, Checker,
-  and Answerer
-  adapters plus an auditable end-to-end model runner; text and structured
-  tables use the deterministic Reader before any visual fallback.
+- Ollama/OpenAI-compatible backends for Planner, Controller, visual retrieval,
+  Readers, Checker, Answerer, and Visual Scan, plus a persistent concurrent
+  end-to-end batch runner.
 - Unified prompt registry, evaluation launcher, Linux bootstrap, and generic
   LoRA/QLoRA SFT entrypoint.
 - Complete model-run audit packets, thin per-decision Teacher reviews, and
   separate strict Controller/Checker SFT exporters with Prompt/version lineage.
+- A completed Controller-only SFT round using 500+ reviewed decisions, improving
+  the internal Test from 50.00%/49.44% to 56.45%/55.32% Accuracy/F1.
 
 ## Not yet claimed as complete
 
 - Production-quality Reader evaluation and server-native model adapters beyond
   the current Ollama v0 backend.
-- A trained Controller policy or a production Teacher trajectory corpus.
-- A reviewed, diverse local Teacher corpus and preference/RL data.
+- A production-scale Teacher trajectory corpus or externally released adapter.
+- A canonical preference/DPO dataset, DPO trainer, or RL training pipeline.
 - Deferred planning and broader semantic/source recall beyond the bounded
   target-switch Observation Recall implementation.
 - Citation materialization in final user-facing output.
@@ -71,6 +78,8 @@ src/softdoc/
   prompts/                  current versioned prompt text for all components
   visual_reading.py         Visual Reader contract and user-prompt renderer
   visual_retrieval.py       Offline visual search identity and provenance
+  visual_scan.py            scoped whole-page visual scan contract
+  table_reading.py          Multimodal Table Reader contract and prompt renderer
   reading_state.py          reads, Observations, Evidence, and action trace
   checking_prompt.py        Checker version and compatibility loader
   controller.py             Controller input and action contracts
@@ -79,6 +88,7 @@ src/softdoc/
   model_backends.py         Ollama Reader/Checker/Answerer adapters
   model_runner.py           Planner-to-Answerer runner and audit artifacts
   teacher_data.py           thin Controller/Checker reviews and separate SFT exports
+  training_data.py          version-bound model-facing SFT records
   answering.py              Answerer contract and user-prompt renderer
   prompt_registry.py        single prompt discovery/version entrypoint
   evaluation_protocol.py    frozen metrics and immutable experiment snapshots
@@ -87,18 +97,14 @@ src/softdoc/
 Supporting areas:
 
 ```text
-tests/                      regression tests; keep with behavior changes
-scripts/evaluate_*.py       reproducible component evaluations
-scripts/train_sft.py        generic validated LoRA/QLoRA SFT entry
-configs/training/           example training-data contract
+tests/                      core contract and runtime regression tests
+scripts/run_model_batch.py  persistent closed-loop evaluation runner
+scripts/train_sft.py        validated LoRA/QLoRA SFT entry
+scripts/evaluate_controller_sft_offline.py  policy-level adapter comparison
+configs/training/           frozen document split and training-data examples
 constraints/                reproducible CI dependency pins
 docs/                       current design, setup, and research boundaries
 ```
-
-`tests/fixtures/controller_gold_5_diagnostics_v0.json` is a historical
-diagnostic captured with Controller prompt v0.2 and action v0.1. Its version
-headers describe the model run that produced the observations; they are not
-the current canonical Prompt or action versions.
 
 ## Canonical references
 
@@ -113,15 +119,12 @@ the current canonical Prompt or action versions.
   manifests, fail-fast corpus auditing, and Gold-free batch export.
 - [Evaluation Protocol](EVALUATION_PROTOCOL.md): canonical development/reference
   scoring boundary, metric definitions, and immutable experiment IDs.
-- [Server Experiment Plan](SERVER_EXPERIMENT_PLAN_CN.md): dependency-ordered
-  component gates, integration smoke tests, affected-case replays, and the next
-  development baseline.
 - [Research Positioning](RESEARCH_POSITIONING.md): current research hypothesis
   and novelty boundary.
 - [TODO](TODO.md): unresolved decisions and experiments. A TODO is not an
   implemented feature.
-- [Teacher Loop Handoff](TEACHER_LOOP_HANDOFF.md): artifact boundaries,
-  review/export workflow, and quality rules for trajectory distillation.
+- [Post-training Guide](POST_TRAINING.md): durable SFT/DPO artifact boundaries,
+  review/export workflow, metrics, and resume checklist.
 
 Frozen prompt text is not copied into documentation. Edit or inspect the
 versioned files in `src/softdoc/prompts/`, and use the executable registry to
@@ -141,7 +144,6 @@ softdoc prompts show answerer
 ```bash
 python -m pip install -e .
 python -m pytest -q
-python scripts/evaluate_prompts.py --dry-run
 softdoc doctor --profile core
 ```
 

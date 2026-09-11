@@ -159,7 +159,7 @@ def _summarize_records(records: list[dict[str, Any]]) -> dict[str, Any]:
     treated as a positive prediction; terminal fallback runs persist
     ``Not answerable`` and are treated as negative predictions.  This matches
     the frozen Test baseline accounting in
-    ``docs/MMLONGBENCH_SPLIT_AND_SCORECARD_CN.md``.
+    ``docs/EVALUATION_PROTOCOL.md``.
     """
 
     status_counts = Counter(row["reading_status"] for row in records)

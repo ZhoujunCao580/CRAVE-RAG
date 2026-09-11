@@ -94,4 +94,8 @@ The current Git history verifies development from 2026-07-21 onward. The initial
 - “separate Controller and Checker is always better”;
 - “the current local prototype already outperforms Q-Guide, DocNavRAG, MAGE-RAG, or G2-Reader.”
 
-Those statements require experiments or are contradicted by nearby work. The current repository provides the representation, retrieval, and state contracts needed to test a narrower and more defensible hypothesis.
+Those statements require comparable experiments or are contradicted by nearby
+work. The repository now includes one Controller-only SFT result on the frozen
+internal Test (56.45% Accuracy and 55.32% generalized F1), but it still does not
+support cross-system superiority claims because the evaluation subsets and
+answer-equivalence protocols are not identical.

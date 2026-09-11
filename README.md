@@ -12,12 +12,36 @@ The Controller maintains a current question and evidence gap, then chooses how t
 
 ## Core Design
 
-This loop gives the system four important properties:
+CRAVE-RAG separates *finding*, *reading*, and *believing* a source instead of
+placing one retrieved context directly in front of an answer model.
 
-- **Active reading:** it can keep reading from a useful clue instead of repeatedly rebuilding a fixed final context.
-- **Structured navigation:** page structure and document relations become explicit reading opportunities rather than automatically expanded answer context.
-- **Independent evidence control:** the Controller explores, while the Checker separately decides whether an Observation deserves to enter Evidence.
-- **Traceable decisions:** every reading action, Observation, and accepted Evidence item remains connected to its source, providing the inputs needed for deterministic citation materialization.
+- **Three-route retrieval:** BM25, text Dense, and native visual Dense retrieval
+  produce one mixed candidate batch. Exact anchors are resolved before ranking;
+  duplicate routes to the same `element_id` occupy only one candidate slot.
+- **Preview/read separation:** text snippets, HTML-derived `TablePreview`s, and
+  short VLM visual descriptions help the Controller choose what to open. A
+  visual description is generated only after a batch is frozen, is cached by
+  source identity, and never becomes searchable text or Evidence.
+- **Multimodal table reading:** every Table may be recalled through text and
+  visual routes, but `READ_SOURCE` resolves both to one Table identity. The
+  Table Reader receives structured HTML/cells, the original crop, inherited
+  headers for confirmed continuations, page/source identity, and the current
+  local problem. It emits grounded Observations plus explicit limitations.
+- **Action-controlled reading:** the Planner proposes a small question DAG;
+  the Controller selects Search, Read, page-context, or relation-navigation
+  actions from only currently visible IDs. Readers never navigate on their own.
+- **Evidence-gated completion:** Readers create source-linked Observations; an
+  independent Checker atomically updates Evidence Memory and the active gap.
+  Candidate previews, relations, and unaccepted Observations cannot reach the
+  Answerer.
+- **Long-horizon state:** search cursors, candidate batches, reads,
+  Observations, Evidence, limitations, and actions are persisted. Target-switch
+  Evidence rechecks and bounded Observation Recall can reuse earlier facts
+  without creating fake reads.
+- **Post-training boundary:** Controller supervision is exported as versioned
+  `ControllerInput -> Action` records with prompt hashes and source-run lineage.
+  Checker supervision stays separate; future preference pairs must compare
+  actions under the identical visible state.
 
 ## Soft Document Structure
 
@@ -78,17 +102,6 @@ softdoc parse-mineru <MINERU_OUTPUT_DIR> --output <SOFTDOC_OUTPUT_DIR>
 softdoc validate <SOFTDOC_OUTPUT_DIR>
 ```
 
-With representative SoftDocs available locally, the model-free replay audit
-exercises Search, Exact routing, reading, Checker deltas, Relation navigation,
-and answering with scripted backends:
-
-```bash
-python scripts/audit_reading_environment_v0.py --softdoc-root <SOFTDOC_ROOT>
-```
-
-This replay checks interfaces and state transitions; it is not a model-quality
-benchmark.
-
 With the required Ollama text and visual models available, run a low-level
 single-case component smoke on one serialized SoftDoc:
 
@@ -146,14 +159,11 @@ visual index is missing.
 ## Prompts and Evaluations
 
 Editable, versioned prompt text lives together under
-[`src/softdoc/prompts/`](src/softdoc/prompts/README.md). The registry remains
-the runtime discovery and hashing interface for the seven active model-facing
-prompts. The retired Coverage Checker remains available only as an explicitly
-exported `legacy_inactive` historical prompt:
+[`src/softdoc/prompts/`](src/softdoc/prompts/README.md). The registry is the
+runtime discovery and hashing interface for active model-facing prompts:
 
 ```bash
 softdoc prompts list
-softdoc prompts list --include-inactive
 softdoc prompts show controller
 softdoc prompts show planner --question "How did revenue change?"
 softdoc prompts export --output .runlogs/prompts
@@ -186,4 +196,4 @@ committed to Git. Use the [external-dataset manifest and
 auditor](docs/EXTERNAL_DATASETS.md) before batch execution. See [Server
 Setup](docs/SERVER_SETUP.md).
 
-See [Project Guide](docs/PROJECT_GUIDE.md), [Server Experiment Plan](docs/SERVER_EXPERIMENT_PLAN_CN.md), [Model Contracts](docs/MODEL_CONTRACTS.md), [Architecture](docs/ARCHITECTURE.md), and [TODO](docs/TODO.md) for the current implementation boundary, complete JSON interfaces, validation order, and open research questions.
+See [Project Guide](docs/PROJECT_GUIDE.md), [Post-training Guide](docs/POST_TRAINING.md), [Model Contracts](docs/MODEL_CONTRACTS.md), [Architecture](docs/ARCHITECTURE.md), and [TODO](docs/TODO.md) for the current implementation boundary, complete JSON interfaces, training-data rules, and open research questions.

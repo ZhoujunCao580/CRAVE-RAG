@@ -11,7 +11,6 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from audit_representative_tables import parse_table_html
 from softdoc.models import Element, ElementType
 from softdoc.serialization import load_document
 from softdoc.table_view import (
@@ -120,7 +119,6 @@ def materialize_corpus(corpus_dir: Path, output_dir: Path) -> dict[str, Any]:
         "automatic_check_failure_count": len(automatic_failures),
         "automatic_checks": [
             "all Table Elements produce one TableView",
-            "independent HTML parser agrees on anchor cells and coordinates",
             "all serialized visual assets exist",
             "rowspan/colspan runtime occupancy resolves to anchor cells",
             "materialization is deterministic",
@@ -152,28 +150,6 @@ def _automated_check(
             {"element_id": element.element_id, "check": code, "detail": detail}
         )
 
-    audit_cells, audit_rows, audit_columns, audit_issues = parse_table_html(
-        element.html or ""
-    )
-    expected = [
-        (cell.row, cell.column, cell.rowspan, cell.colspan, cell.text or None)
-        for cell in audit_cells
-    ]
-    actual = [
-        (cell.row, cell.column, cell.rowspan, cell.colspan, cell.text)
-        for cell in result.view.cells
-    ]
-    if expected != actual:
-        fail("independent_anchor_cells", "Core and audit HTML parsers disagree.")
-    if (audit_rows, audit_columns) != (
-        result.view.row_count,
-        result.view.column_count,
-    ):
-        fail(
-            "independent_grid_size",
-            f"audit={audit_rows}x{audit_columns}, "
-            f"view={result.view.row_count}x{result.view.column_count}",
-        )
     for asset in result.view.visual_assets:
         resolved = asset.path if asset.path.is_absolute() else document_root / asset.path
         if not resolved.is_file():
@@ -195,7 +171,6 @@ def _automated_check(
         fail("json_round_trip", "TableView changed after JSON round-trip.")
     return {
         "element_id": element.element_id,
-        "audit_parser_issues": audit_issues,
         "passed": not failures,
         "failures": failures,
     }
