@@ -61,7 +61,7 @@
   <text class="t" x="984" y="570" text-anchor="middle" font-size="22" font-weight="800">Evidence Checker</text>
   <path class="blue" d="M820 562 H700"/>
   <rect x="540" y="510" width="158" height="104" rx="18" fill="#eff6ff" stroke="#60a5fa" stroke-width="2"/>
-  <text class="t label" x="619" y="570" text-anchor="middle">State</text>
+  <text class="t" x="619" y="570" text-anchor="middle" font-size="18" font-weight="700">Evidence State</text>
   <path class="blue" d="M619 510 C619 374 811 334 944 289"/>
 
   <path d="M984 614 V668 H1245" fill="none" stroke="#15803d" stroke-width="2.8" marker-end="url(#greenArrow)"/>
