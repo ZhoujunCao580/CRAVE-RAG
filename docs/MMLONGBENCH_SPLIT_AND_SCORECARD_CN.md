@@ -1,6 +1,6 @@
 # CRAVE-RAG：MMLongBench-Doc 拆分与评估记分牌
 
-> 更新日期：2026-09-10  
+> 更新日期：2026-09-11
 > 数据集：MMLongBench-Doc v1 当前 135 文档 / 1,091 问题快照  
 > 边界：这是内部文档级开发拆分，不是官方公开基准的完整复现，也不能宣称为外部未见测试。
 
@@ -38,6 +38,9 @@
 | Test Core / Controller SFT pilot（81） | 已完成 | **42/81 = 51.9%** | **54.24%** |
 | Test Challenge / Controller SFT pilot（43） | 已完成 | **20/43 = 46.5%** | **40.00%** |
 | **Test 合并 / Controller SFT pilot（124）** | 已完成 | **62/124 = 50.0%** | **49.44%** |
+| Test Core / Controller SFT 500+（81） | 已完成 | **44/81 = 54.32%** | 待完整状态汇总 |
+| Test Challenge / Controller SFT 500+（43） | 已完成 | **26/43 = 60.47%** | 待完整状态汇总 |
+| **Test 合并 / Controller SFT 500+（124）** | **已完成** | **70/124 = 56.45%** | **约 55.32%** |
 | Reserve（445） | 未运行 | — | — |
 
 这里的“正式”表示项目后续选 checkpoint、比较 SFT 和汇报内部结果时统一采用的官方指标口径：Acc 按内容等价判对，F1 使用官方 generalized F1 公式。它不再与 48% 的未抽取严格字符串诊断值并列。若投稿或提交公开榜单，仍需披露本次等价判断含自动/人工校准，并补做官方三阶段复现。
@@ -156,3 +159,23 @@ Dev 合并正式结果 53.9% Acc / 53.28% F1 在数字上略高于 MAGE-RAG 主�
 
 该结果不能表述为 SFT 提升。它证明的是 Controller 数据审计、QLoRA、vLLM LoRA 路由和
 端到端评估闭环已经打通。完整技术边界见 `docs/CONTROLLER_SFT_PILOT_REPORT_CN.md`。
+
+## 9. Controller SFT 500+ 决策 Test 记录
+
+2026-09-11，在首轮 78 决策工程 pilot 之后，扩大到 **500+ 个经审阅的 Controller SFT
+决策样本**并在同一 124 题内部 Test 上完成配对评估：
+
+- Prompt-only baseline：**62/124 = 50.00% Acc，49.44% generalized F1**；
+- Controller SFT 500+：**70/124 = 56.45% Acc，约 55.32% generalized F1**；
+- 提升：**+6.45 个百分点 Acc，约 +5.88 个百分点 F1**；
+- Test Core 救回 6 题，得到 **44/81 = 54.32% Acc**；
+- Test Challenge 救回 4 题、退化 2 题，得到 **26/43 = 60.47% Acc**；
+- 合计救回 10 题、退化 2 题，净增加 8 道正确答案。
+
+该轮只训练 Controller；Planner、Reader、Checker、Answerer 与检索链路保持基座版本。它说明
+扩大且经过审阅的决策监督已经带来端到端净收益，不应再用 78 决策 pilot 的“净提升为 0”
+作为当前项目结论。当前 **55.32% F1 为按已知救回/退化和状态分布推算的近似值**；待完整
+SFT scorer 状态计数导入仓库后，应重新生成精确 precision、recall 与 F1，并将其替换。
+
+这里仍是内部 124 题、内容等价判分的配对结果，不等同于 MMLongBench-Doc 完整 1,091 题
+官方协议结果，也不能直接作为公开排行榜名次。

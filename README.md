@@ -35,13 +35,32 @@ The structure preserves page layout, element bounding boxes, reading order, visu
 
 ## Current Status
 
-The repository currently provides the SoftDoc representation, MinerU adaptation pipeline, deterministic document relations, spatial navigation, exact/sparse/dense retrieval, candidate previews, search sessions, frozen contracts for planning, reading, evidence checking, and answering, an executable stateful reading loop, and an Ollama-backed end-to-end runner with explicit incomplete termination.
+The repository currently provides the SoftDoc representation, MinerU adaptation pipeline, deterministic document relations, spatial navigation, exact/sparse/dense/visual retrieval, candidate previews, search sessions, multimodal table reading, frozen contracts for planning, reading, evidence checking, and answering, plus an executable stateful reading loop with explicit incomplete termination.
 
-The immediate research stage is generating and reviewing a small, diverse set
-of local reading runs, then exporting validated Controller decisions for SFT.
-Production policy evaluation, final source citation
-materialization, and full answer-quality and reading-efficiency experiments
-follow after that foundation is stable.
+The first Controller QLoRA/SFT iteration is complete. After a 78-decision
+pipeline pilot, the current Controller dataset was expanded to more than 500
+reviewed SFT decisions. On the frozen internal 124-question Test split, the
+prompt-only system scored **50.00% content accuracy / 49.44% generalized F1**.
+The latest Controller-SFT run scored **56.45% content accuracy / approximately
+55.32% generalized F1**, rescuing ten previously incorrect questions while two
+previously correct questions regressed (net +8). Planner, Reader, Checker, and
+Answerer remain on the base model; this is a Controller-only training result.
+
+| System | Evaluation scope | Accuracy | Generalized F1 |
+| --- | --- | ---: | ---: |
+| ColBERTv2 | Published full MMLongBench-Doc | 30.56% | 20.43% |
+| M3DocRAG | Published full MMLongBench-Doc | 38.21% | 37.52% |
+| G2-Reader | Published full MMLongBench-Doc | 46.96% | 45.29% |
+| CRAVE-RAG, prompt-only | Internal frozen Test, 124 questions | 50.00% | 49.44% |
+| **CRAVE-RAG, Controller SFT (500+ decisions)** | **Internal frozen Test, 124 questions** | **56.45%** | **~55.32%** |
+
+The published baselines and the internal CRAVE-RAG split are shown as context,
+not as a leaderboard claim: the evaluation subsets and answer-equivalence
+protocols are not identical. The SFT F1 remains approximate until the complete
+post-SFT status counts are persisted; accuracy is exact from 70/124 correct.
+The next research stage is expanding verified online Teacher rollouts, measuring
+paired rescue/regression behavior on document-isolated development data, and
+separately deciding whether Checker supervision is warranted.
 
 ## Quick Start
 
