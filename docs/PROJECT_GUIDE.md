@@ -13,8 +13,8 @@ controls Evidence; and the Answerer responds only from accepted Evidence.
 
 The guiding principle is:
 
-> Start from a clue, follow useful structure, and stop only when the evidence
-> is sufficient.
+> Find a promising entry point, read the document like a human, and judge
+> whether each finding helps answer the question.
 
 ## Current implemented boundary
 
