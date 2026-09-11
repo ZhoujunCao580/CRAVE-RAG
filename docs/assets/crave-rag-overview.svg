@@ -1,93 +1,81 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1040" viewBox="0 0 1800 1040" role="img" aria-labelledby="title desc">
-  <title id="title">CRAVE-RAG multimodal agentic reading architecture</title>
-  <desc id="desc">PDFs become typed SoftDocs. Exact anchors and three retrieval routes produce a deduplicated mixed candidate batch. A Controller selects actions, specialized readers create observations, and an independent Checker maintains evidence and the active gap. Audited decisions support Controller SFT and future DPO.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="900" viewBox="0 0 1800 900" role="img" aria-labelledby="title desc">
+  <title id="title">CRAVE-RAG architecture</title>
+  <desc id="desc">A PDF becomes a SoftDoc and is retrieved through BM25, text Dense, and visual Dense routes. A Planner, Controller, Environment, specialized Readers, Evidence Checker, and Answerer form a stateful evidence-gated reading loop. Audited decisions support Controller SFT and future DPO.</desc>
   <defs>
     <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#475569"/></marker>
     <marker id="blueArrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#2563eb"/></marker>
     <marker id="greenArrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#15803d"/></marker>
     <style>
-      .t{font-family:Inter,Arial,sans-serif;fill:#0f172a}.muted{fill:#64748b}.small{font-size:15px}.body{font-size:17px}.label{font-size:18px;font-weight:700}.head{font-size:24px;font-weight:750}.line{stroke:#475569;stroke-width:2.4;fill:none;marker-end:url(#arrow)}.blue{stroke:#2563eb;stroke-width:2.8;fill:none;marker-end:url(#blueArrow)}
+      .t{font-family:Inter,Arial,sans-serif;fill:#0f172a}.label{font-size:20px;font-weight:700}.head{font-size:24px;font-weight:750}.line{stroke:#475569;stroke-width:2.5;fill:none;marker-end:url(#arrow)}.blue{stroke:#2563eb;stroke-width:2.8;fill:none;marker-end:url(#blueArrow)}
     </style>
   </defs>
-  <rect width="1800" height="1040" fill="#ffffff"/>
+  <rect width="1800" height="900" fill="#fff"/>
   <text class="t" x="900" y="48" text-anchor="middle" font-size="34" font-weight="800">CRAVE-RAG</text>
-  <text class="t muted" x="900" y="79" text-anchor="middle" font-size="19">Three-route retrieval · action-controlled multimodal reading · independent evidence admission</text>
+  <text class="t" x="900" y="78" text-anchor="middle" font-size="18" fill="#64748b">Controller-guided Reading and Action Via Evidence Gaps</text>
 
-  <!-- Offline document layer -->
-  <rect x="35" y="112" width="420" height="780" rx="24" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
-  <text class="t head" x="245" y="151" text-anchor="middle">1 · Document foundation</text>
-  <rect x="75" y="188" width="340" height="70" rx="15" fill="#fff" stroke="#94a3b8" stroke-width="2"/>
-  <text class="t label" x="245" y="230" text-anchor="middle">Long, visual PDF</text>
-  <path class="line" d="M245 258 V292"/>
-  <rect x="63" y="294" width="364" height="177" rx="18" fill="#e0f2fe" stroke="#38bdf8" stroke-width="2"/>
-  <text class="t label" x="245" y="328" text-anchor="middle">Typed SoftDoc</text>
-  <text class="t body" x="88" y="362">Document → Page → Section</text>
-  <text class="t body" x="88" y="393">Paragraph · Table · Figure · Caption</text>
-  <text class="t body" x="88" y="424">bbox · page label · asset · provenance</text>
-  <text class="t body" x="88" y="455">confirmed / candidate Relations</text>
-  <path class="line" d="M245 471 V505"/>
-  <rect x="63" y="508" width="364" height="338" rx="18" fill="#eef2ff" stroke="#818cf8" stroke-width="2"/>
-  <text class="t label" x="245" y="541" text-anchor="middle">Retrieval and previews</text>
-  <rect x="82" y="568" width="100" height="58" rx="12" fill="#fff" stroke="#64748b"/><text class="t small" x="132" y="592" text-anchor="middle" font-weight="700">BM25</text><text class="t small muted" x="132" y="613" text-anchor="middle">text</text>
-  <rect x="194" y="568" width="100" height="58" rx="12" fill="#fff" stroke="#64748b"/><text class="t small" x="244" y="592" text-anchor="middle" font-weight="700">Dense</text><text class="t small muted" x="244" y="613" text-anchor="middle">text/table</text>
-  <rect x="306" y="568" width="100" height="58" rx="12" fill="#fff" stroke="#64748b"/><text class="t small" x="356" y="592" text-anchor="middle" font-weight="700">Visual</text><text class="t small muted" x="356" y="613" text-anchor="middle">native image</text>
-  <text class="t body" x="245" y="664" text-anchor="middle">Exact anchors before ranking</text>
-  <text class="t body" x="245" y="694" text-anchor="middle">deduplicate by stable element_id</text>
-  <text class="t body" x="245" y="724" text-anchor="middle">freeze one mixed candidate batch</text>
-  <rect x="83" y="750" width="324" height="68" rx="14" fill="#fff" stroke="#a5b4fc"/>
-  <text class="t small" x="245" y="777" text-anchor="middle" font-weight="700">Controller-facing previews only</text>
-  <text class="t small muted" x="245" y="801" text-anchor="middle">snippet · TablePreview · cached VLM summary</text>
+  <rect x="42" y="112" width="405" height="662" rx="24" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+  <text class="t head" x="244" y="151" text-anchor="middle">Document and Retrieval</text>
+  <rect x="95" y="194" width="300" height="78" rx="16" fill="#fff" stroke="#94a3b8" stroke-width="2"/>
+  <text class="t label" x="245" y="241" text-anchor="middle">Long, visual PDF</text>
+  <path class="line" d="M245 272 V322"/>
+  <rect x="95" y="324" width="300" height="88" rx="18" fill="#e0f2fe" stroke="#38bdf8" stroke-width="2.5"/>
+  <text class="t" x="245" y="378" text-anchor="middle" font-size="27" font-weight="800">SoftDoc</text>
+  <path class="line" d="M245 412 V462"/>
+  <rect x="70" y="464" width="350" height="216" rx="20" fill="#eef2ff" stroke="#818cf8" stroke-width="2.5"/>
+  <text class="t head" x="245" y="507" text-anchor="middle">Three-route Retrieval</text>
+  <rect x="91" y="550" width="96" height="70" rx="14" fill="#fff" stroke="#64748b" stroke-width="1.8"/>
+  <text class="t label" x="139" y="592" text-anchor="middle">BM25</text>
+  <rect x="197" y="550" width="96" height="70" rx="14" fill="#fff" stroke="#64748b" stroke-width="1.8"/>
+  <text class="t label" x="245" y="592" text-anchor="middle">Dense</text>
+  <rect x="303" y="550" width="96" height="70" rx="14" fill="#fff" stroke="#64748b" stroke-width="1.8"/>
+  <text class="t label" x="351" y="592" text-anchor="middle">Visual</text>
 
-  <!-- Online loop -->
-  <rect x="490" y="112" width="1268" height="780" rx="24" fill="#ffffff" stroke="#94a3b8" stroke-width="2" stroke-dasharray="9 7"/>
-  <text class="t head" x="1124" y="151" text-anchor="middle">2 · Stateful agentic reading loop</text>
-  <rect x="535" y="190" width="240" height="82" rx="17" fill="#fef3c7" stroke="#f59e0b" stroke-width="2"/>
-  <text class="t label" x="655" y="222" text-anchor="middle">Planner</text><text class="t small muted" x="655" y="249" text-anchor="middle">root + minimal subquestion DAG</text>
-  <path class="blue" d="M775 231 H860"/>
-  <rect x="862" y="177" width="315" height="108" rx="19" fill="#dbeafe" stroke="#3b82f6" stroke-width="3"/>
-  <text class="t label" x="1019" y="215" text-anchor="middle">Controller</text>
-  <text class="t body" x="1019" y="245" text-anchor="middle">choose the next legal action</text>
-  <text class="t small muted" x="1019" y="268" text-anchor="middle">SEARCH · READ · RELATION · PAGE</text>
-  <path class="blue" d="M1177 231 H1264"/>
-  <rect x="1266" y="177" width="432" height="108" rx="19" fill="#f1f5f9" stroke="#64748b" stroke-width="2"/>
-  <text class="t label" x="1482" y="211" text-anchor="middle">Environment</text>
-  <text class="t small" x="1482" y="239" text-anchor="middle">visible IDs · SearchSession cursor · action budget</text>
-  <text class="t small" x="1482" y="264" text-anchor="middle">persistent reads · relations · page context</text>
+  <rect x="485" y="112" width="1273" height="662" rx="24" fill="#fff" stroke="#94a3b8" stroke-width="2" stroke-dasharray="9 7"/>
+  <text class="t head" x="1122" y="151" text-anchor="middle">Stateful Agentic Reading Loop</text>
 
-  <path class="line" d="M1482 285 V334"/>
-  <rect x="1177" y="336" width="522" height="164" rx="20" fill="#faf5ff" stroke="#a78bfa" stroke-width="2.5"/>
-  <text class="t label" x="1438" y="371" text-anchor="middle">Reader router</text>
-  <rect x="1200" y="393" width="134" height="71" rx="12" fill="#fff" stroke="#c4b5fd"/><text class="t small" x="1267" y="423" text-anchor="middle" font-weight="700">Text Reader</text><text class="t small muted" x="1267" y="447" text-anchor="middle">source text</text>
-  <rect x="1348" y="393" width="150" height="71" rx="12" fill="#fff" stroke="#c4b5fd"/><text class="t small" x="1423" y="423" text-anchor="middle" font-weight="700">Visual Reader</text><text class="t small muted" x="1423" y="447" text-anchor="middle">crop / full page</text>
-  <rect x="1512" y="383" width="164" height="91" rx="12" fill="#fff" stroke="#7c3aed" stroke-width="2"/><text class="t small" x="1594" y="411" text-anchor="middle" font-weight="700">Multimodal Table</text><text class="t small muted" x="1594" y="435" text-anchor="middle">HTML/cells + crop</text><text class="t small muted" x="1594" y="457" text-anchor="middle">units + headers</text>
-  <path class="line" d="M1438 500 V548"/>
-  <rect x="1266" y="550" width="432" height="85" rx="17" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="2"/>
-  <text class="t label" x="1482" y="583" text-anchor="middle">Source-linked Observation</text>
-  <text class="t small muted" x="1482" y="609" text-anchor="middle">facts + limitations + stable source/page identity</text>
-  <path class="line" d="M1266 593 H1158"/>
-  <rect x="812" y="534" width="344" height="118" rx="20" fill="#dcfce7" stroke="#22c55e" stroke-width="3"/>
-  <text class="t label" x="984" y="574" text-anchor="middle">Evidence Checker</text>
-  <text class="t body" x="984" y="604" text-anchor="middle">atomic add / replace / remove</text>
-  <text class="t small muted" x="984" y="629" text-anchor="middle">only admitted Evidence can support an answer</text>
-  <path class="blue" d="M812 593 H694"/>
-  <rect x="532" y="521" width="160" height="144" rx="18" fill="#eff6ff" stroke="#60a5fa" stroke-width="2"/>
-  <text class="t label" x="612" y="555" text-anchor="middle">State</text>
-  <text class="t small" x="612" y="585" text-anchor="middle">Evidence Memory</text><text class="t small" x="612" y="610" text-anchor="middle">active gap</text><text class="t small" x="612" y="635" text-anchor="middle">Observation Recall</text>
-  <path class="blue" d="M612 521 C612 365 820 340 932 285"/>
-  <text class="t small muted" x="696" y="410">incomplete → continue</text>
-  <path d="M984 652 V714 H1250" fill="none" stroke="#15803d" stroke-width="2.8" marker-end="url(#greenArrow)"/>
-  <rect x="1252" y="674" width="235" height="82" rx="17" fill="#ecfdf5" stroke="#34d399" stroke-width="2"/>
-  <text class="t label" x="1369" y="708" text-anchor="middle">Answerer</text><text class="t small muted" x="1369" y="735" text-anchor="middle">Evidence-only shortest answer</text>
-  <rect x="1512" y="674" width="186" height="82" rx="17" fill="#f8fafc" stroke="#94a3b8"/>
-  <text class="t label" x="1605" y="708" text-anchor="middle">Audit packet</text><text class="t small muted" x="1605" y="735" text-anchor="middle">state → action → evidence</text>
-  <path class="line" d="M1487 715 H1512"/>
-  <rect x="532" y="714" width="590" height="123" rx="19" fill="#fff7ed" stroke="#fb923c" stroke-width="2"/>
-  <text class="t label" x="827" y="748" text-anchor="middle">Post-training boundary</text>
-  <text class="t body" x="827" y="780" text-anchor="middle">audited ControllerInput → Action records → QLoRA / SFT</text>
-  <text class="t body" x="827" y="810" text-anchor="middle">same-state chosen / rejected actions → future DPO</text>
-  <path class="line" d="M1512 756 C1400 824 1260 824 1122 796"/>
+  <rect x="540" y="195" width="220" height="82" rx="17" fill="#fef3c7" stroke="#f59e0b" stroke-width="2"/>
+  <text class="t label" x="650" y="244" text-anchor="middle">Planner</text>
+  <path class="blue" d="M760 236 H865"/>
+  <rect x="867" y="183" width="285" height="106" rx="19" fill="#dbeafe" stroke="#3b82f6" stroke-width="3"/>
+  <text class="t" x="1009" y="246" text-anchor="middle" font-size="24" font-weight="800">Controller</text>
+  <path class="blue" d="M1152 236 H1260"/>
+  <rect x="1262" y="195" width="425" height="82" rx="17" fill="#f1f5f9" stroke="#64748b" stroke-width="2"/>
+  <text class="t label" x="1474" y="244" text-anchor="middle">Reading Environment</text>
 
-  <rect x="35" y="924" width="1723" height="76" rx="17" fill="#0f172a"/>
-  <text x="896" y="955" text-anchor="middle" font-family="Inter,Arial,sans-serif" font-size="20" font-weight="700" fill="#fff">Finding is not reading. Reading is not believing.</text>
-  <text x="896" y="982" text-anchor="middle" font-family="Inter,Arial,sans-serif" font-size="16" fill="#cbd5e1">Every accepted fact remains traceable to a visible action, Reader call, Observation, Evidence delta, and document source.</text>
+  <path class="line" d="M1474 277 V329"/>
+  <rect x="1182" y="331" width="505" height="145" rx="20" fill="#faf5ff" stroke="#a78bfa" stroke-width="2.5"/>
+  <text class="t label" x="1434" y="368" text-anchor="middle">Reader Router</text>
+  <rect x="1205" y="392" width="135" height="58" rx="12" fill="#fff" stroke="#c4b5fd"/>
+  <text class="t" x="1272" y="427" text-anchor="middle" font-size="17" font-weight="700">Text Reader</text>
+  <rect x="1353" y="392" width="148" height="58" rx="12" fill="#fff" stroke="#c4b5fd"/>
+  <text class="t" x="1427" y="427" text-anchor="middle" font-size="17" font-weight="700">Visual Reader</text>
+  <rect x="1514" y="383" width="150" height="76" rx="12" fill="#fff" stroke="#7c3aed" stroke-width="2"/>
+  <text class="t" x="1589" y="414" text-anchor="middle" font-size="16" font-weight="700">Multimodal</text>
+  <text class="t" x="1589" y="438" text-anchor="middle" font-size="16" font-weight="700">Table Reader</text>
+
+  <path class="line" d="M1434 476 V521"/>
+  <rect x="1262" y="523" width="425" height="78" rx="17" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="2"/>
+  <text class="t label" x="1474" y="570" text-anchor="middle">Observation</text>
+  <path class="line" d="M1262 562 H1150"/>
+  <rect x="820" y="510" width="328" height="104" rx="20" fill="#dcfce7" stroke="#22c55e" stroke-width="3"/>
+  <text class="t" x="984" y="570" text-anchor="middle" font-size="22" font-weight="800">Evidence Checker</text>
+  <path class="blue" d="M820 562 H700"/>
+  <rect x="540" y="510" width="158" height="104" rx="18" fill="#eff6ff" stroke="#60a5fa" stroke-width="2"/>
+  <text class="t label" x="619" y="570" text-anchor="middle">State</text>
+  <path class="blue" d="M619 510 C619 374 811 334 944 289"/>
+
+  <path d="M984 614 V668 H1245" fill="none" stroke="#15803d" stroke-width="2.8" marker-end="url(#greenArrow)"/>
+  <rect x="1247" y="629" width="220" height="78" rx="17" fill="#ecfdf5" stroke="#34d399" stroke-width="2"/>
+  <text class="t label" x="1357" y="676" text-anchor="middle">Answerer</text>
+  <rect x="1500" y="629" width="187" height="78" rx="17" fill="#f8fafc" stroke="#94a3b8"/>
+  <text class="t label" x="1593" y="676" text-anchor="middle">Audit Trail</text>
+  <path class="line" d="M1467 668 H1500"/>
+
+  <rect x="540" y="650" width="570" height="82" rx="18" fill="#fff7ed" stroke="#fb923c" stroke-width="2"/>
+  <text class="t label" x="825" y="681" text-anchor="middle">Post-training</text>
+  <text class="t" x="825" y="711" text-anchor="middle" font-size="17">Controller SFT · Future DPO</text>
+  <path class="line" d="M1500 707 C1375 755 1232 751 1110 704"/>
+
+  <rect x="42" y="808" width="1716" height="60" rx="16" fill="#0f172a"/>
+  <text x="900" y="846" text-anchor="middle" font-family="Inter,Arial,sans-serif" font-size="20" font-weight="700" fill="#fff">Finding is not reading. Reading is not believing.</text>
 </svg>
