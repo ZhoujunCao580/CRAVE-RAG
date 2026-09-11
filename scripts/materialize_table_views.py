@@ -334,9 +334,9 @@ def _write_index(
         )
         for item in documents
     )
-    page = f'''<!doctype html><html><head><meta charset="utf-8"><title>Representative-28 TableViews</title>
+    page = f'''<!doctype html><html><head><meta charset="utf-8"><title>SoftDoc TableViews</title>
 <style>{_review_css()}</style></head><body>
-<h1>Representative-28 TableView Review</h1>
+<h1>SoftDoc TableView Review</h1>
 <pre>{html_module.escape(json.dumps(summary, ensure_ascii=False, indent=2))}</pre>
 <table><tr><th>Document</th><th>Tables</th><th>Cells</th><th>Internal images</th><th>Issues</th><th>Automatic failures</th></tr>{rows}</table>
 </body></html>'''
@@ -386,12 +386,12 @@ def main() -> None:
     parser.add_argument(
         "--corpus",
         type=Path,
-        default=Path("data/processed/representative_28"),
+        required=True,
     )
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("data/processed/representative_28/table_views"),
+        required=True,
     )
     args = parser.parse_args()
     print(json.dumps(materialize_corpus(args.corpus, args.output), ensure_ascii=False, indent=2))

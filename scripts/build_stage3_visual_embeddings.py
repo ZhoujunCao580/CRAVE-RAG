@@ -22,9 +22,9 @@ from softdoc.retrieval.visual_dense import (
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SOFTDOCS = ROOT / "data" / "processed" / "mmlongbench_doc" / "softdocs"
-DEFAULT_OUTPUT = ROOT / ".runlogs" / "stage3_visual_retrieval" / "colsmol-500m"
+DEFAULT_OUTPUT = ROOT / "data" / "processed" / "mmlongbench_doc" / "retrieval" / "visual_dense"
 DEFAULT_MODEL = "vidore/colSmol-500M"
-BUILD_VERSION = "stage3-visual-embedding-build-v0.1"
+BUILD_VERSION = "visual-embedding-build-v0.2"
 
 
 def main(argv: list[str] | None = None) -> int:

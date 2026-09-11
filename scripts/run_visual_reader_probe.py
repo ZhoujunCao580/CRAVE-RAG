@@ -29,16 +29,6 @@ from softdoc.visual_reading import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_CONFIG = ROOT / "configs" / "visual_reader_v0_probe_25.json"
-DEFAULT_CORPUS = ROOT / "data" / "processed" / "representative_28" / "softdoc"
-DEFAULT_OUTPUT = (
-    ROOT
-    / "data"
-    / "processed"
-    / "representative_28"
-    / "reports"
-    / "visual_reader_v0_probe_25"
-)
 VISUAL_TYPES = {"figure", "chart", "equation"}
 
 
@@ -316,9 +306,9 @@ def _write_summary(output_dir: Path, rows: list[dict[str, Any]], model: str) -> 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
-    parser.add_argument("--corpus-root", type=Path, default=DEFAULT_CORPUS)
-    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("--corpus-root", type=Path, required=True)
+    parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--model", default=None)
     parser.add_argument("--timeout-seconds", type=int, default=240)
     parser.add_argument("--prepare-only", action="store_true")

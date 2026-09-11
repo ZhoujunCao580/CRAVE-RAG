@@ -21,7 +21,7 @@ from softdoc.serialization import load_document
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SOFTDOC_ROOT = (
-    ROOT / "data" / "processed" / "representative_28" / "softdoc"
+    ROOT / "data" / "processed" / "mmlongbench_doc" / "softdocs"
 )
 DEFAULT_MODEL_DIR = (
     ROOT
@@ -31,7 +31,7 @@ DEFAULT_MODEL_DIR = (
     / "intfloat--multilingual-e5-small"
 )
 DEFAULT_OUTPUT_ROOT = (
-    ROOT / "data" / "processed" / "representative_28" / "retrieval"
+    ROOT / "data" / "processed" / "mmlongbench_doc" / "retrieval" / "text_dense"
 )
 MODEL_NAME = "intfloat/multilingual-e5-small"
 
@@ -261,7 +261,7 @@ def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
 
 def _summary_markdown(summary: dict[str, object]) -> str:
     lines = [
-        "# Representative Dense Retrieval Index Run",
+        "# Dense Retrieval Index Run",
         "",
         f"- Documents: {summary['documents']}",
         f"- Pages: {summary['total_pages']}",
