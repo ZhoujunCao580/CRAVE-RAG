@@ -41,8 +41,8 @@ The first Controller QLoRA/SFT iteration is complete. After a 78-decision
 pipeline pilot, the current Controller dataset was expanded to more than 500
 reviewed SFT decisions. On the frozen internal 124-question Test split, the
 prompt-only system scored **50.00% content accuracy / 49.44% generalized F1**.
-The latest Controller-SFT run scored **56.45% content accuracy / approximately
-55.32% generalized F1**, rescuing ten previously incorrect questions while two
+The latest Controller-SFT run scored **56.45% content accuracy / 55.32%
+generalized F1**, rescuing ten previously incorrect questions while two
 previously correct questions regressed (net +8). Planner, Reader, Checker, and
 Answerer remain on the base model; this is a Controller-only training result.
 
@@ -52,12 +52,12 @@ Answerer remain on the base model; this is a Controller-only training result.
 | M3DocRAG | Published full MMLongBench-Doc | 38.21% | 37.52% |
 | G2-Reader | Published full MMLongBench-Doc | 46.96% | 45.29% |
 | CRAVE-RAG, prompt-only | Internal frozen Test, 124 questions | 50.00% | 49.44% |
-| **CRAVE-RAG, Controller SFT (500+ decisions)** | **Internal frozen Test, 124 questions** | **56.45%** | **~55.32%** |
+| **CRAVE-RAG, Controller SFT (500+ decisions)** | **Internal frozen Test, 124 questions** | **56.45%** | **55.32%** |
 
 The published baselines and the internal CRAVE-RAG split are shown as context,
 not as a leaderboard claim: the evaluation subsets and answer-equivalence
-protocols are not identical. The SFT F1 remains approximate until the complete
-post-SFT status counts are persisted; accuracy is exact from 70/124 correct.
+protocols are not identical. Both reported CRAVE-RAG metrics use the project's
+frozen content-equivalence scoring protocol; accuracy is 70/124 correct.
 The next research stage is expanding verified online Teacher rollouts, measuring
 paired rescue/regression behavior on document-isolated development data, and
 separately deciding whether Checker supervision is warranted.

@@ -120,7 +120,7 @@ route agreement 从 base 的 100% 降至 SFT 的 92.86%；端到端 Test 仍为
 | 指标 | Prompt-only baseline | Controller SFT 500+ | 提升 |
 | --- | ---: | ---: | ---: |
 | 内容 Acc | 50.00% | **56.45%** | **+6.45 pp** |
-| generalized F1 | 49.44% | **约 55.32%** | **约 +5.88 pp** |
+| generalized F1 | 49.44% | **55.32%** | **+5.88 pp** |
 
 题目级变化为：Test Core 救回 6 题；Test Challenge 救回 4 题、退化 2 题；总计净增加 8 道
 正确答案。该结果说明扩大且经过审阅的 Controller 监督有效，替代了上一节小样本 pilot 的
@@ -129,5 +129,5 @@ route agreement 从 base 的 100% 降至 SFT 的 92.86%；端到端 Test 仍为
 1. 不用 Test 逐题错误继续选择 checkpoint 或改标签；新一轮选择只看 Clean Dev；
 2. 将救回与退化案例按动作类型和文档隔离复核，避免新增样本只覆盖某一困难模式；
 3. Checker 训练数据继续单独建集，不能把 Controller、检索或 Reader 的错误混入；
-4. 当前 F1 是依据现有汇总推算的近似值，导入完整后训练状态计数后重新精算；
+4. 固定使用当前内容等价评分协议；已复算确认的 Test 指标为 56.45% Acc / 55.32% F1；
 5. 论文级最终结论仍需在 Reserve 冻结新盲测或运行完整官方协议。
