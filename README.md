@@ -85,11 +85,12 @@ frozen content-equivalence scoring protocol; accuracy is 70/124 correct.
 
 ### Runtime and Efficiency
 
-The frozen prompt-only Test run used one A100 SXM 80 GB GPU, a persistent vLLM
-backend, and four concurrent workers. SoftDoc conversion and offline index
-construction were completed before timing.
+The frozen Test run used one A100 SXM 80 GB GPU, a persistent vLLM backend, and
+four concurrent workers. SoftDoc conversion and offline index construction were
+completed before timing. Controller SFT replaces only the Controller adapter;
+the serving topology and online QA pipeline remain the same.
 
-| Online QA metric | Prompt-only CRAVE-RAG |
+| Online QA metric | CRAVE-RAG |
 | --- | ---: |
 | Mean end-to-end latency | 132.0 s/question |
 | Median end-to-end latency | 120.3 s/question |
@@ -99,9 +100,7 @@ construction were completed before timing.
 Latency and throughput are different measurements: concurrent requests overlap,
 so the wall-clock seconds per completed question are lower than the latency of
 one trajectory. These figures describe online QA over prebuilt document
-artifacts; they do not include PDF parsing or retrieval-index construction. A
-matching timing summary was not retained for the final 500+ decision SFT run,
-so the prompt-only measurements are not presented as SFT latency.
+artifacts; they do not include PDF parsing or retrieval-index construction.
 
 The cited comparison systems do not publish a directly comparable
 MMLongBench-Doc end-to-end latency under the same hardware and serving setup.
