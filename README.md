@@ -82,6 +82,40 @@ The published baselines and the internal CRAVE-RAG split are shown as context,
 not as a leaderboard claim: the evaluation subsets and answer-equivalence
 protocols are not identical. Both reported CRAVE-RAG metrics use the project's
 frozen content-equivalence scoring protocol; accuracy is 70/124 correct.
+
+### Runtime and Efficiency
+
+The frozen prompt-only Test run used one A100 SXM 80 GB GPU, a persistent vLLM
+backend, and four concurrent workers. SoftDoc conversion and offline index
+construction were completed before timing.
+
+| Online QA metric | Prompt-only CRAVE-RAG |
+| --- | ---: |
+| Mean end-to-end latency | 132.0 s/question |
+| Median end-to-end latency | 120.3 s/question |
+| P95 end-to-end latency | 333.3 s/question |
+| Four-worker wall-clock throughput | 35.35 s/question (about 102 questions/hour) |
+
+Latency and throughput are different measurements: concurrent requests overlap,
+so the wall-clock seconds per completed question are lower than the latency of
+one trajectory. These figures describe online QA over prebuilt document
+artifacts; they do not include PDF parsing or retrieval-index construction. A
+matching timing summary was not retained for the final 500+ decision SFT run,
+so the prompt-only measurements are not presented as SFT latency.
+
+The cited comparison systems do not publish a directly comparable
+MMLongBench-Doc end-to-end latency under the same hardware and serving setup.
+[M3DocRAG](https://openaccess.thecvf.com/content/ICCV2025W/Findings/papers/Cho_M3DocVQA_Multi-modal_Multi-page_Multi-document_Understanding_ICCVW_2025_paper.pdf)
+reports a retrieval-only result of roughly 20 s/query with exact search and
+under 2 s/query with an IVF index over 40K pages; answer generation is excluded.
+[G2-Reader](https://arxiv.org/html/2601.22055) reports offline Content Graph
+construction averaging 233.6 s/document for its full method and 130.4
+s/document for its Lite variant; these are not question-answering latencies.
+[ColBERTv2](https://aclanthology.org/2022.naacl-main.272/) reports roughly 100
+ms/query retrieval on its IR benchmarks using a Titan V, but that measurement
+excludes PDF parsing, OCR, and downstream answer generation. For that reason,
+this README does not rank the systems by incompatible speed measurements.
+
 The next research stage is expanding verified online Teacher rollouts, measuring
 paired rescue/regression behavior on document-isolated development data, and
 separately deciding whether Checker supervision is warranted.
