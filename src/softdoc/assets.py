@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from pathlib import Path
 
 from PIL import Image
 
 from softdoc.ids import stable_digest
 from softdoc.models import ContentAvailability, Document, Element, ElementType
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 VISUAL_ELEMENT_TYPES = frozenset(
@@ -138,7 +142,14 @@ def crop_page_bbox(
             right = max(left + 1, min(width, int(round(x2 * width))))
             bottom = max(top + 1, min(height, int(round(y2 * height))))
             image.crop((left, top, right, bottom)).save(destination)
-    except Exception:
+    except Exception as exc:
+        LOGGER.warning(
+            "Could not crop visual asset for %s from %s: %s",
+            owner_id,
+            source,
+            exc,
+            exc_info=True,
+        )
         return None
     return destination.relative_to(output_dir)
 

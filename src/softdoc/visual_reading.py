@@ -172,7 +172,11 @@ def visual_reader_user_prompt(request: VisualReadRequest) -> str:
 
     request_json = request.model_dump_json(
         indent=2,
-        exclude={"visual_inputs": {"__all__": {"bbox"}}},
+        exclude={
+            "visual_inputs": {
+                "__all__": {"bbox", "page_image_path"},
+            }
+        },
     )
     example_ids = [item.input_id for item in request.visual_inputs]
     example_regions = [{"input_id": input_id} for input_id in example_ids]

@@ -363,3 +363,57 @@ class Document(SoftDocModel):
         if indexes != sorted(indexes):
             raise ValueError("Document pages must be ordered by page_index")
         return pages
+
+    @model_validator(mode="after")
+    def validate_document_ownership_and_page_sequence(self) -> Self:
+        """Keep the physical page namespace and object ownership canonical.
+
+        Runtime navigation uses ``page_index +/- 1`` and Visual Reader inputs
+        interpret ``page_number`` as an ordered one-based source-page number
+        (which may begin above one for a document subset). Merely checking that
+        page indexes are sorted still permits duplicate or gapped indexes,
+        which makes adjacent-page navigation ambiguous.
+        Likewise, nested objects carrying another ``document_id`` must not be
+        accepted into this Document even when all local IDs happen to resolve.
+        """
+
+        indexes = [page.page_index for page in self.pages]
+        expected_indexes = list(range(len(self.pages)))
+        if indexes != expected_indexes:
+            raise ValueError(
+                "Document page_index values must be unique and contiguous "
+                "from zero"
+            )
+        page_numbers = [page.page_number for page in self.pages]
+        if page_numbers != sorted(set(page_numbers)):
+            raise ValueError(
+                "Document page_number values must be unique and strictly increasing"
+            )
+        wrong_pages = [
+            page.page_id
+            for page in self.pages
+            if page.document_id != self.document_id
+        ]
+        wrong_sections = [
+            section.section_id
+            for section in self.sections
+            if section.document_id != self.document_id
+        ]
+        wrong_elements = [
+            element.element_id
+            for element in self.elements
+            if element.document_id != self.document_id
+        ]
+        if wrong_pages or wrong_sections or wrong_elements:
+            details = []
+            if wrong_pages:
+                details.append("pages=" + ",".join(wrong_pages))
+            if wrong_sections:
+                details.append("sections=" + ",".join(wrong_sections))
+            if wrong_elements:
+                details.append("elements=" + ",".join(wrong_elements))
+            raise ValueError(
+                "Document contains objects owned by another document: "
+                + "; ".join(details)
+            )
+        return self

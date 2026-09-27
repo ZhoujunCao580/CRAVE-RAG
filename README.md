@@ -168,6 +168,15 @@ python scripts/run_model_batch.py \
 The profile aborts before any question runs if a required module or completed
 visual index is missing.
 
+Each committed case records stage-level health separately from the outer
+process result. A batch therefore distinguishes a clean completion,
+`completed_with_stage_errors` (for example, a Reader or Checker call that was
+degraded by the Environment), and an outer case failure. Fresh runs still
+refuse a nonempty output directory. After an interruption, pass `--resume`
+with the same case manifest and runtime settings to preserve committed audit
+packets and execute only the missing cases; incompatible resumes fail before
+model inference starts.
+
 ## Prompts and Evaluations
 
 Editable, versioned prompt text lives together under

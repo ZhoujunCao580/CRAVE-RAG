@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shutil
 import time
 from typing import Any, Protocol
+from uuid import uuid4
 
 from pydantic import Field, model_validator
 
@@ -91,8 +93,8 @@ class ModelPipelineRun(SoftDocModel):
         return self
 
 
-def _generation_metadata(backend: Any) -> dict[str, Any]:
-    """Collect compact OpenAI-compatible diagnostics from a model adapter."""
+def _generation_clients(backend: Any) -> list[Any]:
+    """Return the unique structured-generation clients owned by one adapter."""
 
     clients: list[Any] = []
     direct = getattr(backend, "client", None)
@@ -103,11 +105,34 @@ def _generation_metadata(backend: Any) -> dict[str, Any]:
         client = getattr(adapter, "client", None)
         if client is not None and all(client is not item for item in clients):
             clients.append(client)
+    return clients
+
+
+def _reset_generation_metadata(backend: Any) -> None:
+    """Start a call-local metadata scope so earlier calls cannot leak."""
+
+    for client in _generation_clients(backend):
+        reset = getattr(client, "reset_generation_metadata", None)
+        if callable(reset):
+            reset()
+
+
+def _generation_metadata(backend: Any) -> dict[str, Any]:
+    """Collect compact OpenAI-compatible diagnostics from this adapter call."""
+
     generations = [
-        client.generation_metadata()
-        for client in clients
-        if hasattr(client, "generation_metadata")
-        and client.last_response is not None
+        generation
+        for client in _generation_clients(backend)
+        for generation in (
+            client.generation_metadata_history()
+            if hasattr(client, "generation_metadata_history")
+            else (
+                [client.generation_metadata()]
+                if hasattr(client, "generation_metadata")
+                and client.last_response is not None
+                else []
+            )
+        )
     ]
     if not generations:
         return {}
@@ -174,6 +199,7 @@ class _RecordingReader:
             "document_id": context.document.document_id,
             "inputs": [item.model_dump(mode="json") for item in context.inputs],
         }
+        _reset_generation_metadata(self.backend)
         try:
             started = time.perf_counter()
             output = self.backend.read(context)
@@ -219,6 +245,7 @@ class _RecordingVisualScanner:
     ) -> VisualScanBatchResult:
         input_payload = scan_input.model_dump(mode="json")
         input_payload["image_count"] = len(image_paths)
+        _reset_generation_metadata(self.backend)
         try:
             started = time.perf_counter()
             output = self.backend.scan(scan_input, image_paths)
@@ -259,6 +286,7 @@ class _RecordingChecker:
 
     def check(self, checker_input: EvidenceCheckInput) -> EvidenceCheckResult:
         input_payload = checker_input.model_dump(mode="json")
+        _reset_generation_metadata(self.backend)
         try:
             started = time.perf_counter()
             output = self.backend.check(checker_input)
@@ -296,6 +324,7 @@ class _RecordingChecker:
         backend_method = getattr(self.backend, "check_coverage", None)
         if backend_method is None:
             raise TypeError("Configured Checker does not support semantic coverage")
+        _reset_generation_metadata(self.backend)
         try:
             started = time.perf_counter()
             output = backend_method(checker_input)
@@ -309,15 +338,7 @@ class _RecordingChecker:
                     succeeded=False,
                     action_id=checker_input.action_id,
                     elapsed_seconds=time.perf_counter() - started,
-                    metadata=(
-                        {
-                            "rejected_attempts": list(
-                                getattr(self.backend, "last_rejected_attempts", [])
-                            )
-                        }
-                        if getattr(self.backend, "last_rejected_attempts", [])
-                        else {}
-                    ),
+                    metadata=_call_metadata(self.backend),
                 )
             )
             raise
@@ -329,15 +350,7 @@ class _RecordingChecker:
                 output=output.model_dump(mode="json"),
                 action_id=checker_input.action_id,
                 elapsed_seconds=time.perf_counter() - started,
-                metadata=(
-                    {
-                        "rejected_attempts": list(
-                            getattr(self.backend, "last_rejected_attempts", [])
-                        )
-                    }
-                    if getattr(self.backend, "last_rejected_attempts", [])
-                    else {}
-                ),
+                metadata=_call_metadata(self.backend),
             )
         )
         return output
@@ -350,6 +363,7 @@ class _RecordingAnswerer:
 
     def answer(self, answer_input: AnswerInput) -> AnswerResult:
         input_payload = answer_input.model_dump(mode="json")
+        _reset_generation_metadata(self.backend)
         try:
             started = time.perf_counter()
             output = self.backend.answer(answer_input)
@@ -459,7 +473,7 @@ class ModelBackedRunner:
 
 
 def write_model_pipeline_run(run: ModelPipelineRun, output_dir: Path) -> None:
-    """Write a non-overwriting, module-by-module audit packet."""
+    """Atomically write a non-overwriting, module-by-module audit packet."""
 
     output_dir = Path(output_dir)
     if output_dir.exists():
@@ -467,7 +481,24 @@ def write_model_pipeline_run(run: ModelPipelineRun, output_dir: Path) -> None:
             raise FileExistsError(f"Run output path is not a directory: {output_dir}")
         if any(output_dir.iterdir()):
             raise FileExistsError(f"Run output directory is not empty: {output_dir}")
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
+    staging_dir = output_dir.with_name(f".{output_dir.name}.{uuid4().hex}.tmp")
+    staging_dir.mkdir()
+    try:
+        _write_model_pipeline_run_contents(run, staging_dir)
+        if output_dir.exists():
+            output_dir.rmdir()
+        staging_dir.replace(output_dir)
+    finally:
+        if staging_dir.exists():
+            shutil.rmtree(staging_dir, ignore_errors=True)
+
+
+def _write_model_pipeline_run_contents(
+    run: ModelPipelineRun,
+    output_dir: Path,
+) -> None:
+    """Write one complete packet inside a private staging directory."""
 
     calls_by_component: dict[str, list[StageCallRecord]] = {}
     for record in run.stage_calls:
@@ -528,6 +559,7 @@ def write_model_pipeline_run(run: ModelPipelineRun, output_dir: Path) -> None:
         ],
     )
 
+    failed_stage_calls = [record for record in run.stage_calls if not record.succeeded]
     manifest = {
         "pipeline_version": run.pipeline_version,
         "reading_session_id": run.reading_run.evidence_memory.reading_session_id,
@@ -551,6 +583,20 @@ def write_model_pipeline_run(run: ModelPipelineRun, output_dir: Path) -> None:
         "model_call_elapsed_seconds": sum(
             record.elapsed_seconds or 0.0 for record in run.stage_calls
         ),
+        "stage_health": {
+            "failed_call_count": len(failed_stage_calls),
+            "failed_components": sorted(
+                {record.component for record in failed_stage_calls}
+            ),
+            "failed_calls": [
+                {
+                    "component": record.component,
+                    "call_index": record.call_index,
+                    "action_id": record.action_id,
+                }
+                for record in failed_stage_calls
+            ],
+        },
         "answer": (
             run.reading_run.answer.model_dump(mode="json")
             if run.reading_run.answer is not None
@@ -572,36 +618,39 @@ def load_model_pipeline_run(input_dir: Path) -> ModelPipelineRun:
         (input_dir / "reading_run.json").read_text(encoding="utf-8")
     )
     manifest_order = manifest.get("stage_call_order") or []
-    planner_order = next(
-        (
-            item
-            for item in manifest_order
-            if item.get("component") == "planner" and item.get("call_index") == 0
-        ),
-        {},
-    )
-    loaded_records = [
-        StageCallRecord(
-            component="planner",
-            call_index=0,
-            input={"question": manifest["question"]},
-            output=plan.model_dump(mode="json"),
-            elapsed_seconds=planner_order.get("elapsed_seconds"),
-        )
-    ]
+    loaded_records: list[StageCallRecord] = []
     for component in (
+        "planner",
         "controller",
         "reader",
         "checker",
         "coverage_checker",
+        "visual_scan",
         "answerer",
     ):
         path = input_dir / f"{component}_calls.jsonl"
         if not path.is_file():
-            if component == "coverage_checker":
-                # Runs written before semantic Coverage existed have no file
-                # for this optional component. Their manifest also contains no
-                # coverage_checker stage, so skipping it is lossless.
+            manifest_has_component = any(
+                item.get("component") == component for item in manifest_order
+            )
+            if component == "planner" and not manifest_has_component:
+                # Backward-compatible loading for audit packets created before
+                # planner_calls.jsonl became part of the packet contract.
+                loaded_records.append(
+                    StageCallRecord(
+                        component="planner",
+                        call_index=0,
+                        input={"question": manifest["question"]},
+                        output=plan.model_dump(mode="json"),
+                    )
+                )
+                continue
+            if (
+                component in {"coverage_checker", "visual_scan"}
+                and not manifest_has_component
+            ):
+                # Older packets predate one or both optional components. If
+                # their manifest has no such call, skipping it is lossless.
                 continue
             raise FileNotFoundError(f"Missing model call log: {path}")
         for line_number, line in enumerate(

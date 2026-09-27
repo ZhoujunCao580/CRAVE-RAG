@@ -6,12 +6,15 @@ import os
 from pathlib import Path
 import socket
 import subprocess
+import threading
+import time
 
 import pytest
 from PIL import Image
 
 from scripts.run_model_batch import (
     BASELINE_RUNTIME_PROFILE,
+    _CaseDeadlineTransport,
     _PersistentRuntime,
     _batch_lock_path,
     _group_cases_by_document,
@@ -40,6 +43,7 @@ from softdoc.visual_retrieval import (
 def _args(tmp_path: Path) -> argparse.Namespace:
     return argparse.Namespace(
         output_root=tmp_path / "batch",
+        resume=False,
         base_url="http://127.0.0.1:11434",
         inference_backend="ollama",
         text_model="text-model",
@@ -141,6 +145,13 @@ def test_run_batch_keeps_running_after_one_case_fails(tmp_path: Path) -> None:
 
     def fake_executor(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
         commands.append(command)
+        if len(commands) == 2:
+            case_output = Path(command[command.index("--output") + 1])
+            case_output.mkdir(parents=True)
+            (case_output / "run_manifest.json").write_text(
+                json.dumps({"stage_health": {"failed_call_count": 0}}),
+                encoding="utf-8",
+            )
         return subprocess.CompletedProcess(
             command,
             7 if len(commands) == 1 else 0,
@@ -167,6 +178,149 @@ def test_run_batch_keeps_running_after_one_case_fails(tmp_path: Path) -> None:
         (args.output_root / "batch_manifest.json").read_text(encoding="utf-8")
     )
     assert written == manifest
+
+
+def test_batch_distinguishes_stage_errors_from_outer_failures(tmp_path: Path) -> None:
+    args = _args(tmp_path)
+    case = {
+        "case_id": "Q1",
+        "document_dir": str(tmp_path / "doc1"),
+        "question": "Question one?",
+    }
+
+    def fake_executor(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        case_output = Path(command[command.index("--output") + 1])
+        case_output.mkdir(parents=True)
+        (case_output / "run_manifest.json").write_text(
+            json.dumps(
+                {
+                    "stage_health": {
+                        "failed_call_count": 1,
+                        "failed_components": ["checker"],
+                        "failed_calls": [
+                            {
+                                "component": "checker",
+                                "call_index": 2,
+                                "action_id": "action:2",
+                            }
+                        ],
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    manifest = run_batch(cases=[case], args=args, executor=fake_executor)
+
+    assert manifest["status"] == "completed_with_stage_errors"
+    assert manifest["succeeded"] == 1
+    assert manifest["degraded"] == 1
+    assert manifest["failed"] == 0
+    assert manifest["cases"][0]["status"] == "completed_with_stage_errors"
+    assert manifest["cases"][0]["stage_health"]["failed_components"] == [
+        "checker"
+    ]
+
+
+def test_batch_resume_skips_manifested_cases(tmp_path: Path) -> None:
+    args = _args(tmp_path)
+    cases = [
+        {
+            "case_id": case_id,
+            "document_dir": str(tmp_path / case_id),
+            "question": f"Question {case_id}?",
+        }
+        for case_id in ("Q1", "Q2")
+    ]
+    first_commands: list[list[str]] = []
+
+    def first_executor(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        first_commands.append(command)
+        case_output = Path(command[command.index("--output") + 1])
+        if case_output.name == "Q1":
+            case_output.mkdir(parents=True)
+            (case_output / "run_manifest.json").write_text(
+                json.dumps({"stage_health": {"failed_call_count": 0}}),
+                encoding="utf-8",
+            )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    run_batch(cases=cases, args=args, executor=first_executor)
+    manifest_path = args.output_root / "batch_manifest.json"
+    interrupted = json.loads(manifest_path.read_text(encoding="utf-8"))
+    interrupted["cases"] = interrupted["cases"][:1]
+    interrupted["status"] = "running"
+    manifest_path.write_text(json.dumps(interrupted), encoding="utf-8")
+
+    args.resume = True
+    resumed_commands: list[list[str]] = []
+
+    def resumed_executor(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        resumed_commands.append(command)
+        case_output = Path(command[command.index("--output") + 1])
+        case_output.mkdir(parents=True, exist_ok=True)
+        (case_output / "run_manifest.json").write_text(
+            json.dumps({"stage_health": {"failed_call_count": 0}}),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    resumed = run_batch(cases=cases, args=args, executor=resumed_executor)
+
+    assert len(first_commands) == 2
+    assert len(resumed_commands) == 1
+    assert "Q2" in resumed_commands[0][resumed_commands[0].index("--output") + 1]
+    assert [item["case_id"] for item in resumed["cases"]] == ["Q1", "Q2"]
+    assert resumed["succeeded"] == 2
+
+
+def test_batch_rejects_success_without_committed_audit_packet(tmp_path: Path) -> None:
+    args = _args(tmp_path)
+
+    manifest = run_batch(
+        cases=[
+            {
+                "case_id": "Q1",
+                "document_dir": str(tmp_path / "doc"),
+                "question": "Question?",
+            }
+        ],
+        args=args,
+        executor=lambda command, **_: subprocess.CompletedProcess(
+            command, 0, stdout="", stderr=""
+        ),
+    )
+
+    assert manifest["status"] == "completed_with_errors"
+    assert manifest["succeeded"] == 0
+    assert manifest["failed"] == 1
+    assert "without a committed run_manifest.json" in manifest["cases"][0]["error"]
+
+
+def test_batch_resume_rejects_changed_case_input(tmp_path: Path) -> None:
+    args = _args(tmp_path)
+    case = {
+        "case_id": "Q1",
+        "document_dir": str(tmp_path / "doc"),
+        "question": "Original question?",
+    }
+
+    def executor(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        case_output = Path(command[command.index("--output") + 1])
+        case_output.mkdir(parents=True)
+        (case_output / "run_manifest.json").write_text(
+            json.dumps({"stage_health": {"failed_call_count": 0}}),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    run_batch(cases=[case], args=args, executor=executor)
+    args.resume = True
+    changed_case = dict(case, question="Different question?")
+
+    with pytest.raises(ValueError, match="case inputs"):
+        run_batch(cases=[changed_case], args=args, executor=executor)
 
 
 def test_batch_refuses_to_overwrite_existing_output(tmp_path: Path) -> None:
@@ -211,6 +365,54 @@ def test_batch_refuses_duplicate_live_runner(tmp_path: Path) -> None:
             run_batch(cases=cases, args=args)
     finally:
         lock_path.unlink(missing_ok=True)
+
+
+def test_batch_lock_is_scoped_to_output_directory(tmp_path: Path) -> None:
+    args = _args(tmp_path)
+    first_cases = [
+        {"case_id": "Q1", "document_dir": str(tmp_path / "a"), "question": "A?"}
+    ]
+    second_cases = [
+        {"case_id": "Q2", "document_dir": str(tmp_path / "b"), "question": "B?"}
+    ]
+
+    assert _batch_lock_path(first_cases, args) == _batch_lock_path(second_cases, args)
+    other_args = _args(tmp_path)
+    other_args.output_root = tmp_path / "other-batch"
+    assert _batch_lock_path(first_cases, args) != _batch_lock_path(
+        first_cases, other_args
+    )
+
+
+def test_case_deadline_transport_caps_each_http_timeout() -> None:
+    class FakeTransport:
+        def __init__(self) -> None:
+            self.timeout: float | None = None
+
+        def post_json(self, _url, _payload, timeout_seconds):
+            self.timeout = timeout_seconds
+            return {"ok": True}
+
+    context = threading.local()
+    context.deadline_monotonic = time.monotonic() + 0.5
+    underlying = FakeTransport()
+    transport = _CaseDeadlineTransport(context, underlying)
+
+    assert transport.post_json("http://test", {}, 30.0) == {"ok": True}
+    assert underlying.timeout is not None
+    assert 0 < underlying.timeout <= 0.5
+
+    context.deadline_monotonic = time.monotonic() - 1
+    with pytest.raises(TimeoutError, match="case timeout"):
+        transport.post_json("http://test", {}, 30.0)
+
+
+def test_batch_rejects_nonpositive_case_timeout(tmp_path: Path) -> None:
+    args = _args(tmp_path)
+    args.case_timeout = 0
+
+    with pytest.raises(ValueError, match="case-timeout must be positive"):
+        _validate_batch_args(args)
 
 
 def test_dense_case_command_preserves_runtime_options(tmp_path: Path) -> None:
@@ -586,3 +788,58 @@ def test_persistent_batch_reuses_one_runtime_and_writes_manifest(
     assert manifest["succeeded"] == 3
     assert [item["case_id"] for item in manifest["cases"]] == ["A1", "A2", "B1"]
     assert all(item["peak_gpu_memory_mib"] == 123 for item in manifest["cases"])
+
+
+def test_persistent_resume_recovers_committed_unmanifested_case(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    args = _args(tmp_path)
+    args.execution_mode = "persistent"
+    args.inference_backend = "vllm"
+    cases = [
+        {
+            "case_id": case_id,
+            "document_dir": str(tmp_path / "doc"),
+            "question": f"Question {case_id}?",
+        }
+        for case_id in ("Q1", "Q2")
+    ]
+    constructed: list[object] = []
+
+    class FakeRuntime:
+        def __init__(self, _: argparse.Namespace) -> None:
+            constructed.append(self)
+
+        def run_case(self, case: dict[str, object], output: Path) -> None:
+            output.mkdir(parents=True)
+            (output / "run_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "case_id": case["case_id"],
+                        "stage_health": {"failed_call_count": 0},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+    monkeypatch.setattr("scripts.run_model_batch._PersistentRuntime", FakeRuntime)
+    monkeypatch.setattr(
+        "scripts.run_model_batch._run_callable_with_peak_vram",
+        lambda call: (call(), 123)[1],
+    )
+
+    run_batch(cases=cases, args=args)
+    manifest_path = args.output_root / "batch_manifest.json"
+    interrupted = json.loads(manifest_path.read_text(encoding="utf-8"))
+    interrupted["cases"] = interrupted["cases"][:1]
+    interrupted["status"] = "running"
+    manifest_path.write_text(json.dumps(interrupted), encoding="utf-8")
+
+    args.resume = True
+    resumed = run_batch(cases=cases, args=args)
+
+    assert len(constructed) == 1
+    assert resumed["status"] == "completed"
+    assert resumed["succeeded"] == 2
+    assert resumed["cases"][1]["case_id"] == "Q2"
+    assert resumed["cases"][1]["recovered_on_resume"] is True

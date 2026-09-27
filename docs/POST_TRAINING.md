@@ -63,6 +63,12 @@ python scripts/train_sft.py \
   --qlora
 ```
 
+The training entry refuses any example whose complete rendered Prompt plus
+target exceeds `--max-length`. It never silently left-truncates the System
+Prompt, Root Question, or Controller state. Increase the context limit or
+curate/compress the state explicitly after inspecting the token-length
+distribution.
+
 Use `scripts/evaluate_controller_sft_offline.py` for contract and action-policy
 metrics, then use `scripts/run_model_batch.py` for closed-loop evaluation.
 

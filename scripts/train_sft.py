@@ -78,7 +78,13 @@ def _encode_example(example: SFTExample, tokenizer: Any, max_length: int) -> Enc
             f"{example.example_id}: target alone has {len(target_ids)} tokens, "
             f"which does not fit max_length={max_length}"
         )
-    prompt_ids = prompt_ids[-(max_length - len(target_ids)) :]
+    total_length = len(prompt_ids) + len(target_ids)
+    if total_length > max_length:
+        raise ValueError(
+            f"{example.example_id}: prompt plus target has {total_length} tokens, "
+            f"which exceeds max_length={max_length}; refusing to left-truncate "
+            "the System Prompt or Controller state"
+        )
     return EncodedExample(
         input_ids=prompt_ids + target_ids,
         labels=[-100] * len(prompt_ids) + target_ids,

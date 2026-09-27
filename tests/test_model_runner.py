@@ -286,8 +286,13 @@ def test_model_runner_records_every_executed_stage_and_writes_artifacts(tmp_path
     assert reader_call.action_id == controller_calls[1].action_id
     assert checker_call.action_id == controller_calls[1].action_id
 
+    # The loader must use the persisted Planner call instead of reconstructing
+    # a metadata-free approximation from planner.json.
+    run.stage_calls[0].metadata["audit_marker"] = "persisted-planner-call"
+
     output = tmp_path / "run"
     write_model_pipeline_run(run, output)
+    assert not list(tmp_path.glob(".run.*.tmp"))
     assert (output / "planner.json").is_file()
     assert (output / "planner_calls.jsonl").is_file()
     assert (output / "candidate_batches.jsonl").is_file()
@@ -314,6 +319,37 @@ def test_model_runner_records_every_executed_stage_and_writes_artifacts(tmp_path
     assert load_model_pipeline_run(output).model_dump(mode="json") == (
         run.model_dump(mode="json")
     )
+
+    visual_scan_run = run.model_copy(
+        update={
+            "stage_calls": [
+                *run.stage_calls,
+                StageCallRecord(
+                    component="visual_scan",
+                    call_index=0,
+                    input={"batch_index": 1, "image_count": 2},
+                    output={"error_type": "TimeoutError", "error": "timed out"},
+                    succeeded=False,
+                ),
+            ]
+        }
+    )
+    visual_output = tmp_path / "visual-scan-run"
+    write_model_pipeline_run(visual_scan_run, visual_output)
+    assert not list(tmp_path.glob(".visual-scan-run.*.tmp"))
+    assert load_model_pipeline_run(visual_output).model_dump(mode="json") == (
+        visual_scan_run.model_dump(mode="json")
+    )
+    visual_manifest = json.loads(
+        (visual_output / "run_manifest.json").read_text(encoding="utf-8")
+    )
+    assert visual_manifest["stage_health"] == {
+        "failed_call_count": 1,
+        "failed_components": ["visual_scan"],
+        "failed_calls": [
+            {"component": "visual_scan", "call_index": 0, "action_id": None}
+        ],
+    }
 
     interleaved = run.model_copy(
         update={

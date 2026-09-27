@@ -186,10 +186,22 @@ the completed visual index, preview-only descriptor cache/on-demand generation,
 or the multimodal Table Reader is missing. Visual descriptions are added only
 to the two visual candidate previews after each mixed batch is frozen; they do
 not become BM25/Dense corpus text. One malformed model response is recorded as
-a failed case but does not discard later cases. `batch_manifest.json` is
+a stage error but does not discard later cases. `batch_manifest.json` is
 rewritten after every case and the command returns a nonzero exit code if any
-case failed. Use a new output directory for every rerun; existing nonempty
-outputs are never overwritten.
+case failed or completed with a stage error. Clean cases, cases completed with an internal stage error, and
+outer case failures are counted separately. Use a new output directory for an
+independent rerun; existing nonempty outputs are never overwritten by default.
+The batch lock is scoped to the resolved output directory, so two different
+commands cannot race while writing the same manifest. In persistent mode,
+`--case-timeout` is enforced cooperatively across all OpenAI-compatible model
+requests in a case; each request is capped by the remaining case deadline.
+
+If the process is interrupted, rerun the same command with `--resume`. Resume
+is accepted only when the case IDs, schema version, and recorded runtime
+settings match. It preserves cases already present in the manifest, recovers a
+fully committed case packet from the narrow crash window before its batch
+manifest update, and executes only missing cases. It does not silently retry a
+case already recorded as failed or merge two experiments.
 
 SoftDocs created on Windows may persist relative asset paths such as
 `assets\elements\...`. Both visual-descriptor loading and multimodal Table
@@ -201,8 +213,8 @@ For throughput experiments against vLLM, `scripts/run_model_batch.py` also
 supports `--execution-mode persistent --workers 2` (or 4 after a two-worker
 smoke test). Persistent mode loads retrieval models once, groups questions by
 document, reuses document search services, records per-stage latency and peak
-GPU memory, and prevents two identical live batches from starting
-accidentally.
+GPU memory, and prevents two live batches from owning the same output
+directory.
 
 ## 5. Teacher data and SFT
 

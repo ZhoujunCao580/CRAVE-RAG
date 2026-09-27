@@ -82,6 +82,22 @@ def test_openai_compatible_records_finish_reason_and_usage():
 
     assert client.generation_metadata()["finish_reason"] == "length"
     assert client.generation_metadata()["usage"]["completion_tokens"] == 4
+    assert client.generation_metadata_history() == [client.generation_metadata()]
+
+    client.reset_generation_metadata()
+
+    assert client.last_response is None
+    assert client.last_raw_content is None
+    assert client.generation_metadata_history() == []
+
+    for _ in range(2):
+        client.generate(
+            component="smoke",
+            system_prompt="Return JSON.",
+            user_prompt="test",
+            output_model=_Result,
+        )
+    assert len(client.generation_metadata_history()) == 2
 
 
 def test_openai_compatible_image_message(tmp_path: Path):

@@ -6,6 +6,7 @@ import pytest
 from PIL import Image
 
 from softdoc.adapters import MinerUAdapter
+from softdoc.assets import crop_page_bbox
 from softdoc.coverage import CoverageRecoveryResult
 from softdoc.models import ElementType
 from softdoc.pipeline import (
@@ -35,6 +36,31 @@ def _passes():
         ValidationPass(),
         RuleAuditPass(),
     )
+
+
+def test_visual_crop_failure_is_diagnosable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    source = tmp_path / "page.png"
+    source.write_bytes(b"not-an-image")
+
+    def fail_open(_: Path):
+        raise OSError("decoder unavailable")
+
+    monkeypatch.setattr("softdoc.assets.Image.open", fail_open)
+    with caplog.at_level("WARNING", logger="softdoc.assets"):
+        result = crop_page_bbox(
+            output_dir=tmp_path,
+            page_image=Path("page.png"),
+            normalized_bbox=(0.1, 0.1, 0.9, 0.9),
+            owner_id="element:1",
+        )
+
+    assert result is None
+    assert "element:1" in caplog.text
+    assert "decoder unavailable" in caplog.text
 
 
 def test_pipeline_is_the_only_full_orchestration_entry(

@@ -109,6 +109,8 @@ def _validate_batch_args(args: argparse.Namespace) -> None:
     """Validate cross-option contracts for CLI and programmatic callers."""
 
     _validate_runtime_profile(args)
+    if args.case_timeout is not None and args.case_timeout <= 0:
+        raise ValueError("--case-timeout must be positive")
     if args.visual_search_index is not None and not args.dense:
         raise ValueError("--visual-search-index requires --dense")
     if args.visual_descriptor_cache is not None and args.execution_mode != "persistent":
@@ -130,23 +132,8 @@ def _validate_batch_args(args: argparse.Namespace) -> None:
 def _batch_lock_path(
     cases: list[dict[str, Any]], args: argparse.Namespace
 ) -> Path:
-    identity = {
-        "base_url": args.base_url,
-        "inference_backend": args.inference_backend,
-        "text_model": args.text_model,
-        "controller_model": (
-            getattr(args, "controller_model", None) or args.text_model
-        ),
-        "visual_model": args.visual_model,
-        "cases": [
-            {
-                "case_id": item["case_id"],
-                "question_id": item.get("question_id"),
-                "document_dir": item["document_dir"],
-            }
-            for item in cases
-        ],
-    }
+    del cases  # Output ownership, not workload similarity, is the lock boundary.
+    identity = {"output_root": str(args.output_root.resolve())}
     digest = hashlib.sha256(
         json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()[:20]
@@ -166,7 +153,7 @@ def _pid_is_alive(pid: int) -> bool:
 
 
 class _BatchRunLock:
-    """Prevent accidental duplicate batches from sharing one model service."""
+    """Give exactly one live batch exclusive ownership of an output root."""
 
     def __init__(self, cases: list[dict[str, Any]], args: argparse.Namespace) -> None:
         self.path = _batch_lock_path(cases, args)
@@ -207,7 +194,7 @@ class _BatchRunLock:
                     else "an unknown owner"
                 )
                 raise RuntimeError(
-                    "A matching model batch is already running under "
+                    "A model batch is already running for this output directory under "
                     f"{detail}; output={existing.get('output_root')!r}."
                 )
             else:
@@ -252,6 +239,142 @@ def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
         encoding="utf-8",
     )
     temporary.replace(path)
+
+
+def _case_stage_health(case_output: Path) -> dict[str, Any]:
+    """Read stage-level failures from a completed case audit packet."""
+
+    manifest_path = Path(case_output) / "run_manifest.json"
+    if not manifest_path.is_file():
+        return {
+            "failed_call_count": 0,
+            "failed_components": [],
+            "failed_calls": [],
+        }
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Invalid case run manifest {manifest_path}: {exc}") from exc
+    health = payload.get("stage_health") or {}
+    failed_calls = health.get("failed_calls") or []
+    failed_components = health.get("failed_components") or []
+    failed_call_count = health.get("failed_call_count", len(failed_calls))
+    if not isinstance(failed_call_count, int) or failed_call_count < 0:
+        raise ValueError(f"Invalid stage failure count in {manifest_path}")
+    if not isinstance(failed_calls, list) or not isinstance(failed_components, list):
+        raise ValueError(f"Invalid stage health payload in {manifest_path}")
+    return {
+        "failed_call_count": failed_call_count,
+        "failed_components": sorted({str(item) for item in failed_components}),
+        "failed_calls": failed_calls,
+    }
+
+
+def _refresh_batch_counts(manifest: dict[str, Any]) -> None:
+    """Keep outer failures separate from completed runs with stage errors."""
+
+    statuses = [item["status"] for item in manifest["cases"]]
+    manifest["succeeded"] = sum(
+        status in {"succeeded", "completed_with_stage_errors"}
+        for status in statuses
+    )
+    manifest["degraded"] = sum(
+        status == "completed_with_stage_errors" for status in statuses
+    )
+    manifest["failed"] = sum(status == "failed" for status in statuses)
+
+
+def _recover_completed_case(
+    case: dict[str, Any],
+    *,
+    output_root: Path,
+    log_root: Path,
+) -> dict[str, Any] | None:
+    """Recover a case committed just before an interrupted manifest update."""
+
+    case_output = output_root / case["case_id"]
+    if not (case_output / "run_manifest.json").is_file():
+        return None
+    stage_health = _case_stage_health(case_output)
+    status = (
+        "completed_with_stage_errors"
+        if stage_health["failed_call_count"]
+        else "succeeded"
+    )
+    return {
+        "case_id": case["case_id"],
+        "question_id": case.get("question_id"),
+        "document_dir": case["document_dir"],
+        "output_dir": str(case_output),
+        "started_at": None,
+        "finished_at": _utc_now(),
+        "elapsed_seconds": None,
+        "peak_gpu_memory_mib": None,
+        "status": status,
+        "stage_health": stage_health,
+        "return_code": 0,
+        "error": None,
+        "stdout_log": str(log_root / f"{case['case_id']}.stdout.log"),
+        "stderr_log": str(log_root / f"{case['case_id']}.stderr.log"),
+        "recovered_on_resume": True,
+    }
+
+
+def _validate_resume_manifest(
+    manifest: dict[str, Any],
+    *,
+    schema_version: str,
+    case_ids: list[str],
+    case_inputs: list[dict[str, Any]],
+    runtime: dict[str, Any],
+    output_root: Path,
+) -> None:
+    """Reject resume attempts that would mix incompatible experiments."""
+
+    if manifest.get("schema_version") != schema_version:
+        raise ValueError("Existing batch manifest uses a different schema version")
+    recorded_ids = manifest.get("case_ids")
+    if recorded_ids is not None:
+        if recorded_ids != case_ids:
+            raise ValueError("Resume case IDs do not match the existing batch")
+    else:
+        completed_ids = [item.get("case_id") for item in manifest.get("cases", [])]
+        if manifest.get("case_count") != len(case_ids) or any(
+            item not in case_ids for item in completed_ids
+        ):
+            raise ValueError("Resume cases do not match the existing batch")
+    recorded_case_inputs = manifest.get("case_inputs")
+    if recorded_case_inputs is None:
+        raise ValueError(
+            "Existing batch manifest does not record case inputs; start a new "
+            "output directory instead of resuming it"
+        )
+    if recorded_case_inputs != case_inputs:
+        raise ValueError("Resume case inputs do not match the existing batch")
+    recorded_runtime = manifest.get("runtime") or {}
+    missing_runtime_keys = sorted(set(runtime).difference(recorded_runtime))
+    if missing_runtime_keys:
+        raise ValueError(
+            "Existing batch manifest does not record required runtime settings: "
+            + ", ".join(missing_runtime_keys)
+        )
+    for key, value in runtime.items():
+        if key == "initialization_seconds":
+            continue
+        if recorded_runtime[key] != value:
+            raise ValueError(
+                f"Resume runtime setting {key!r} does not match the existing batch"
+            )
+    for item in manifest.get("cases", []):
+        if item.get("status") == "failed":
+            continue
+        case_id = item.get("case_id")
+        if not isinstance(case_id, str) or not (
+            output_root / case_id / "run_manifest.json"
+        ).is_file():
+            raise ValueError(
+                f"Resume case {case_id!r} is recorded complete but its audit packet is missing"
+            )
 
 
 def _output_text(value: str | bytes | None) -> str:
@@ -419,6 +542,21 @@ def _group_cases_by_document(cases: list[dict[str, Any]]) -> list[dict[str, Any]
     return [case for group in groups.values() for case in group]
 
 
+def _case_inputs(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Freeze inputs whose reuse would otherwise mix two experiments."""
+
+    return [
+        {
+            "case_id": case["case_id"],
+            "question_id": case.get("question_id"),
+            "document_dir": case["document_dir"],
+            "question": case["question"],
+            "run_key": case.get("run_key"),
+        }
+        for case in cases
+    ]
+
+
 class _LockedVisualModel:
     """Serialize calls into one shared ColSmol model while reusing its weights."""
 
@@ -433,6 +571,40 @@ class _LockedVisualModel:
     def similarity(self, queries: list[Any], documents: list[Any], **kwargs: Any) -> Any:
         with self._lock:
             return self._model.similarity(queries, documents, **kwargs)
+
+
+class _CaseDeadlineTransport:
+    """Cap every persistent HTTP call by the current worker's case deadline.
+
+    Python threads cannot safely terminate arbitrary model code.  Persistent
+    cases therefore enforce their wall-clock deadline cooperatively at every
+    OpenAI-compatible request, which is where almost all long-running work
+    occurs.  The deadline lives in thread-local case context so one shared
+    transport remains safe across batch workers.
+    """
+
+    def __init__(self, case_context: threading.local, transport: Any | None = None) -> None:
+        if transport is None:
+            from softdoc.openai_compatible import UrllibOpenAICompatibleTransport
+
+            transport = UrllibOpenAICompatibleTransport()
+        self._case_context = case_context
+        self._transport = transport
+
+    def post_json(
+        self,
+        url: str,
+        payload: dict[str, Any],
+        timeout_seconds: float,
+    ) -> dict[str, Any]:
+        deadline = getattr(self._case_context, "deadline_monotonic", None)
+        effective_timeout = timeout_seconds
+        if deadline is not None:
+            remaining = float(deadline) - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("persistent case timeout expired before model call")
+            effective_timeout = min(timeout_seconds, remaining)
+        return self._transport.post_json(url, payload, effective_timeout)
 
 
 class _PersistentRuntime:
@@ -450,6 +622,7 @@ class _PersistentRuntime:
         self._visual_descriptor_backend = None
         self._visual_descriptor_lock = threading.RLock()
         self._case_context = threading.local()
+        self._model_transport = _CaseDeadlineTransport(self._case_context)
         self._visual_descriptor_records: dict[
             tuple[str, str, str, str, str], dict[str, Any]
         ] = {}
@@ -506,7 +679,8 @@ class _PersistentRuntime:
                         base_url=args.base_url,
                         timeout_seconds=args.timeout,
                         max_tokens=args.visual_descriptor_max_tokens,
-                    )
+                    ),
+                    transport=self._model_transport,
                 )
             )
         if args.dense:
@@ -824,10 +998,12 @@ class _PersistentRuntime:
             max_tokens=self.args.controller_max_tokens,
         )
         reader_client = OpenAICompatibleStructuredClient(
-            config(self.args.reader_max_tokens)
+            config(self.args.reader_max_tokens),
+            transport=self._model_transport,
         )
         checker_client = OpenAICompatibleStructuredClient(
-            config(self.args.checker_max_tokens)
+            config(self.args.checker_max_tokens),
+            transport=self._model_transport,
         )
         answerer_client = OpenAICompatibleStructuredClient(
             config(
@@ -837,14 +1013,26 @@ class _PersistentRuntime:
                     if getattr(self.args, "disable_answerer_thinking", False)
                     else None
                 ),
-            )
+            ),
+            transport=self._model_transport,
+        )
+        planner_client = OpenAICompatibleStructuredClient(
+            planner_config,
+            transport=self._model_transport,
+        )
+        controller_client = OpenAICompatibleStructuredClient(
+            controller_config,
+            transport=self._model_transport,
         )
         return ModelBackedRunner(
             planner=InitialPlanner(
-                VLLMPlannerBackend(planner_config),
+                VLLMPlannerBackend(planner_config, client=planner_client),
                 PlannerConfig(fallback_to_root_on_limit=True),
             ),
-            controller=VLLMControllerBackend(controller_config),
+            controller=VLLMControllerBackend(
+                controller_config,
+                client=controller_client,
+            ),
             reader=ModelBackedReader(
                 OllamaVisualReaderBackend(reader_client),
                 table_reader=(
@@ -865,6 +1053,12 @@ class _PersistentRuntime:
         from softdoc.model_runner import write_model_pipeline_run
 
         self._case_context.visual_descriptor_calls = []
+        case_timeout = getattr(self.args, "case_timeout", None)
+        self._case_context.deadline_monotonic = (
+            time.monotonic() + float(case_timeout)
+            if case_timeout is not None
+            else None
+        )
         try:
             document, search_service = self._search_resources(case["document_dir"])
             result = self._runner().run(
@@ -878,12 +1072,18 @@ class _PersistentRuntime:
                 question_id=case.get("question_id"),
                 search_service=search_service,
             )
+            deadline = self._case_context.deadline_monotonic
+            if deadline is not None and time.monotonic() > deadline:
+                raise TimeoutError(
+                    f"persistent case timed out after {case_timeout} seconds"
+                )
             write_model_pipeline_run(result, output)
         finally:
             records = list(self._case_context.visual_descriptor_calls)
             if records:
                 _write_jsonl(output / "visual_descriptor_calls.jsonl", records)
             self._case_context.visual_descriptor_calls = None
+            self._case_context.deadline_monotonic = None
 
 
 def _run_callable_with_peak_vram(call: Callable[[], None]) -> int | None:
@@ -911,66 +1111,141 @@ def _run_persistent_batch_unlocked(
     *, cases: list[dict[str, Any]], args: argparse.Namespace
 ) -> dict[str, Any]:
     output_root = args.output_root.resolve()
-    if output_root.exists() and any(output_root.iterdir()):
+    resume = bool(getattr(args, "resume", False))
+    nonempty_output = output_root.exists() and any(output_root.iterdir())
+    if nonempty_output and not resume:
         raise FileExistsError(f"Batch output directory is not empty: {output_root}")
     output_root.mkdir(parents=True, exist_ok=True)
     log_root = output_root / "_logs"
-    log_root.mkdir()
+    log_root.mkdir(exist_ok=resume)
     manifest_path = output_root / "batch_manifest.json"
     ordered_cases = _group_cases_by_document(cases)
-    manifest: dict[str, Any] = {
+    case_ids = [case["case_id"] for case in ordered_cases]
+    case_inputs = _case_inputs(ordered_cases)
+    runtime_settings = {
+        "runtime_profile": getattr(args, "runtime_profile", None),
+        "execution_mode": "persistent",
+        "workers": args.workers,
+        "grouped_by_document": True,
+        "base_url": args.base_url,
+        "inference_backend": args.inference_backend,
+        "text_model": args.text_model,
+        "controller_model": (
+            getattr(args, "controller_model", None) or args.text_model
+        ),
+        "visual_model": args.visual_model,
+        "context_length": args.context_length,
+        "action_budget": args.action_budget,
+        "run_key_prefix": args.run_key_prefix,
+        "timeout": args.timeout,
+        "dense": args.dense,
+        "dense_model": args.dense_model,
+        "dense_model_path": (
+            str(args.dense_model_path) if args.dense_model_path is not None else None
+        ),
+        "dense_device": args.dense_device,
+        "embedding_cache": (
+            str(args.embedding_cache) if args.embedding_cache is not None else None
+        ),
+        "visual_search_index": str(args.visual_search_index) if args.visual_search_index else None,
+        "visual_search_model": args.visual_search_model,
+        "visual_search_device": args.visual_search_device,
+        "visual_similarity_chunk_elements": args.visual_similarity_chunk_elements,
+        "visual_descriptor_cache": (
+            str(args.visual_descriptor_cache)
+            if getattr(args, "visual_descriptor_cache", None)
+            else None
+        ),
+        "visual_descriptor_on_demand": getattr(
+            args, "visual_descriptor_on_demand", False
+        ),
+        "visual_descriptor_max_tokens": getattr(
+            args, "visual_descriptor_max_tokens", 256
+        ),
+        "multimodal_table_reader": getattr(
+            args, "multimodal_table_reader", False
+        ),
+        "max_tokens": {
+            "planner": args.planner_max_tokens,
+            "controller": args.controller_max_tokens,
+            "reader": args.reader_max_tokens,
+            "checker": args.checker_max_tokens,
+            "answerer": args.answerer_max_tokens,
+        },
+        "disable_answerer_thinking": getattr(
+            args, "disable_answerer_thinking", False
+        ),
+        "disable_planner_thinking": getattr(
+            args, "disable_planner_thinking", False
+        ),
+    }
+    fresh_manifest: dict[str, Any] = {
         "schema_version": "model-batch-v0.2",
         "started_at": _utc_now(),
         "finished_at": None,
         "status": "initializing",
         "case_count": len(cases),
+        "case_ids": case_ids,
+        "case_inputs": case_inputs,
         "succeeded": 0,
+        "degraded": 0,
         "failed": 0,
-        "runtime": {
-            "runtime_profile": getattr(args, "runtime_profile", None),
-            "execution_mode": "persistent",
-            "workers": args.workers,
-            "grouped_by_document": True,
-            "base_url": args.base_url,
-            "inference_backend": args.inference_backend,
-            "text_model": args.text_model,
-            "controller_model": (
-                getattr(args, "controller_model", None) or args.text_model
-            ),
-            "visual_model": args.visual_model,
-            "context_length": args.context_length,
-            "action_budget": args.action_budget,
-            "dense": args.dense,
-            "visual_search_index": str(args.visual_search_index) if args.visual_search_index else None,
-            "visual_search_model": args.visual_search_model,
-            "visual_descriptor_cache": (
-                str(args.visual_descriptor_cache)
-                if getattr(args, "visual_descriptor_cache", None)
-                else None
-            ),
-            "visual_descriptor_on_demand": getattr(
-                args, "visual_descriptor_on_demand", False
-            ),
-            "multimodal_table_reader": getattr(
-                args, "multimodal_table_reader", False
-            ),
-            "max_tokens": {
-                "planner": args.planner_max_tokens,
-                "controller": args.controller_max_tokens,
-                "reader": args.reader_max_tokens,
-                "checker": args.checker_max_tokens,
-                "answerer": args.answerer_max_tokens,
-            },
-            "disable_answerer_thinking": getattr(
-                args, "disable_answerer_thinking", False
-            ),
-            "disable_planner_thinking": getattr(
-                args, "disable_planner_thinking", False
-            ),
-        },
+        "runtime": runtime_settings,
         "cases": [],
     }
+    if nonempty_output:
+        if not manifest_path.is_file():
+            raise ValueError("Cannot resume without batch_manifest.json")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        _validate_resume_manifest(
+            manifest,
+            schema_version="model-batch-v0.2",
+            case_ids=case_ids,
+            case_inputs=case_inputs,
+            runtime=runtime_settings,
+            output_root=output_root,
+        )
+    else:
+        manifest = fresh_manifest
     _write_json(manifest_path, manifest)
+    completed_by_id: dict[str, dict[str, Any]] = {
+        item["case_id"]: item for item in manifest.get("cases", [])
+    }
+    if resume:
+        for case in ordered_cases:
+            if case["case_id"] in completed_by_id:
+                continue
+            recovered = _recover_completed_case(
+                case,
+                output_root=output_root,
+                log_root=log_root,
+            )
+            if recovered is not None:
+                completed_by_id[case["case_id"]] = recovered
+        manifest["cases"] = [
+            completed_by_id[case["case_id"]]
+            for case in ordered_cases
+            if case["case_id"] in completed_by_id
+        ]
+        _refresh_batch_counts(manifest)
+        _write_json(manifest_path, manifest)
+    pending_cases = [
+        case for case in ordered_cases if case["case_id"] not in completed_by_id
+    ]
+    if not pending_cases:
+        _refresh_batch_counts(manifest)
+        manifest["finished_at"] = manifest.get("finished_at") or _utc_now()
+        manifest["status"] = (
+            "completed_with_errors"
+            if manifest["failed"]
+            else (
+                "completed_with_stage_errors"
+                if manifest["degraded"]
+                else "completed"
+            )
+        )
+        _write_json(manifest_path, manifest)
+        return manifest
     initialization_started = time.perf_counter()
     runtime = _PersistentRuntime(args)
     manifest["runtime"]["initialization_seconds"] = round(
@@ -995,6 +1270,27 @@ def _run_persistent_batch_unlocked(
             succeeded = False
             error = f"{type(exc).__name__}: {exc}"
             stderr = traceback.format_exc()
+        if succeeded and not (case_output / "run_manifest.json").is_file():
+            succeeded = False
+            error = "case returned successfully without a committed run_manifest.json"
+        stage_health = (
+            _case_stage_health(case_output)
+            if succeeded
+            else {
+                "failed_call_count": 0,
+                "failed_components": [],
+                "failed_calls": [],
+            }
+        )
+        case_status = (
+            "failed"
+            if not succeeded
+            else (
+                "completed_with_stage_errors"
+                if stage_health["failed_call_count"]
+                else "succeeded"
+            )
+        )
         stdout_log = log_root / f"{case['case_id']}.stdout.log"
         stderr_log = log_root / f"{case['case_id']}.stderr.log"
         stdout_log.write_text("", encoding="utf-8")
@@ -1008,16 +1304,16 @@ def _run_persistent_batch_unlocked(
             "finished_at": _utc_now(),
             "elapsed_seconds": round(time.perf_counter() - started, 3),
             "peak_gpu_memory_mib": peak_vram_mib,
-            "status": "succeeded" if succeeded else "failed",
+            "status": case_status,
+            "stage_health": stage_health,
             "return_code": 0 if succeeded else None,
             "error": error,
             "stdout_log": str(stdout_log),
             "stderr_log": str(stderr_log),
         }
 
-    completed_by_id: dict[str, dict[str, Any]] = {}
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futures = {pool.submit(execute, case): case for case in ordered_cases}
+        futures = {pool.submit(execute, case): case for case in pending_cases}
         for future in as_completed(futures):
             record = future.result()
             completed_by_id[record["case_id"]] = record
@@ -1026,14 +1322,19 @@ def _run_persistent_batch_unlocked(
                 for case in ordered_cases
                 if case["case_id"] in completed_by_id
             ]
-            manifest["succeeded"] = sum(
-                item["status"] == "succeeded" for item in manifest["cases"]
-            )
-            manifest["failed"] = len(manifest["cases"]) - manifest["succeeded"]
+            _refresh_batch_counts(manifest)
             _write_json(manifest_path, manifest)
 
     manifest["finished_at"] = _utc_now()
-    manifest["status"] = "completed" if manifest["failed"] == 0 else "completed_with_errors"
+    manifest["status"] = (
+        "completed_with_errors"
+        if manifest["failed"]
+        else (
+            "completed_with_stage_errors"
+            if manifest["degraded"]
+            else "completed"
+        )
+    )
     _write_json(manifest_path, manifest)
     return manifest
 
@@ -1045,47 +1346,122 @@ def _run_batch_unlocked(
     executor: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> dict[str, Any]:
     output_root = args.output_root.resolve()
-    if output_root.exists() and any(output_root.iterdir()):
+    resume = bool(getattr(args, "resume", False))
+    nonempty_output = output_root.exists() and any(output_root.iterdir())
+    if nonempty_output and not resume:
         raise FileExistsError(f"Batch output directory is not empty: {output_root}")
     output_root.mkdir(parents=True, exist_ok=True)
     manifest_path = output_root / "batch_manifest.json"
     log_root = output_root / "_logs"
-    log_root.mkdir()
-    manifest: dict[str, Any] = {
+    log_root.mkdir(exist_ok=resume)
+    case_ids = [case["case_id"] for case in cases]
+    case_inputs = _case_inputs(cases)
+    runtime_settings = {
+        "runtime_profile": getattr(args, "runtime_profile", None),
+        "execution_mode": "subprocess",
+        "base_url": args.base_url,
+        "inference_backend": args.inference_backend,
+        "text_model": args.text_model,
+        "controller_model": (
+            getattr(args, "controller_model", None) or args.text_model
+        ),
+        "visual_model": args.visual_model,
+        "context_length": args.context_length,
+        "action_budget": args.action_budget,
+        "run_key_prefix": args.run_key_prefix,
+        "timeout": args.timeout,
+        "dense": args.dense,
+        "dense_model": args.dense_model,
+        "dense_model_path": (
+            str(args.dense_model_path) if args.dense_model_path is not None else None
+        ),
+        "dense_device": args.dense_device,
+        "embedding_cache": (
+            str(args.embedding_cache) if args.embedding_cache is not None else None
+        ),
+        "visual_search_index": (
+            str(args.visual_search_index)
+            if args.visual_search_index is not None
+            else None
+        ),
+        "visual_search_model": args.visual_search_model,
+        "visual_search_device": args.visual_search_device,
+        "visual_similarity_chunk_elements": args.visual_similarity_chunk_elements,
+        "multimodal_table_reader": getattr(
+            args, "multimodal_table_reader", False
+        ),
+        "max_tokens": {
+            "planner": args.planner_max_tokens,
+            "controller": args.controller_max_tokens,
+            "reader": args.reader_max_tokens,
+            "checker": args.checker_max_tokens,
+            "answerer": args.answerer_max_tokens,
+        },
+        "disable_answerer_thinking": getattr(
+            args, "disable_answerer_thinking", False
+        ),
+        "disable_planner_thinking": getattr(
+            args, "disable_planner_thinking", False
+        ),
+    }
+    fresh_manifest: dict[str, Any] = {
         "schema_version": "model-batch-v0.1",
         "started_at": _utc_now(),
         "finished_at": None,
         "status": "running",
         "case_count": len(cases),
+        "case_ids": case_ids,
+        "case_inputs": case_inputs,
         "succeeded": 0,
+        "degraded": 0,
         "failed": 0,
-        "runtime": {
-            "runtime_profile": getattr(args, "runtime_profile", None),
-            "base_url": args.base_url,
-            "inference_backend": args.inference_backend,
-            "text_model": args.text_model,
-            "controller_model": (
-                getattr(args, "controller_model", None) or args.text_model
-            ),
-            "visual_model": args.visual_model,
-            "context_length": args.context_length,
-            "action_budget": args.action_budget,
-            "dense": args.dense,
-            "visual_search_index": (
-                str(args.visual_search_index)
-                if args.visual_search_index is not None
-                else None
-            ),
-            "visual_search_model": args.visual_search_model,
-        },
+        "runtime": runtime_settings,
         "cases": [],
     }
+    if nonempty_output:
+        if not manifest_path.is_file():
+            raise ValueError("Cannot resume without batch_manifest.json")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        _validate_resume_manifest(
+            manifest,
+            schema_version="model-batch-v0.1",
+            case_ids=case_ids,
+            case_inputs=case_inputs,
+            runtime=runtime_settings,
+            output_root=output_root,
+        )
+    else:
+        manifest = fresh_manifest
     _write_json(manifest_path, manifest)
     environment = dict(os.environ)
     source_root = str(ROOT / "src")
     environment["PYTHONPATH"] = source_root + os.pathsep + environment.get("PYTHONPATH", "")
 
+    completed_by_id = {
+        item["case_id"]: item for item in manifest.get("cases", [])
+    }
+    if resume:
+        for case in cases:
+            if case["case_id"] in completed_by_id:
+                continue
+            recovered = _recover_completed_case(
+                case,
+                output_root=output_root,
+                log_root=log_root,
+            )
+            if recovered is not None:
+                completed_by_id[case["case_id"]] = recovered
+        manifest["cases"] = [
+            completed_by_id[case["case_id"]]
+            for case in cases
+            if case["case_id"] in completed_by_id
+        ]
+        _refresh_batch_counts(manifest)
+        _write_json(manifest_path, manifest)
+    completed_ids = set(completed_by_id)
     for case in cases:
+        if case["case_id"] in completed_ids:
+            continue
         case_output = output_root / case["case_id"]
         command = build_case_command(case, args, case_output)
         started_at = _utc_now()
@@ -1124,6 +1500,28 @@ def _run_batch_unlocked(
             stdout = ""
             stderr = ""
         succeeded = return_code == 0
+        if succeeded and not (case_output / "run_manifest.json").is_file():
+            succeeded = False
+            return_code = None
+            error = "case returned successfully without a committed run_manifest.json"
+        stage_health = (
+            _case_stage_health(case_output)
+            if succeeded
+            else {
+                "failed_call_count": 0,
+                "failed_components": [],
+                "failed_calls": [],
+            }
+        )
+        case_status = (
+            "failed"
+            if not succeeded
+            else (
+                "completed_with_stage_errors"
+                if stage_health["failed_call_count"]
+                else "succeeded"
+            )
+        )
         stdout_log = log_root / f"{case['case_id']}.stdout.log"
         stderr_log = log_root / f"{case['case_id']}.stderr.log"
         stdout_log.write_text(stdout, encoding="utf-8")
@@ -1138,19 +1536,27 @@ def _run_batch_unlocked(
                 "finished_at": _utc_now(),
                 "elapsed_seconds": round(time.perf_counter() - case_started, 3),
                 "peak_gpu_memory_mib": peak_vram_mib,
-                "status": "succeeded" if succeeded else "failed",
+                "status": case_status,
+                "stage_health": stage_health,
                 "return_code": return_code,
                 "error": error,
                 "stdout_log": str(stdout_log),
                 "stderr_log": str(stderr_log),
             }
         )
-        key = "succeeded" if succeeded else "failed"
-        manifest[key] += 1
+        _refresh_batch_counts(manifest)
         _write_json(manifest_path, manifest)
 
     manifest["finished_at"] = _utc_now()
-    manifest["status"] = "completed" if manifest["failed"] == 0 else "completed_with_errors"
+    manifest["status"] = (
+        "completed_with_errors"
+        if manifest["failed"]
+        else (
+            "completed_with_stage_errors"
+            if manifest["degraded"]
+            else "completed"
+        )
+    )
     _write_json(manifest_path, manifest)
     return manifest
 
@@ -1160,6 +1566,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cases", type=Path, required=True, help="UTF-8 JSONL case manifest")
     parser.add_argument("--path-root", type=Path, default=Path.cwd())
     parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help=(
+            "Resume an interrupted compatible batch, preserving completed "
+            "case records and running only cases absent from its manifest."
+        ),
+    )
     parser.add_argument("--base-url", default="http://127.0.0.1:11434")
     parser.add_argument(
         "--inference-backend",
@@ -1330,9 +1744,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     manifest = run_batch(cases=cases, args=args)
     print(
         f"Batch {manifest['status']}: {manifest['succeeded']} succeeded, "
+        f"{manifest.get('degraded', 0)} completed with stage errors, "
         f"{manifest['failed']} failed; artifacts: {args.output_root.resolve()}"
     )
-    return 0 if manifest["failed"] == 0 else 1
+    return 0 if manifest["failed"] == 0 and manifest.get("degraded", 0) == 0 else 1
 
 
 if __name__ == "__main__":

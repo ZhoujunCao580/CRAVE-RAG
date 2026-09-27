@@ -99,6 +99,14 @@ class OpenAICompatibleStructuredClient:
         self.transport = transport or UrllibOpenAICompatibleTransport(config.api_key)
         self.last_raw_content: str | None = None
         self.last_response: dict[str, Any] | None = None
+        self._generation_history: list[dict[str, Any]] = []
+
+    def reset_generation_metadata(self) -> None:
+        """Clear call-local diagnostics before a new recorded stage begins."""
+
+        self.last_raw_content = None
+        self.last_response = None
+        self._generation_history = []
 
     @staticmethod
     def _image_data_uri(path: Path) -> str:
@@ -141,9 +149,10 @@ class OpenAICompatibleStructuredClient:
         content = message.get("content") if isinstance(message, dict) else None
         if isinstance(content, list):
             content = "".join(item.get("text", "") for item in content if isinstance(item, dict))
+        self.last_raw_content = content if isinstance(content, str) else None
+        self._generation_history.append(self.generation_metadata())
         if not isinstance(content, str) or not content.strip():
             raise OpenAICompatibleError(f"OpenAI-compatible response has no message content: {response.get('error', '')}")
-        self.last_raw_content = content
         try:
             return output_model.model_validate_json(content) if hasattr(output_model, "model_validate_json") else output_model.validate_json(content)
         except ValidationError as exc:
@@ -168,3 +177,8 @@ class OpenAICompatibleStructuredClient:
             if key in response:
                 metadata[f"response_{key}"] = response[key]
         return {key: value for key, value in metadata.items() if value is not None}
+
+    def generation_metadata_history(self) -> list[dict[str, Any]]:
+        """Return every generation performed in the current recorded stage."""
+
+        return [dict(item) for item in self._generation_history]

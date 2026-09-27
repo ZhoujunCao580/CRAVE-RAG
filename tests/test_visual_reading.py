@@ -124,6 +124,8 @@ def test_visual_reader_prompt_forbids_answer_and_global_ids():
     assert "Do not generate action IDs" in VISUAL_READER_SYSTEM_PROMPT
     assert "bbox" not in prompt
     assert "bbox" not in VISUAL_READER_SYSTEM_PROMPT
+    assert "page_image_path" not in prompt
+    assert "assets/pages/page_0001.png" not in prompt
 
 
 def test_visual_reader_prompt_shows_joint_shape_for_multiple_images():
